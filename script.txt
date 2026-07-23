@@ -1,0 +1,8 @@
+#node toolg/addVersion.mjs
+#node toolg/modifyReadme.mjs
+
+git add .  -A
+git commit -m 'modify: '
+git push origin master:master
+
+#npm publish

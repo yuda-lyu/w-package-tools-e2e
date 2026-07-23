@@ -1,0 +1,23 @@
+{
+  "name": "w-package-tools-e2e",
+  "version": "1.0.0",
+  "dependencies": {
+    "dotenv": "^17.4.2",
+    "json5": "^2.2.3",
+    "pixelmatch": "^7.2.0",
+    "playwright": "^1.61.1",
+    "pngjs": "^7.0.0",
+    "sharp": "^0.35.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yuda-lyu/w-package-tools-e2e"
+  },
+  "keywords": [
+    "package",
+    "tool",
+    "build"
+  ],
+  "author": "yuda-lyu(semisphere)",
+  "license": "MIT"
+}
