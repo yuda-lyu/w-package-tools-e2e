@@ -5,9 +5,15 @@
     "dotenv": "^17.4.2",
     "json5": "^2.2.3",
     "pixelmatch": "^7.2.0",
-    "playwright": "^1.61.1",
+    "playwright": "^1.62.1",
     "pngjs": "^7.0.0",
     "sharp": "^0.35.3"
+  },
+  "devDependencies": {
+    "w-package-tools": "^1.1.16"
+  },
+  "scripts": {
+    "test": "mocha --no-parallel \"test/*.test.mjs\" --timeout 180000"
   },
   "repository": {
     "type": "git",

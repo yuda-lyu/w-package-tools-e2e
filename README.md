@@ -18,10 +18,8 @@ To view documentation or get support, visit [docs](https://yuda-lyu.github.io/w-
 
 npm i w-package-tools-e2e
 
-import rollupCode from 'w-package-tools-e2e/src/rollupCode.mjs'
-rollupCode({...})
-
-import rollupWorker from 'w-package-tools-e2e/src/rollupWorker.mjs'
-rollupWorker({...})
+//launchChromium: 啟動Playwright之Chromium, 所需版本之瀏覽器不存在時先自動下載(不依賴安裝腳本)
+import launchChromium from 'w-package-tools-e2e/src/launchChromium.mjs'
+let browser = await launchChromium({ headless: true })
 
 ```
