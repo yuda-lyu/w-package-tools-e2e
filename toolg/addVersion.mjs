@@ -1,4 +1,4 @@
-import addVersion from '../src/addVersion.mjs'
+import addVersion from 'w-package-tools/src/addVersion.mjs'
 
 
 addVersion()
