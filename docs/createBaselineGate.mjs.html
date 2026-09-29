@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    
+    <meta charset="utf-8">
+    <title>createBaselineGate.mjs - Documentation</title>
+    
+    
+    <script src="scripts/prettify/prettify.js"></script>
+    <script src="scripts/prettify/lang-css.js"></script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc.css">
+    <script src="scripts/nav.js" defer></script>
+    
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+
+<input type="checkbox" id="nav-trigger" class="nav-trigger" />
+<label for="nav-trigger" class="navicon-button x">
+  <div class="navicon"></div>
+</label>
+
+<label for="nav-trigger" class="overlay"></label>
+
+<nav >
+    
+    
+    <h2><a href="index.html">Home</a></h2><h3>Global</h3><ul><li><a href="global.html#BOX_PAD">BOX_PAD</a></li><li><a href="global.html#INK_PAD">INK_PAD</a></li><li><a href="global.html#WPackageToolsE2e">WPackageToolsE2e</a></li><li><a href="global.html#assertBaselineMatch">assertBaselineMatch</a></li><li><a href="global.html#assertTextSpec">assertTextSpec</a></li><li><a href="global.html#canvasInkRects">canvasInkRects</a></li><li><a href="global.html#captureStable">captureStable</a></li><li><a href="global.html#captureStableWithBox">captureStableWithBox</a></li><li><a href="global.html#chromiumLaunchArgs">chromiumLaunchArgs</a></li><li><a href="global.html#collectDomText">collectDomText</a></li><li><a href="global.html#compareImageDirs">compareImageDirs</a></li><li><a href="global.html#createBaselineGate">createBaselineGate</a></li><li><a href="global.html#createKnownDefect">createKnownDefect</a></li><li><a href="global.html#createServiceManager">createServiceManager</a></li><li><a href="global.html#createTempSettings">createTempSettings</a></li><li><a href="global.html#cropRegion">cropRegion</a></li><li><a href="global.html#diffBaselineSnapshots">diffBaselineSnapshots</a></li><li><a href="global.html#findOrphanBaselines">findOrphanBaselines</a></li><li><a href="global.html#getE2eMode">getE2eMode</a></li><li><a href="global.html#gridContentBox">gridContentBox</a></li><li><a href="global.html#isChildAlive">isChildAlive</a></li><li><a href="global.html#itemsUnionBox">itemsUnionBox</a></li><li><a href="global.html#killOwnTree">killOwnTree</a></li><li><a href="global.html#killPortListeners">killPortListeners</a></li><li><a href="global.html#launchBrowser">launchBrowser</a></li><li><a href="global.html#launchChromium">launchChromium</a></li><li><a href="global.html#launchChromiumCore">launchChromiumCore</a></li><li><a href="global.html#listenerPids">listenerPids</a></li><li><a href="global.html#maskRegions">maskRegions</a></li><li><a href="global.html#normalizeShots">normalizeShots</a></li><li><a href="global.html#openCasePage">openCasePage</a></li><li><a href="global.html#overlayImageAt">overlayImageAt</a></li><li><a href="global.html#overlayRegions">overlayRegions</a></li><li><a href="global.html#pageHasText">pageHasText</a></li><li><a href="global.html#parseListenerPids">parseListenerPids</a></li><li><a href="global.html#pidExists">pidExists</a></li><li><a href="global.html#pollUntil">pollUntil</a></li><li><a href="global.html#probeHttp">probeHttp</a></li><li><a href="global.html#registerCleanupHooks">registerCleanupHooks</a></li><li><a href="global.html#resetAgGridScroll">resetAgGridScroll</a></li><li><a href="global.html#rowBoxSel">rowBoxSel</a></li><li><a href="global.html#runBaselineCase">runBaselineCase</a></li><li><a href="global.html#runIsolatedE2e">runIsolatedE2e</a></li><li><a href="global.html#sleepSync">sleepSync</a></li><li><a href="global.html#snapshotBaselines">snapshotBaselines</a></li><li><a href="global.html#stepShots">stepShots</a></li><li><a href="global.html#typeIntoInput">typeIntoInput</a></li><li><a href="global.html#typeIntoNthInput">typeIntoNthInput</a></li><li><a href="global.html#waitAlertGone">waitAlertGone</a></li><li><a href="global.html#waitChildExit">waitChildExit</a></li><li><a href="global.html#waitColResizeOverlay">waitColResizeOverlay</a></li><li><a href="global.html#waitDrawerReady">waitDrawerReady</a></li><li><a href="global.html#waitGridIdle">waitGridIdle</a></li><li><a href="global.html#waitUntilExist">waitUntilExist</a></li></ul>
+    
+</nav>
+
+<div id="main">
+    
+    <h1 class="page-title">createBaselineGate.mjs</h1>
+    
+
+    
+
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>import fs from 'fs'
+import path from 'path'
+import pixelmatch from 'pixelmatch'
+import { PNG } from 'pngjs'
+import findOrphanBaselines from './findOrphanBaselines.mjs'
+
+
+//讀取命令列旗標之值: 旗標存在時須有值且值不得為另一個旗標(防 `--names --langs cht` 把 --langs 吃成名單)
+function readFlag(argv, flag) {
+    let i = argv.indexOf(flag)
+    if (i &lt; 0) {
+        return null
+    }
+    let v = argv[i + 1]
+    if (v === undefined || String(v).startsWith('--')) {
+        throw new Error(`${flag} 缺少值 (其後須接以逗號分隔之清單)`)
+    }
+    let items = String(v).split(',').map((s) => s.trim()).filter(Boolean)
+    if (items.length === 0) {
+        throw new Error(`${flag} 之值為空`)
+    }
+    return items
+}
+
+
+/**
+ * 建立標準圖產製之篩選器：解析--names、--langs、--write-mode與E2E_BASELINE_OUT_DIR，於「截圖之前」決定要跑哪些案例、寫哪些階段圖
+ *
+ * 案例宣告：cases為[{name,stages,compareOnly,langs}]，name為案例鍵；stages為該案產出之階段圖鍵陣列(可省略，省略時單張案例之圖鍵即name，
+ * 多階段案例則於執行後以編號前綴比對)；compareOnly為true代表只比對不產圖(共用他案標準圖)；langs限定語系(預設全部)。
+ *
+ * --names 每項之解析順序(每項可帶`&lt;語系>-`前綴限定語系，不帶則套用全部已選語系)：
+ * ①完全等於某案例宣告之階段圖鍵 → 只寫該張(案例鍵與首張階段圖鍵同名時亦只寫該張)；
+ * ②完全等於案例鍵，或為案例鍵之邊界前綴(`E2E-005`命中`E2E-005-xxx`，不命中`E2E-0051-xxx`) → 寫該案全部階段；
+ * ③為已宣告階段圖鍵之邊界前綴 → 寫命中之各張；
+ * ④案例未宣告stages而編號相符 → 執行該案，只寫圖鍵等於該項或以「該項-」開頭者，執行後未產出即拋錯(不靜默略過)；
+ * 命中compareOnly案例、或不符任何案例與圖鍵者一律拋錯並列出可用鍵。--langs須完全等於已宣告語系。
+ * 未篩選(全部案例)時casesFor含只比對案例：產製端照跑其流程與語意斷言、不寫圖(runBaselineCase於regen遇compareOnly即不寫)，
+ * 與mocha REGEN型專案一致(2026-09-28前直跑型專案之產製端從不執行只比對案例)。
+ * 孤兒檢查：給pathOf(或由runBaselineCase經usePathOf告知)時，finalize()以findOrphanBaselines靜態比對宣告圖鍵與標準圖目錄，有孤兒即拋錯並列出。
+ * --write-mode：all(預設，全寫)、missing(只寫標準圖不存在者，追加案例用)、changed(只寫與現行標準圖差異超過容差或尺寸不同者，避免重寫已審過之圖)。
+ * E2E_BASELINE_OUT_DIR：有值時寫檔改導至該目錄(等價驗證用)，比對端讀取之標準圖路徑不受影響
+ *
+ * @param {Object} opt 輸入設定物件
+ * @param {Array} opt.langs 輸入已宣告之語系陣列
+ * @param {Array} opt.cases 輸入案例宣告陣列(元素為物件或案例鍵字串)
+ * @param {Array} [opt.argv=process.argv] 輸入命令列參數陣列，預設process.argv
+ * @param {Object} [opt.env=process.env] 輸入環境變數物件，預設process.env
+ * @param {RegExp} [opt.idPattern=/^(E2E-\d+)(?=-|$)/] 輸入自鍵取出案例編號之樣式，預設/^(E2E-\d+)(?=-|$)/
+ * @param {String} [opt.outDirEnv='E2E_BASELINE_OUT_DIR'] 輸入輸出目錄之環境變數名稱字串，預設'E2E_BASELINE_OUT_DIR'
+ * @param {Number} [opt.threshold=0.1] 輸入write-mode為changed時pixelmatch之色差門檻，預設0.1
+ * @param {Number} [opt.maxDiffPixels=100] 輸入write-mode為changed時容許之真不同像素數，預設100
+ * @param {Function} [opt.pathOf] 輸入標準圖路徑函數(lang,key)=>路徑字串，供孤兒檢查；省略時由runBaselineCase首次產製時經usePathOf告知，皆無則不檢查孤兒
+ * @returns {Object} 回傳篩選器物件{filtered,langs,writeMode,outDir,casesFor(lang),shouldWrite(lang,caseName,stageKey),noteProduced(lang,caseName,stageKey),decideWrite(buf,baselinePath),outPath(baselinePath),usePathOf(fn),orphans(),finalize(),describe()}
+ * @example
+ *
+ * import createBaselineGate from 'w-package-tools-e2e/src/createBaselineGate.mjs'
+ *
+ * let gate = createBaselineGate({
+ *     langs: ['eng', 'cht'],
+ *     cases: [
+ *         { name: 'E2E-001-list-loaded' },
+ *         { name: 'E2E-005-grant-perms-save-success', stages: ['E2E-005-1-click-perms', 'E2E-005-2-perms-list'] },
+ *     ],
+ * })
+ * console.log(gate.describe())
+ * for (let lang of gate.langs) {
+ *     for (let c of gate.casesFor(lang)) {
+ *         //...執行案例, 每張圖以 gate.shouldWrite(lang, c.name, key) 決定是否寫檔...
+ *     }
+ * }
+ * gate.finalize()
+ *
+ */
+function createBaselineGate(opt = {}) {
+    let {
+        langs,
+        cases,
+        argv = process.argv,
+        env = process.env,
+        idPattern = /^(E2E-\d+)(?=-|$)/,
+        outDirEnv = 'E2E_BASELINE_OUT_DIR',
+        threshold = 0.1,
+        maxDiffPixels = 100,
+    } = opt
+    let pathOf = typeof opt.pathOf === 'function' ? opt.pathOf : null
+    if (!Array.isArray(langs) || langs.length === 0) {
+        throw new Error('createBaselineGate: langs 為必填陣列')
+    }
+    if (!Array.isArray(cases) || cases.length === 0) {
+        throw new Error('createBaselineGate: cases 為必填陣列')
+    }
+    let decls = cases.map((c) => (typeof c === 'string' ? { name: c } : { ...c }))
+    let seen = new Set()
+    for (let c of decls) {
+        if (!c.name) {
+            throw new Error('createBaselineGate: 案例宣告缺 name')
+        }
+        if (seen.has(c.name)) {
+            throw new Error(`createBaselineGate: 案例鍵重複 ${c.name}`)
+        }
+        seen.add(c.name)
+    }
+    let idOf = (key) => {
+        let m = String(key).match(idPattern)
+        return m ? m[1] : null
+    }
+    let caseLangs = (c) => (Array.isArray(c.langs) ? c.langs : langs)
+    let boundary = (key, t) => key === t || key.startsWith(`${t}-`)
+
+    //--langs
+    let langItems = readFlag(argv, '--langs')
+    if (langItems) {
+        for (let l of langItems) {
+            if (!langs.includes(l)) {
+                throw new Error(`--langs 之「${l}」不是已宣告語系 (${langs.join(', ')})`)
+            }
+        }
+    }
+    let selLangs = langs.filter((l) => !langItems || langItems.includes(l))
+
+    //--write-mode
+    let wm = readFlag(argv, '--write-mode')
+    let writeMode = wm ? wm[0] : 'all'
+    if (!['all', 'missing', 'changed'].includes(writeMode)) {
+        throw new Error(`--write-mode 須為 all、missing 或 changed，實得「${writeMode}」`)
+    }
+
+    let outDir = env[outDirEnv] ? String(env[outDirEnv]) : null
+
+    //--names
+    let tokens = readFlag(argv, '--names')
+    let filtered = !!tokens
+    //sel[lang][caseName] = { all, stages:Set, filters:[{fn,tokenIdx}], tokenIdxAll:[...], tokenIdxStage:Map(stage->[idx]) }
+    let sel = {}
+    let produced = [] //各 token 是否有產出
+    let pick = (lang, c) => {
+        sel[lang] = sel[lang] || {}
+        sel[lang][c.name] = sel[lang][c.name] || { all: false, allTokens: [], stages: new Map(), filters: [] }
+        return sel[lang][c.name]
+    }
+    let available = () => {
+        let ks = []
+        for (let c of decls) {
+            ks.push(`  · ${c.compareOnly ? `${c.name}(只比對)` : c.name}`)
+            for (let s of (c.stages || [])) {
+                if (s !== c.name) {
+                    ks.push(`      ‧ ${s}`)
+                }
+            }
+        }
+        return ks.join('\n')
+    }
+
+    if (tokens) {
+        tokens.forEach((t, ti) => {
+            produced[ti] = false
+            //語系前綴
+            let scope = null
+            let rest = t
+            for (let l of langs) {
+                if (t.startsWith(`${l}-`)) {
+                    scope = [l]
+                    rest = t.slice(l.length + 1)
+                    break
+                }
+            }
+            if (scope &amp;&amp; !selLangs.includes(scope[0])) {
+                throw new Error(`--names 之「${t}」限定語系 ${scope[0]}，與 --langs 衝突`)
+            }
+            let tLangs = scope || selLangs
+            let hit = false
+            for (let lang of tLangs) {
+                let cs = decls.filter((c) => caseLangs(c).includes(lang))
+                //①完全等於已宣告之階段圖鍵: 只比對之案例宣告之是「共用他案之圖鍵」, 不參與寫檔解析(由產出該圖之案例負責);
+                //只命中只比對之案例者拋錯
+                let exactAll = cs.filter((c) => (c.stages || []).includes(rest))
+                let exactStage = exactAll.filter((c) => !c.compareOnly)
+                if (exactStage.length > 1) {
+                    throw new Error(`--names 之「${t}」同時是多個案例之階段圖鍵: ${exactStage.map((c) => c.name).join(', ')}`)
+                }
+                if (exactStage.length === 0 &amp;&amp; exactAll.length > 0) {
+                    throw new Error(`--names 之「${t}」屬只比對之案例 ${exactAll.map((c) => c.name).join(', ')}，不產圖`)
+                }
+                if (exactStage.length === 1) {
+                    let c = exactStage[0]
+                    let s = pick(lang, c)
+                    s.stages.set(rest, [...(s.stages.get(rest) || []), ti])
+                    hit = true
+                    continue
+                }
+                //②案例鍵(完全或邊界前綴)
+                let byCase = cs.filter((c) => boundary(c.name, rest))
+                if (byCase.length > 0) {
+                    let co = byCase.filter((c) => c.compareOnly)
+                    if (co.length > 0) {
+                        throw new Error(`--names 之「${t}」命中只比對之案例 ${co.map((c) => c.name).join(', ')}，不產圖(共用他案標準圖)`)
+                    }
+                    for (let c of byCase) {
+                        let s = pick(lang, c)
+                        s.all = true
+                        s.allTokens.push(ti)
+                    }
+                    hit = true
+                    continue
+                }
+                //③已宣告階段圖鍵之邊界前綴(只比對之案例之共用圖鍵同①不參與; 只命中只比對之案例者拋錯)
+                let prefixAll = []
+                for (let c of cs) {
+                    for (let st of (c.stages || [])) {
+                        if (boundary(st, rest)) {
+                            prefixAll.push([c, st])
+                        }
+                    }
+                }
+                let byStagePrefix = prefixAll.filter(([c]) => !c.compareOnly)
+                if (byStagePrefix.length === 0 &amp;&amp; prefixAll.length > 0) {
+                    throw new Error(`--names 之「${t}」屬只比對之案例 ${[...new Set(prefixAll.map(([c]) => c.name))].join(', ')}，不產圖`)
+                }
+                if (byStagePrefix.length > 0) {
+                    for (let [c, st] of byStagePrefix) {
+                        let s = pick(lang, c)
+                        s.stages.set(st, [...(s.stages.get(st) || []), ti])
+                    }
+                    hit = true
+                    continue
+                }
+                //④未宣告 stages 之案例, 以編號相符執行, 執行後驗證有產出
+                let id = idOf(rest)
+                let byId = id ? cs.filter((c) => !c.stages &amp;&amp; idOf(c.name) === id) : []
+                if (byId.length > 0) {
+                    for (let c of byId) {
+                        if (c.compareOnly) {
+                            throw new Error(`--names 之「${t}」屬只比對之案例 ${c.name}，不產圖`)
+                        }
+                        let s = pick(lang, c)
+                        s.filters.push({ fn: (k) => boundary(k, rest), ti })
+                    }
+                    hit = true
+                    continue
+                }
+            }
+            if (!hit) {
+                throw new Error(`--names 之「${t}」不符合任何案例或階段圖鍵；可用之鍵:\n${available()}`)
+            }
+        })
+    }
+
+    function casesFor(lang) {
+        if (!selLangs.includes(lang)) {
+            return []
+        }
+        if (!filtered) {
+            //含只比對案例: 產製端照跑流程與語意斷言, 由 runBaselineCase 不寫圖(技能 §7.9「產製時照跑流程與語意斷言」)
+            return decls.filter((c) => caseLangs(c).includes(lang))
+        }
+        let s = sel[lang] || {}
+        return decls.filter((c) => s[c.name])
+    }
+
+    //回傳命中此圖之 token 索引陣列(未篩選時回 null 代表全寫)
+    function matchTokens(lang, caseName, stageKey) {
+        let s = sel[lang] &amp;&amp; sel[lang][caseName]
+        if (!s) {
+            return []
+        }
+        let idx = []
+        if (s.all) {
+            idx.push(...s.allTokens)
+        }
+        if (s.stages.has(stageKey)) {
+            idx.push(...s.stages.get(stageKey))
+        }
+        for (let f of s.filters) {
+            if (f.fn(stageKey)) {
+                idx.push(f.ti)
+            }
+        }
+        return idx
+    }
+
+    function shouldWrite(lang, caseName, stageKey) {
+        if (!selLangs.includes(lang)) {
+            return false
+        }
+        if (!filtered) {
+            return true
+        }
+        return matchTokens(lang, caseName, stageKey).length > 0
+    }
+
+    function noteProduced(lang, caseName, stageKey) {
+        if (!filtered) {
+            return
+        }
+        for (let ti of matchTokens(lang, caseName, stageKey)) {
+            produced[ti] = true
+        }
+    }
+
+    //依 write-mode 決定是否寫出(比對對象為正式標準圖路徑)
+    function decideWrite(buf, baselinePath) {
+        if (writeMode === 'all') {
+            return { write: true, reason: 'all' }
+        }
+        if (!fs.existsSync(baselinePath)) {
+            return { write: true, reason: 'missing' }
+        }
+        if (writeMode === 'missing') {
+            return { write: false, reason: 'exists' }
+        }
+        let a = PNG.sync.read(buf)
+        let b = PNG.sync.read(fs.readFileSync(baselinePath))
+        if (a.width !== b.width || a.height !== b.height) {
+            return { write: true, reason: 'sizeChanged' }
+        }
+        let n = a.data.equals(b.data) ? 0 : pixelmatch(a.data, b.data, null, a.width, a.height, { threshold, includeAA: false })
+        if (n > maxDiffPixels) {
+            return { write: true, reason: `diff=${n}px` }
+        }
+        return { write: false, reason: `withinTolerance(diff=${n}px)` }
+    }
+
+    function outPath(baselinePath) {
+        return outDir ? path.join(outDir, path.basename(baselinePath)) : baselinePath
+    }
+
+    //由 runBaselineCase 告知標準圖路徑函數(建立篩選器時未給 pathOf 者)
+    function usePathOf(fn) {
+        if (!pathOf &amp;&amp; typeof fn === 'function') {
+            pathOf = fn
+        }
+    }
+
+    //孤兒標準圖(靜態比對宣告, 見 findOrphanBaselines); 無 pathOf 時回 []
+    function orphans() {
+        if (!pathOf) {
+            return []
+        }
+        return findOrphanBaselines({ cases: decls, langs, pathOf, idPattern })
+    }
+
+    //全部案例執行完後呼叫: 任何 --names 項目未產出即拋錯(不靜默略過); 標準圖目錄有孤兒圖亦拋錯(列出供確認後刪除)
+    function finalize() {
+        let problems = []
+        if (filtered) {
+            let miss = tokens.filter((t, i) => !produced[i])
+            if (miss.length > 0) {
+                problems.push(`--names 之下列項目執行後未產出任何圖(圖鍵不符或案例未執行): ${miss.join(', ')}`)
+            }
+        }
+        let orph = orphans()
+        if (orph.length > 0) {
+            problems.push(`標準圖目錄有 ${orph.length} 張孤兒圖(不是任何案例之宣告圖鍵; 多為改名後之舊圖, 確認後刪除, git 追蹤檔可 git restore 復原): ${orph.join(', ')}`)
+        }
+        if (problems.length > 0) {
+            throw new Error(problems.join('\n'))
+        }
+    }
+
+    function describe() {
+        let lines = [`[baseline-gate] langs=${selLangs.join(',')} writeMode=${writeMode}${outDir ? ` outDir=${outDir}` : ''}${filtered ? '' : ' (全部案例)'}`]
+        if (filtered) {
+            for (let lang of selLangs) {
+                for (let c of casesFor(lang)) {
+                    let s = sel[lang][c.name]
+                    let what = s.all ? '全部階段' : [...s.stages.keys(), ...s.filters.map(() => '(依編號前綴)')].join(', ')
+                    lines.push(`  ${lang}-${c.name} → ${what}`)
+                }
+            }
+        }
+        return lines.join('\n')
+    }
+
+    return {
+        filtered,
+        langs: selLangs,
+        writeMode,
+        outDir,
+        casesFor,
+        shouldWrite,
+        noteProduced,
+        decideWrite,
+        outPath,
+        usePathOf,
+        orphans,
+        finalize,
+        describe,
+    }
+}
+
+
+export default createBaselineGate
+</code></pre>
+        </article>
+    </section>
+
+
+
+
+    
+    
+</div>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 4.0.5</a> on Tue Sep 29 2026 09:06:00 GMT+0800 (台北標準時間) using the <a href="https://github.com/clenemt/docdash">docdash</a> theme.
+</footer>
+
+<script>prettyPrint();</script>
+<script src="scripts/polyfill.js"></script>
+<script src="scripts/linenumber.js"></script>
+
+
+
+</body>
+</html>

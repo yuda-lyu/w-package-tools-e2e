@@ -1,0 +1,488 @@
+import { INK_PAD } from './inkRect.mjs'
+import { BOX_PAD, BOX_STROKE } from './composeBox.mjs'
+
+
+/**
+ * 紅框「可見項目之聯集」之量測型目標：清單、樹、選單、訊息時間軸、工具列上之項目、一行訊息文字等，框實際有內容之項目而非整欄/整區
+ *
+ * 交給captureStableWithBox作為target(或其陣列之一員)。技能 §7.2「清單/樹重新列出、展開縮合、進入頁面 → 當時可見之項目列的聯集」、
+ * §7.3-2「不框整欄/整區的空白」。量測於捲入與等待之後、截圖之前進行。
+ * 項目：選擇器字串、其陣列(以逗號併為一個選擇器)，或Playwright Locator(例：getByText 取得之訊息文字)；選擇器與Locator皆經同一個頁內量測函式。
+ * 可見項目＝命中項目、寬高大於0、非display:none/visibility:hidden/opacity:0，且與範圍容器(within；未給則為視窗)有交集者；
+ * 聯集再夾在範圍容器內(容器可捲動時，捲出可視範圍之項目不計入)。一個都量不到時回傳null(captureStableWithBox因此拋錯)。
+ * fit：依「元素自身有無可見邊界」決定量法——有(底色異於其背後底色、至少三邊之邊框、陰影、背景圖，或圖片/表單等替換元素；晶片、按鈕、
+ * 灰頁上之白卡、底色列)量元素本身；無(透明容器、白頁上之白底區塊、整行文字、開關與其標籤、勾選列、無內距之欄位與表單欄)
+ * 改量其可見內容(有可見邊界之子元素框與文字行框之聯集；透明子元素之內距不計)，且一律外擴 inkPad。
+ * 用於「一行字卻框整列寬」(技能 §7.2 提示訊息/狀態文字→訊息本體)、「一列晶片卻框整列寬」與「無邊界之元件緊貼文字」。
+ * inkPad(2026-09-28)：紅框幾何為目標 ±6 且 5px 描邊內縮，無可見邊界之目標緊貼墨跡時框內僅剩約 1px、紅框壓字
+ * (SSO login E2E-006、stainfor E2E-002、tokens 權限勾選列與編輯模式開關、連線狀態文字殷鑑)；外擴 4px 後框內留白約 5px，與自帶內距之按鈕相當。
+ * 子元素(勾選框、開關軌道、圖示、輸入框)與文字同外擴(同日改：原只外擴文字，子元素框貼框線 0–1px、四邊留白不一致)。
+ * fit 下框線不壓框外內容(2026-09-28，業主：「亂框亂壓導致遮蔽有效資訊或使用者誤解就是問題」)：
+ * ①相鄰項目(自元素往上至多 4 層之緊鄰兄弟，上下左右四向各取最近一層)：框線置於兩者**可見範圍**(有可見邊界者為元素框，否則為子元素與文字之聯集)
+ *   間隙正中，不壓到鄰項之字(例：權限清單緊鄰列、模式段與名稱段)，也不因鄰項元素框之透明內距而貼回目標自身之字(例：開關右側之圖示鈕)；
+ *   無可見內容之兄弟(空白間隔)不算鄰項；
+ * ②浮層(自身或祖先為 position:fixed，例：下拉清單、浮出面板；全畫面者除外)：浮層外之頁面內容不是 DOM 兄弟，改以命中測試找目標四周、
+ *   浮層範圍外最近之可見內容(文字、晶片／按鈕／觸發區級之有邊界元件、圖示與表單元件；大容器之底色與整張圖表不算；遮罩後之背景不算)，
+ *   框線置於與其間隙正中；浮層本身為目標時以其內容之可見範圍計，框線可退入浮層內距；四周無內容者照常外擴
+ *   (同日首版一律畫在浮層內側，內距小之清單框線反而貼字：PERM 時間清單下緣 2px、關聯模式清單左緣 1px)。
+ *
+ * @param {String|Array|Object} itemSel 輸入項目之選擇器字串、其陣列，或Playwright Locator
+ * @param {Object} [opt={}] 輸入設定物件，預設{}
+ * @param {String} [opt.within=''] 輸入範圍容器之選擇器字串(項目於其內查找，聯集夾在其內)，取第一個命中者，預設''代表整頁與視窗
+ * @param {String|Object} [opt.scroll] 輸入先捲入視窗之選擇器字串或Locator，預設同within；within亦未給時，項目為Locator者捲該Locator，否則不捲動
+ * @param {Boolean} [opt.fit=false] 輸入無可見邊界之項目是否改量其內容範圍並外擴文字墨跡布林值，預設false
+ * @param {Number} [opt.inkPad=4] 輸入fit下文字墨跡之外擴像素，預設4
+ * @returns {Object} 回傳量測型目標物件{label,scroll,measure}
+ * @example
+ *
+ * import itemsUnionBox from 'w-package-tools-e2e/src/itemsUnionBox.mjs'
+ *
+ * let buf = await captureStableWithBox(page, itemsUnionBox('.tree-item', { within: '[data-fmid="channel-tree"]' }))
+ * let buf2 = await captureStableWithBox(page, ['img.spinner', itemsUnionBox(page.getByText('Connecting...').first(), { fit: true })])
+ *
+ */
+function itemsUnionBox(itemSel, opt = {}) {
+    let { within = '', scroll, fit = false, inkPad = INK_PAD } = opt
+    let isLoc = !!itemSel && typeof itemSel === 'object' && !Array.isArray(itemSel) && typeof itemSel.evaluateAll === 'function'
+    let sel = isLoc ? '' : (Array.isArray(itemSel) ? itemSel.join(', ') : itemSel)
+    if (!isLoc && (typeof sel !== 'string' || sel.trim() === '')) {
+        throw new Error('itemsUnionBox: itemSel 須為非空之選擇器字串、其陣列或 Locator')
+    }
+    if (typeof inkPad !== 'number' || !(inkPad >= 0)) {
+        throw new Error('itemsUnionBox: inkPad 須為非負數')
+    }
+    if (scroll === undefined) {
+        scroll = within || (isLoc ? itemSel : null)
+    }
+    return {
+        label: `itemsUnionBox(${isLoc ? 'Locator' : sel}${within ? ` within ${within}` : ''}${fit ? ' fit' : ''})`,
+        scroll,
+        probe: isLoc ? itemSel : null, //項目為單一 Locator 時供 captureStableWithBox 做被蓋住檢查(同直接傳 Locator)
+        measure: async (page) => {
+            let loc = isLoc ? itemSel : (within ? page.locator(within).first().locator(sel) : page.locator(sel))
+            //頁內量測(選擇器與 Locator 共用此一函式)
+            let measureEls = (els, { within, fit, inkPad, edge, strokeHalf, debug }) => {
+                let dbg = []
+                let uni = (a, b) => (!a ? b : !b ? a : { left: Math.min(a.left, b.left), top: Math.min(a.top, b.top), right: Math.max(a.right, b.right), bottom: Math.max(a.bottom, b.bottom) })
+                //元素自身有可見邊界(底色異於其背後底色、邊框、陰影、背景圖，或圖片/表單等替換元素)：其邊界即視覺邊界
+                let rgbaOf = (c) => {
+                    let m = String(c || '').match(/rgba?\(([^)]+)\)/)
+                    if (!m) {
+                        return (c && c !== 'transparent') ? [0, 0, 0, 1] : [0, 0, 0, 0]
+                    }
+                    let p = m[1].split(/[\s,/]+/).filter((s) => s !== '').map(Number)
+                    return [p[0], p[1], p[2], p.length >= 4 ? p[3] : 1]
+                }
+                let backdropOf = (e) => {
+                    for (let p = e.parentElement; p; p = p.parentElement) {
+                        let c = rgbaOf(window.getComputedStyle(p).backgroundColor)
+                        if (c[3] > 0) {
+                            return c
+                        }
+                    }
+                    return [255, 255, 255, 1]
+                }
+                let hasBoundary = (e) => {
+                    if (['IMG', 'SVG', 'CANVAS', 'VIDEO', 'INPUT', 'BUTTON', 'SELECT', 'TEXTAREA'].includes(e.tagName.toUpperCase())) {
+                        return true
+                    }
+                    let cs = window.getComputedStyle(e)
+                    if ((cs.backgroundImage && cs.backgroundImage !== 'none') || (cs.boxShadow && cs.boxShadow !== 'none')) {
+                        return true
+                    }
+                    let bg = rgbaOf(cs.backgroundColor)
+                    if (bg[3] > 0) {
+                        let bd = backdropOf(e)
+                        if ([0, 1, 2].some((i) => Math.abs(bg[i] - bd[i]) > 8)) {
+                            return true //底色與背後不同(白底卡片放在白頁上則不算)
+                        }
+                    }
+                    //邊框須至少三邊可見才圍成框；單邊或上下兩條為分隔線(例：工具列 border-top)，不算
+                    return ['Top', 'Right', 'Bottom', 'Left'].filter((s) => parseFloat(cs[`border${s}Width`]) > 0 && cs[`border${s}Style`] !== 'none' && rgbaOf(cs[`border${s}Color`])[3] > 0).length >= 3
+                }
+                //可見範圍：有可見邊界者為元素框；否則為其可見子元素之可見範圍與文字行框之聯集(遞迴，overflow 非 visible 者夾在元素框內)；
+                //只以偽元素呈現者(icon font 之 ::before/::after)為元素框；無任何可見內容(空白間隔、透明占位)回 null。
+                //每次計算走訪元素數設上限，超過者以元素框計(保守，同未細分)。contentOnly：不看元素自身邊界、只取其內容(浮層本身為目標時用)
+                //structRef(浮層面板)：其內撐滿面板寬或高(≥ 90%)之有邊界子元素(標頭列、清單底色)為結構性底色，不以其框計、改看其內之文字與元件
+                //(否則全寬標頭使內容範圍貼到面板邊，框線無處可退而壓到緊貼浮層之背景按鈕：tokens 權限浮層右緣殷鑑)
+                let budget = 0
+                let structRef = null
+                let visExtent = (e, contentOnly = false, ref = null) => {
+                    budget = 3000
+                    structRef = ref
+                    let v = visRec(e, contentOnly)
+                    structRef = null
+                    return v
+                }
+                let visRec = (e, contentOnly = false) => {
+                    let r = e.getBoundingClientRect()
+                    let structural = !!structRef && (r.width >= structRef.width * 0.9 || r.height >= structRef.height * 0.9)
+                    if ((!contentOnly && !structural && hasBoundary(e)) || --budget < 0) {
+                        return (r.width > 0 && r.height > 0) ? r : null
+                    }
+                    let acc = null
+                    for (let n of e.childNodes) {
+                        if (n.nodeType === 3) {
+                            if (!n.nodeValue || n.nodeValue.trim() === '') {
+                                continue
+                            }
+                            let rg = document.createRange()
+                            rg.selectNodeContents(n)
+                            for (let q of rg.getClientRects()) {
+                                if (q.width > 0 && q.height > 0) {
+                                    acc = uni(acc, q)
+                                }
+                            }
+                        }
+                        else if (n.nodeType === 1) {
+                            let cs = window.getComputedStyle(n)
+                            if (cs.display === 'none' || cs.visibility === 'hidden' || Number(cs.opacity) === 0) {
+                                continue
+                            }
+                            let q = visRec(n)
+                            if (q) {
+                                acc = uni(acc, q)
+                            }
+                        }
+                    }
+                    if (!acc) {
+                        let pseudo = ['::before', '::after'].some((p) => {
+                            let c = window.getComputedStyle(e, p).content
+                            return !!c && !['none', 'normal', '""', '\'\''].includes(c)
+                        })
+                        return (pseudo && r.width > 0 && r.height > 0) ? r : null
+                    }
+                    let cs = window.getComputedStyle(e)
+                    if (cs.overflowX !== 'visible' || cs.overflowY !== 'visible') {
+                        acc = { left: Math.max(acc.left, r.left), top: Math.max(acc.top, r.top), right: Math.min(acc.right, r.right), bottom: Math.min(acc.bottom, r.bottom) }
+                        if (acc.right <= acc.left || acc.bottom <= acc.top) {
+                            return null
+                        }
+                    }
+                    return acc
+                }
+                let sameRect = (a, b, tol) => Math.abs(a.left - b.left) <= tol && Math.abs(a.top - b.top) <= tol && Math.abs(a.right - b.right) <= tol && Math.abs(a.bottom - b.bottom) <= tol
+                //自身或後代(至多 6 層)中，矩形與 rc 相同(容差 tol)之有邊界元素：透明外層包著之面板、按鈕等
+                let boundedFilling = (root, rc, tol) => {
+                    let found = null
+                    let walk = (el, depth) => {
+                        if (found || depth > 6) {
+                            return
+                        }
+                        if (hasBoundary(el) && sameRect(el.getBoundingClientRect(), rc, tol)) {
+                            found = el
+                            return
+                        }
+                        for (let c of el.children) {
+                            walk(c, depth + 1)
+                        }
+                    }
+                    walk(root, 0)
+                    return found
+                }
+                //浮層外可見內容之命中測試：點在浮層範圍內者(背後內容被浮層蓋住)、視窗外者不算；全畫面透明層(點擊攔截)略過往下找，
+                //全畫面有底色之遮罩(背後已調暗)不算內容。命中元素往上找：文字行框含此點者、有可見邊界之小元件(寬 ≤ 480 且高 ≤ 120：
+                //晶片、按鈕、觸發區、輸入框、圖示與表單等替換元素)為內容並回傳其矩形；遇大容器即止(大片底色、整張圖表不算)
+                let textRectAt = (a, x, y) => {
+                    for (let n of a.childNodes) {
+                        if (n.nodeType !== 3 || !n.nodeValue || n.nodeValue.trim() === '') {
+                            continue
+                        }
+                        let rg = document.createRange()
+                        rg.selectNodeContents(n)
+                        for (let q of rg.getClientRects()) {
+                            if (x >= q.left && x <= q.right && y >= q.top && y <= q.bottom) {
+                                return q
+                            }
+                        }
+                    }
+                    return null
+                }
+                let contentAt = (x, y, fx, fr) => {
+                    let vw = window.innerWidth
+                    let vh = window.innerHeight
+                    if (x < 0 || y < 0 || x >= vw || y >= vh) {
+                        return null
+                    }
+                    if (x >= fr.left && x < fr.right && y >= fr.top && y < fr.bottom) {
+                        return null
+                    }
+                    for (let h of document.elementsFromPoint(x, y)) {
+                        if (fx.contains(h)) {
+                            return null //浮層自身蓋著此點(面板可大於 fixed 外層)：其後之頁面內容看不見，不算
+                        }
+                        for (let a = h; a && a !== document.body && a !== document.documentElement; a = a.parentElement) {
+                            let t = textRectAt(a, x, y)
+                            if (t) {
+                                return t
+                            }
+                            let ar = a.getBoundingClientRect()
+                            if (ar.width > 480 || ar.height > 120) {
+                                break
+                            }
+                            if (hasBoundary(a)) {
+                                return ar
+                            }
+                        }
+                        let hr = h.getBoundingClientRect()
+                        let hcs = window.getComputedStyle(h)
+                        if (hcs.position === 'fixed' && hr.width >= vw * 0.9 && hr.height >= vh * 0.9 && rgbaOf(hcs.backgroundColor)[3] === 0) {
+                            continue //全畫面透明層：往下找其後之頁面內容
+                        }
+                        return null
+                    }
+                    return null
+                }
+                //目標四周(自其可見範圍向外，掃至預設框線外緣外 2px)、浮層範圍外最近之可見內容；每邊沿線每 4px 取一點，回傳各邊內容之對邊位置(無者 null)。
+                //內容一部分被浮層蓋住時，以浮層外第一個可見點為界
+                let nearestOutside = (inner, box, fx, fr) => {
+                    let res = { top: null, bottom: null, left: null, right: null }
+                    let lim = edge + strokeHalf + 2
+                    let along = (a0, a1) => {
+                        let arr = []
+                        for (let a = a0; a < a1; a += 4) {
+                            arr.push(a)
+                        }
+                        arr.push(a1)
+                        return arr
+                    }
+                    //沿線取樣內縮 1px：端點若恰落在浮層邊線上(內容撐滿面板寬時 inner 邊 = 浮層邊)，會判成浮層外、誤把緊貼浮層側邊之
+                    //背景內容當成上下方內容(tokens cht 權限浮層下緣框線切過末項文字殷鑑)；elementsFromPoint 會把座標取整，內縮 0.5px 不夠
+                    for (let y of along(inner.top + 1, inner.bottom - 1)) {
+                        for (let x = Math.floor(inner.right) + 1; x <= box.right + lim; x++) {
+                            let q = contentAt(x, y, fx, fr)
+                            if (q) {
+                                let p = Math.max(q.left, x - 1)
+                                res.right = res.right === null ? p : Math.min(res.right, p)
+                                break
+                            }
+                        }
+                        for (let x = Math.ceil(inner.left) - 1; x >= box.left - lim; x--) {
+                            let q = contentAt(x, y, fx, fr)
+                            if (q) {
+                                let p = Math.min(q.right, x + 1)
+                                res.left = res.left === null ? p : Math.max(res.left, p)
+                                break
+                            }
+                        }
+                    }
+                    for (let x of along(inner.left + 1, inner.right - 1)) {
+                        for (let y = Math.floor(inner.bottom) + 1; y <= box.bottom + lim; y++) {
+                            let q = contentAt(x, y, fx, fr)
+                            if (q) {
+                                let p = Math.max(q.top, y - 1)
+                                res.bottom = res.bottom === null ? p : Math.min(res.bottom, p)
+                                break
+                            }
+                        }
+                        for (let y = Math.ceil(inner.top) - 1; y >= box.top - lim; y--) {
+                            let q = contentAt(x, y, fx, fr)
+                            if (q) {
+                                let p = Math.min(q.bottom, y + 1)
+                                res.top = res.top === null ? p : Math.max(res.top, p)
+                                break
+                            }
+                        }
+                    }
+                    return res
+                }
+                //框線不得壓到相鄰項目：自元素往上(至多 4 層)找「緊鄰兄弟」，框線(外擴 edge 後之描邊中心)置於兩者**可見範圍**間隙正中——
+                //以可見範圍而非元素框計(元素框含透明內距：圖示鈕之內距使中點貼回目標文字，PERM 編輯模式開關殷鑑)；無可見內容之兄弟不算鄰項；
+                //四向各自取最近一層有鄰項者(左側鄰項在本層、右側鄰項在上層時兩側皆夾)；兩者可見範圍重疊者無間隙可置，不夾；相距遠者之中點本就在框外，不影響
+                let clampByNeighbors = (e, rc) => {
+                    let { left, top, right, bottom } = rc
+                    let own = visExtent(e) || e.getBoundingClientRect()
+                    let done = { top: false, bottom: false, left: false, right: false }
+                    let node = e
+                    for (let lv = 0; lv < 4 && node && node.parentElement; lv++) {
+                        let nr = node.getBoundingClientRect()
+                        let hit = { top: false, bottom: false, left: false, right: false }
+                        for (let s of node.parentElement.children) {
+                            if (s === node) {
+                                continue
+                            }
+                            let sc = window.getComputedStyle(s)
+                            if (sc.display === 'none' || sc.visibility === 'hidden' || Number(sc.opacity) === 0) {
+                                continue
+                            }
+                            let sr = s.getBoundingClientRect()
+                            if (sr.width <= 0 || sr.height <= 0) {
+                                continue
+                            }
+                            let hOverlap = sr.right > nr.left && sr.left < nr.right
+                            let vOverlap = sr.bottom > nr.top && sr.top < nr.bottom
+                            let dir = null
+                            if (hOverlap && sr.bottom <= nr.top + 1) {
+                                dir = 'top'
+                            }
+                            else if (hOverlap && sr.top >= nr.bottom - 1) {
+                                dir = 'bottom'
+                            }
+                            else if (vOverlap && sr.right <= nr.left + 1) {
+                                dir = 'left'
+                            }
+                            else if (vOverlap && sr.left >= nr.right - 1) {
+                                dir = 'right'
+                            }
+                            if (!dir || done[dir]) {
+                                continue
+                            }
+                            let v = visExtent(s)
+                            if (!v) {
+                                continue //無可見內容之間隔元素：框線可經過
+                            }
+                            hit[dir] = true
+                            if (dir === 'top' && v.bottom <= own.top) {
+                                top = Math.max(top, (v.bottom + own.top) / 2 + edge)
+                            }
+                            else if (dir === 'bottom' && v.top >= own.bottom) {
+                                bottom = Math.min(bottom, (own.bottom + v.top) / 2 - edge)
+                            }
+                            else if (dir === 'left' && v.right <= own.left) {
+                                left = Math.max(left, (v.right + own.left) / 2 + edge)
+                            }
+                            else if (dir === 'right' && v.left >= own.right) {
+                                right = Math.min(right, (own.right + v.left) / 2 - edge)
+                            }
+                        }
+                        for (let d of Object.keys(hit)) {
+                            if (hit[d]) {
+                                done[d] = true
+                            }
+                        }
+                        if (done.top && done.bottom && done.left && done.right) {
+                            break
+                        }
+                        node = node.parentElement
+                    }
+                    //浮層(自身或祖先為 position:fixed，例：teleport 之下拉清單、浮出面板)：浮層外之頁面內容不是其 DOM 兄弟，改以命中測試
+                    //找目標四周、浮層範圍外最近之可見內容，框線置於與其間隙正中；浮層本身為目標時以其內容之可見範圍計(框線可退入浮層內距)。
+                    //四周無內容者照常外擴(一律畫在浮層內側會讓內距小之清單框線貼字：PERM 時間清單下緣 2px、關聯模式清單左緣 1px 殷鑑)；
+                    //全畫面之浮層(彈窗、抽屜之外層)不適用
+                    let fx = null
+                    for (let a = e; a && a !== document.body && a !== document.documentElement; a = a.parentElement) {
+                        if (window.getComputedStyle(a).position === 'fixed') {
+                            fx = a
+                            break
+                        }
+                    }
+                    let vw = window.innerWidth
+                    let vh = window.innerHeight
+                    let fr = fx ? fx.getBoundingClientRect() : null
+                    if (fx && !(fr.width >= vw * 0.9 && fr.height >= vh * 0.9)) {
+                        //目標涵蓋整個浮層(浮層本身、其透明外層包裝或撐滿之面板)：以撐滿浮層之有邊界面板的內容計，框線可退入面板內距
+                        //(元件庫之浮層多為「透明之 fixed 外層 + 有底色陰影之內層面板」，只認 fixed 元素本身會漏掉：PERM 語系清單框線壓觸發區殷鑑)
+                        let inner = own
+                        if (e === fx || sameRect(own, fr, 2)) {
+                            let panel = boundedFilling(e, own, 2)
+                            if (panel) {
+                                inner = visExtent(panel, true, panel.getBoundingClientRect()) || own
+                            }
+                        }
+                        let near = nearestOutside(inner, { left, top, right, bottom }, fx, fr)
+                        if (debug) {
+                            dbg.push({ inner: [inner.left, inner.top, inner.right, inner.bottom].map((n) => Math.round(n * 10) / 10), near })
+                        }
+                        if (near.top !== null && near.top <= inner.top) {
+                            top = Math.max(top, (near.top + inner.top) / 2 + edge)
+                        }
+                        if (near.bottom !== null && near.bottom >= inner.bottom) {
+                            bottom = Math.min(bottom, (inner.bottom + near.bottom) / 2 - edge)
+                        }
+                        if (near.left !== null && near.left <= inner.left) {
+                            left = Math.max(left, (near.left + inner.left) / 2 + edge)
+                        }
+                        if (near.right !== null && near.right >= inner.right) {
+                            right = Math.min(right, (inner.right + near.right) / 2 - edge)
+                        }
+                    }
+                    if (debug) {
+                        let rr = (q) => (q ? [q.left, q.top, q.right, q.bottom].map((n) => Math.round(n * 10) / 10) : null)
+                        dbg.push({ el: `${e.tagName}.${String(e.className || '').slice(0, 30)}`, own: rr(own), fixed: fx ? `${fx.tagName}.${String(fx.className || '').slice(0, 30)}` : null, fr: rr(fr), rcIn: rr(rc), out: rr({ left, top, right, bottom }) })
+                    }
+                    if (right - left < 1 || bottom - top < 1) {
+                        return rc //防呆：夾到沒有尺寸則不夾
+                    }
+                    return { left, top, right, bottom }
+                }
+                let rectOf = (e) => {
+                    let r = e.getBoundingClientRect()
+                    if (!fit) {
+                        return r
+                    }
+                    if (hasBoundary(e)) {
+                        return clampByNeighbors(e, r) //元素自身有可見邊界(晶片、按鈕、卡片、底色列)：量元素本身
+                    }
+                    //無可見邊界者(透明容器、整行文字、開關/勾選列等)：量其可見內容(有邊界之子元素框與文字行框之聯集)並一律外擴 inkPad——
+                    //勾選框、開關軌道、圖示、輸入框等子元素與文字同留白(原只外擴文字、子元素框不外擴，框線貼勾選框與開關軌道 0–1px：
+                    //tokens 權限列、編輯模式開關殷鑑)；透明子元素之內距不計入(不可見)
+                    let v = visExtent(e, true)
+                    if (!v) {
+                        let rg = document.createRange()
+                        rg.selectNodeContents(e)
+                        let c = rg.getBoundingClientRect()
+                        return clampByNeighbors(e, (c.width > 0 && c.height > 0) ? c : r)
+                    }
+                    //可見內容恰為單一有邊界之後代(透明外層包著之面板、按鈕)：視同框該元素本身，不外擴(同直接框有邊界之元素)
+                    if (boundedFilling(e, v, 1)) {
+                        return clampByNeighbors(e, v)
+                    }
+                    return clampByNeighbors(e, { left: v.left - inkPad, top: v.top - inkPad, right: v.right + inkPad, bottom: v.bottom + inkPad })
+                }
+                let box = null
+                if (within) {
+                    let scope = document.querySelector(within)
+                    if (!scope) {
+                        return null
+                    }
+                    box = scope.getBoundingClientRect()
+                }
+                else {
+                    box = { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight }
+                }
+                let parts = []
+                els.forEach((e) => {
+                    let r = rectOf(e)
+                    if (!(r.right - r.left > 0) || !(r.bottom - r.top > 0)) {
+                        return
+                    }
+                    let cs = window.getComputedStyle(e)
+                    if (cs.display === 'none' || cs.visibility === 'hidden' || Number(cs.opacity) === 0) {
+                        return
+                    }
+                    if (r.bottom <= box.top || r.top >= box.bottom || r.right <= box.left || r.left >= box.right) {
+                        return
+                    }
+                    parts.push(r)
+                })
+                if (parts.length === 0) {
+                    return null
+                }
+                let left = Math.max(Math.min(...parts.map((r) => r.left)), box.left)
+                let top = Math.max(Math.min(...parts.map((r) => r.top)), box.top)
+                let right = Math.min(Math.max(...parts.map((r) => r.right)), box.right)
+                let bottom = Math.min(Math.max(...parts.map((r) => r.bottom)), box.bottom)
+                if (right <= left || bottom <= top) {
+                    return null
+                }
+                let res = { x: left, y: top, width: right - left, height: bottom - top }
+                if (debug) {
+                    res._dbg = dbg
+                }
+                return res
+            }
+            //edge：目標矩形邊至框線中心之距離(外擴 BOX_PAD、描邊 BOX_STROKE 置於外擴區內側)；
+            //E2E_BOX_DEBUG=1 時印出各元素之可見範圍、浮層矩形、內容範圍、浮層外最近內容與夾邊前後(審圖查因用)
+            let debug = !!process.env.E2E_BOX_DEBUG
+            let res = await loc.evaluateAll(measureEls, { within, fit, inkPad, edge: BOX_PAD - BOX_STROKE / 2, strokeHalf: BOX_STROKE / 2, debug })
+            if (res && res._dbg) {
+                console.log(`[itemsUnionBox debug] ${isLoc ? 'Locator' : sel} ${JSON.stringify(res._dbg)} → ${JSON.stringify([res.x, res.y, res.x + res.width, res.y + res.height])}`)
+                delete res._dbg
+            }
+            return res
+        },
+    }
+}
+
+
+export default itemsUnionBox

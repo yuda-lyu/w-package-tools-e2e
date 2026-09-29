@@ -1,0 +1,116 @@
+/**
+ * 畫布(canvas)目標之實際墨跡範圍：逐矩形讀其所在 canvas 之像素，回傳矩形內實際有墨跡之最小外接矩形(視窗座標)
+ *
+ * 圖表程式庫(echarts/zrender 等)回報之文字、圖例項矩形常比畫出之字形寬數 px(字寬量測與實際繪字之差、項目群組含互動熱區)；
+ * 以之交 inkRect 外擴留白或取與鄰項間隙之中點，框線會偏向一側而貼到鄰項(2026-09-28 w-web-perm 統計圖例項殷鑑：
+ * 框線距自身文字 7px、貼下一項圖示 0px)。先以本函數收斂到實際墨跡再交 inkRect。
+ * 被捲動窗裁掉一部分之項目只回其可見墨跡、完全未繪製者回 null——同一列之鄰項應取「畫面上有墨跡者」，
+ * 不可只取完整顯示者(否則緊鄰之半顯示項不算鄰項，框線照常外擴而貼上去；同一殷鑑)。
+ * canvas 預設以各矩形中心點命中測試取得(該點最上層之 canvas)，亦可由 opt.canvas 指定(選擇器字串或 Locator)。
+ * 墨跡判準：未繪製處須為透明(圖表未設不透明背景色)，以 alpha 大於門檻判定；背景不透明者以 opt.bg 給背景色，改以色差判定。
+ *
+ * @param {Object} page 輸入Playwright Page
+ * @param {Array} rects 輸入視窗座標矩形陣列，每個為{x,y,width,height}
+ * @param {Object} [opt={}] 輸入設定物件，預設{}
+ * @param {String|Object} [opt.canvas=null] 輸入canvas之選擇器字串或Locator(取第一個)，預設null代表逐矩形以中心點命中測試取得
+ * @param {Number} [opt.alpha=40] 輸入墨跡判準之alpha門檻(0~255)，預設40
+ * @param {Array} [opt.bg=null] 輸入不透明背景色[r,g,b]，給定時改以「與背景之最大通道差 > 24」判定墨跡，預設null
+ * @param {Boolean} [opt.trimY=false] 輸入是否亦收斂上下，預設false(只收左右，上下沿用原矩形：同一行字之高度不因字形而異)
+ * @returns {Promise<Array>} 回傳與rects同序之矩形陣列，矩形內無墨跡、找不到canvas或canvas非2d者為null
+ * @example
+ *
+ * import canvasInkRects from 'w-package-tools-e2e/src/canvasInkRects.mjs'
+ *
+ * let inks = await canvasInkRects(page, legend.items.map((o) => o.whole))
+ * let target = inks[0]
+ * let buf = await captureStableWithBox(page, inkRect(target, { neighbors: inks.slice(1).filter(Boolean) }))
+ *
+ */
+async function canvasInkRects(page, rects, opt = {}) {
+    let { canvas = null, alpha = 40, bg = null, trimY = false } = opt
+    let isRect = (r) => !!r && ['x', 'y', 'width', 'height'].every((k) => typeof r[k] === 'number')
+    if (!Array.isArray(rects) || !rects.every(isRect)) {
+        throw new Error('canvasInkRects: rects 須為 {x,y,width,height} 之數值矩形陣列')
+    }
+    if (typeof alpha !== 'number' || !(alpha >= 0 && alpha <= 255)) {
+        throw new Error('canvasInkRects: alpha 須為 0～255 之數字')
+    }
+    if (bg !== null && !(Array.isArray(bg) && bg.length === 3 && bg.every((v) => typeof v === 'number'))) {
+        throw new Error('canvasInkRects: bg 須為 [r,g,b] 或 null')
+    }
+    let handle = null
+    if (canvas) {
+        let loc = typeof canvas === 'string' ? page.locator(canvas).first() : (typeof canvas.first === 'function' ? canvas.first() : canvas)
+        if (await loc.count() === 0) {
+            throw new Error('canvasInkRects: 找不到指定之 canvas') //不交 elementHandle 等待逾時
+        }
+        handle = await loc.elementHandle()
+    }
+    try {
+        return await page.evaluate(({ rects, handle, alpha, bg, trimY }) => {
+            let out = []
+            for (let r of rects) {
+                let cvs = handle
+                if (!cvs) {
+                    let cx = r.x + r.width / 2
+                    let cy = r.y + r.height / 2
+                    cvs = document.elementsFromPoint(cx, cy).find((e) => e.tagName === 'CANVAS') || null
+                }
+                let ctx = cvs ? cvs.getContext('2d') : null //已為 webgl 之 canvas 回 null
+                if (!ctx) {
+                    out.push(null)
+                    continue
+                }
+                let cr = cvs.getBoundingClientRect()
+                let sx = cvs.width / cr.width
+                let sy = cvs.height / cr.height
+                let x0 = Math.max(0, Math.floor((r.x - cr.left) * sx))
+                let x1 = Math.min(cvs.width, Math.ceil((r.x + r.width - cr.left) * sx))
+                let y0 = Math.max(0, Math.floor((r.y - cr.top) * sy))
+                let y1 = Math.min(cvs.height, Math.ceil((r.y + r.height - cr.top) * sy))
+                let w = x1 - x0
+                let h = y1 - y0
+                if (w <= 0 || h <= 0) {
+                    out.push(null)
+                    continue
+                }
+                let d = ctx.getImageData(x0, y0, w, h).data
+                let minX = w
+                let maxX = -1
+                let minY = h
+                let maxY = -1
+                for (let y = 0; y < h; y++) {
+                    for (let x = 0; x < w; x++) {
+                        let i = (y * w + x) * 4
+                        let ink = d[i + 3] > alpha && (!bg || Math.max(Math.abs(d[i] - bg[0]), Math.abs(d[i + 1] - bg[1]), Math.abs(d[i + 2] - bg[2])) > 24)
+                        if (ink) {
+                            if (x < minX) minX = x
+                            if (x > maxX) maxX = x
+                            if (y < minY) minY = y
+                            if (y > maxY) maxY = y
+                        }
+                    }
+                }
+                if (maxX < 0) {
+                    out.push(null)
+                    continue
+                }
+                out.push({
+                    x: cr.left + (x0 + minX) / sx,
+                    y: trimY ? cr.top + (y0 + minY) / sy : r.y,
+                    width: (maxX - minX + 1) / sx,
+                    height: trimY ? (maxY - minY + 1) / sy : r.height,
+                })
+            }
+            return out
+        }, { rects, handle, alpha, bg, trimY })
+    }
+    finally {
+        if (handle) {
+            await handle.dispose()
+        }
+    }
+}
+
+
+export default canvasInkRects

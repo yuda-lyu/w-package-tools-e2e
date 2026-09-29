@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    
+    <meta charset="utf-8">
+    <title>stepShots.mjs - Documentation</title>
+    
+    
+    <script src="scripts/prettify/prettify.js"></script>
+    <script src="scripts/prettify/lang-css.js"></script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc.css">
+    <script src="scripts/nav.js" defer></script>
+    
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+
+<input type="checkbox" id="nav-trigger" class="nav-trigger" />
+<label for="nav-trigger" class="navicon-button x">
+  <div class="navicon"></div>
+</label>
+
+<label for="nav-trigger" class="overlay"></label>
+
+<nav >
+    
+    
+    <h2><a href="index.html">Home</a></h2><h3>Global</h3><ul><li><a href="global.html#BOX_PAD">BOX_PAD</a></li><li><a href="global.html#INK_PAD">INK_PAD</a></li><li><a href="global.html#WPackageToolsE2e">WPackageToolsE2e</a></li><li><a href="global.html#assertBaselineMatch">assertBaselineMatch</a></li><li><a href="global.html#assertTextSpec">assertTextSpec</a></li><li><a href="global.html#canvasInkRects">canvasInkRects</a></li><li><a href="global.html#captureStable">captureStable</a></li><li><a href="global.html#captureStableWithBox">captureStableWithBox</a></li><li><a href="global.html#chromiumLaunchArgs">chromiumLaunchArgs</a></li><li><a href="global.html#collectDomText">collectDomText</a></li><li><a href="global.html#compareImageDirs">compareImageDirs</a></li><li><a href="global.html#createBaselineGate">createBaselineGate</a></li><li><a href="global.html#createKnownDefect">createKnownDefect</a></li><li><a href="global.html#createServiceManager">createServiceManager</a></li><li><a href="global.html#createTempSettings">createTempSettings</a></li><li><a href="global.html#cropRegion">cropRegion</a></li><li><a href="global.html#diffBaselineSnapshots">diffBaselineSnapshots</a></li><li><a href="global.html#findOrphanBaselines">findOrphanBaselines</a></li><li><a href="global.html#getE2eMode">getE2eMode</a></li><li><a href="global.html#gridContentBox">gridContentBox</a></li><li><a href="global.html#isChildAlive">isChildAlive</a></li><li><a href="global.html#itemsUnionBox">itemsUnionBox</a></li><li><a href="global.html#killOwnTree">killOwnTree</a></li><li><a href="global.html#killPortListeners">killPortListeners</a></li><li><a href="global.html#launchBrowser">launchBrowser</a></li><li><a href="global.html#launchChromium">launchChromium</a></li><li><a href="global.html#launchChromiumCore">launchChromiumCore</a></li><li><a href="global.html#listenerPids">listenerPids</a></li><li><a href="global.html#maskRegions">maskRegions</a></li><li><a href="global.html#normalizeShots">normalizeShots</a></li><li><a href="global.html#openCasePage">openCasePage</a></li><li><a href="global.html#overlayImageAt">overlayImageAt</a></li><li><a href="global.html#overlayRegions">overlayRegions</a></li><li><a href="global.html#pageHasText">pageHasText</a></li><li><a href="global.html#parseListenerPids">parseListenerPids</a></li><li><a href="global.html#pidExists">pidExists</a></li><li><a href="global.html#pollUntil">pollUntil</a></li><li><a href="global.html#probeHttp">probeHttp</a></li><li><a href="global.html#registerCleanupHooks">registerCleanupHooks</a></li><li><a href="global.html#resetAgGridScroll">resetAgGridScroll</a></li><li><a href="global.html#rowBoxSel">rowBoxSel</a></li><li><a href="global.html#runBaselineCase">runBaselineCase</a></li><li><a href="global.html#runIsolatedE2e">runIsolatedE2e</a></li><li><a href="global.html#sleepSync">sleepSync</a></li><li><a href="global.html#snapshotBaselines">snapshotBaselines</a></li><li><a href="global.html#stepShots">stepShots</a></li><li><a href="global.html#typeIntoInput">typeIntoInput</a></li><li><a href="global.html#typeIntoNthInput">typeIntoNthInput</a></li><li><a href="global.html#waitAlertGone">waitAlertGone</a></li><li><a href="global.html#waitChildExit">waitChildExit</a></li><li><a href="global.html#waitColResizeOverlay">waitColResizeOverlay</a></li><li><a href="global.html#waitDrawerReady">waitDrawerReady</a></li><li><a href="global.html#waitGridIdle">waitGridIdle</a></li><li><a href="global.html#waitUntilExist">waitUntilExist</a></li></ul>
+    
+</nav>
+
+<div id="main">
+    
+    <h1 class="page-title">stepShots.mjs</h1>
+    
+
+    
+
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>/**
+ * 「每步兩張」之單步：操作前框住將被操作之元素整顆 → 執行操作 → 等反應就緒 → 框住有反應之內容
+ *
+ * 依全域技能 role-coder-for-test-e2e §7.1(每個操作步驟兩張、兩張皆須有框)與 §7.2(先決定反應是什麼再決定框什麼)。
+ * 相鄰兼任(§7.3-1 相鄰兩物取聯集為一框)：前一步之反應與本步之目標相鄰時，前一步之後圖即本步之前圖——
+ * 此時呼叫端傳 before:null 表示不另拍；before 不可省略(undefined 即拋錯)，強制每一步明確決定是否兼任。
+ * 泛化自 w-web-perm 之 setDialogModeWithShots／openChipsAllWithShots／setChipsAllModeWithShots 與 w-web-sso tokens 之 capturePermsChangeSave。
+ *
+ * @param {Page} page 輸入Playwright之Page
+ * @param {Object} opt 輸入設定物件
+ * @param {Function} opt.capture 輸入框圖截圖函數(page,target,opt)=>Promise&lt;Buffer>，通常為專案之captureStableWithBox(已帶settle與strict組態)
+ * @param {*} opt.before 輸入操作前之框選目標(選擇器、Locator、矩形或其陣列)；null代表由前一步之後圖兼任、不另拍
+ * @param {Function} opt.act 輸入執行操作之函數async()=>{}(真滑鼠／鍵盤，技能 §4)
+ * @param {Function} [opt.ready=null] 輸入等待反應就緒之函數async()=>{}(偵測driven，技能 §4.4)，預設null
+ * @param {*} opt.after 輸入操作後之框選目標；為函數時於ready之後呼叫取得(目標於操作後才出現者)
+ * @param {Object} [opt.beforeOpt={}] 輸入操作前截圖之設定物件(透傳capture)，預設{}
+ * @param {Object} [opt.afterOpt={}] 輸入操作後截圖之設定物件(透傳capture)，預設{}
+ * @returns {Promise} 回傳Promise，resolve回傳{before,after}，before為Buffer或null(兼任)，after為Buffer
+ * @example
+ *
+ * import stepShots from 'w-package-tools-e2e/src/stepShots.mjs'
+ *
+ * let s = await stepShots(page, {
+ *     capture: captureStableWithBox,
+ *     before: saveBtnLoc(page),
+ *     act: () => saveBtnLoc(page).click(),
+ *     ready: () => waitCheckYes(page),
+ *     after: '.w-checkyes-panel',
+ * })
+ * shots['E2E-003-5-click-save'] = s.before
+ * shots['E2E-003-6-save-success-modal'] = s.after
+ *
+ */
+async function stepShots(page, opt = {}) {
+    let { capture, before, act, ready = null, after, beforeOpt = {}, afterOpt = {} } = opt
+    if (typeof capture !== 'function') {
+        throw new Error('stepShots: capture 須為函數(通常為專案之 captureStableWithBox)')
+    }
+    if (typeof act !== 'function') {
+        throw new Error('stepShots: act 須為函數')
+    }
+    if (before === undefined) {
+        throw new Error('stepShots: before 不可省略——給操作前之框選目標, 或傳 null 表示由前一步之後圖兼任(技能 §7.3-1)')
+    }
+    if (after === undefined || after === null) {
+        throw new Error('stepShots: after 為必填(操作後有反應之內容, 技能 §7.2)')
+    }
+    let bufBefore = before === null ? null : await capture(page, before, beforeOpt)
+    await act()
+    if (ready) {
+        await ready()
+    }
+    let target = typeof after === 'function' ? await after() : after
+    let bufAfter = await capture(page, target, afterOpt)
+    return { before: bufBefore, after: bufAfter }
+}
+
+
+export default stepShots
+</code></pre>
+        </article>
+    </section>
+
+
+
+
+    
+    
+</div>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 4.0.5</a> on Tue Sep 29 2026 09:06:00 GMT+0800 (台北標準時間) using the <a href="https://github.com/clenemt/docdash">docdash</a> theme.
+</footer>
+
+<script>prettyPrint();</script>
+<script src="scripts/polyfill.js"></script>
+<script src="scripts/linenumber.js"></script>
+
+
+
+</body>
+</html>

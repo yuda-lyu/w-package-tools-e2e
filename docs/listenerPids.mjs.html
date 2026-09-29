@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    
+    <meta charset="utf-8">
+    <title>listenerPids.mjs - Documentation</title>
+    
+    
+    <script src="scripts/prettify/prettify.js"></script>
+    <script src="scripts/prettify/lang-css.js"></script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc.css">
+    <script src="scripts/nav.js" defer></script>
+    
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+
+<input type="checkbox" id="nav-trigger" class="nav-trigger" />
+<label for="nav-trigger" class="navicon-button x">
+  <div class="navicon"></div>
+</label>
+
+<label for="nav-trigger" class="overlay"></label>
+
+<nav >
+    
+    
+    <h2><a href="index.html">Home</a></h2><h3>Global</h3><ul><li><a href="global.html#BOX_PAD">BOX_PAD</a></li><li><a href="global.html#INK_PAD">INK_PAD</a></li><li><a href="global.html#WPackageToolsE2e">WPackageToolsE2e</a></li><li><a href="global.html#assertBaselineMatch">assertBaselineMatch</a></li><li><a href="global.html#assertTextSpec">assertTextSpec</a></li><li><a href="global.html#canvasInkRects">canvasInkRects</a></li><li><a href="global.html#captureStable">captureStable</a></li><li><a href="global.html#captureStableWithBox">captureStableWithBox</a></li><li><a href="global.html#chromiumLaunchArgs">chromiumLaunchArgs</a></li><li><a href="global.html#collectDomText">collectDomText</a></li><li><a href="global.html#compareImageDirs">compareImageDirs</a></li><li><a href="global.html#createBaselineGate">createBaselineGate</a></li><li><a href="global.html#createKnownDefect">createKnownDefect</a></li><li><a href="global.html#createServiceManager">createServiceManager</a></li><li><a href="global.html#createTempSettings">createTempSettings</a></li><li><a href="global.html#cropRegion">cropRegion</a></li><li><a href="global.html#diffBaselineSnapshots">diffBaselineSnapshots</a></li><li><a href="global.html#findOrphanBaselines">findOrphanBaselines</a></li><li><a href="global.html#getE2eMode">getE2eMode</a></li><li><a href="global.html#gridContentBox">gridContentBox</a></li><li><a href="global.html#isChildAlive">isChildAlive</a></li><li><a href="global.html#itemsUnionBox">itemsUnionBox</a></li><li><a href="global.html#killOwnTree">killOwnTree</a></li><li><a href="global.html#killPortListeners">killPortListeners</a></li><li><a href="global.html#launchBrowser">launchBrowser</a></li><li><a href="global.html#launchChromium">launchChromium</a></li><li><a href="global.html#launchChromiumCore">launchChromiumCore</a></li><li><a href="global.html#listenerPids">listenerPids</a></li><li><a href="global.html#maskRegions">maskRegions</a></li><li><a href="global.html#normalizeShots">normalizeShots</a></li><li><a href="global.html#openCasePage">openCasePage</a></li><li><a href="global.html#overlayImageAt">overlayImageAt</a></li><li><a href="global.html#overlayRegions">overlayRegions</a></li><li><a href="global.html#pageHasText">pageHasText</a></li><li><a href="global.html#parseListenerPids">parseListenerPids</a></li><li><a href="global.html#pidExists">pidExists</a></li><li><a href="global.html#pollUntil">pollUntil</a></li><li><a href="global.html#probeHttp">probeHttp</a></li><li><a href="global.html#registerCleanupHooks">registerCleanupHooks</a></li><li><a href="global.html#resetAgGridScroll">resetAgGridScroll</a></li><li><a href="global.html#rowBoxSel">rowBoxSel</a></li><li><a href="global.html#runBaselineCase">runBaselineCase</a></li><li><a href="global.html#runIsolatedE2e">runIsolatedE2e</a></li><li><a href="global.html#sleepSync">sleepSync</a></li><li><a href="global.html#snapshotBaselines">snapshotBaselines</a></li><li><a href="global.html#stepShots">stepShots</a></li><li><a href="global.html#typeIntoInput">typeIntoInput</a></li><li><a href="global.html#typeIntoNthInput">typeIntoNthInput</a></li><li><a href="global.html#waitAlertGone">waitAlertGone</a></li><li><a href="global.html#waitChildExit">waitChildExit</a></li><li><a href="global.html#waitColResizeOverlay">waitColResizeOverlay</a></li><li><a href="global.html#waitDrawerReady">waitDrawerReady</a></li><li><a href="global.html#waitGridIdle">waitGridIdle</a></li><li><a href="global.html#waitUntilExist">waitUntilExist</a></li></ul>
+    
+</nav>
+
+<div id="main">
+    
+    <h1 class="page-title">listenerPids.mjs</h1>
+    
+
+    
+
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>import { execSync } from 'child_process'
+import parseListenerPids from './parseListenerPids.mjs'
+
+
+//同步指令一律帶逾時與隱藏視窗: 在exit/signal處理器內卡住會使行程無法結束
+let EXEC_OPT = { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 10000, windowsHide: true }
+
+
+/**
+ * 查詢監聽指定port之PID(同步)
+ *
+ * Windows以`netstat -ano`(不可加-p TCP，該參數只列IPv4，會漏掉以::雙堆疊監聽者)取得後以parseListenerPids解析；
+ * 其他平台以`lsof -nP -iTCP:&lt;port> -sTCP:LISTEN -t`。無人監聽回傳[]，查詢工具不可用回傳null(呼叫端不得把null當成無人)。
+ * 依賴可注入，供單元測試。移植自w-web-task test/tools/harnessProc.mjs
+ *
+ * @param {Number} port 輸入port
+ * @param {Object} [opt={}] 輸入設定物件，預設{}
+ * @param {Function} [opt.exec=execSync] 輸入同步執行指令函數，預設execSync
+ * @param {String} [opt.platform=process.platform] 輸入作業系統字串，預設process.platform
+ * @returns {Array|null} 回傳PID字串陣列，無人回傳[]，工具不可用回傳null
+ * @example
+ *
+ * import listenerPids from 'w-package-tools-e2e/src/listenerPids.mjs'
+ *
+ * console.log(listenerPids(11007))
+ * // => ['18168']
+ *
+ */
+function listenerPids(port, opt = {}) {
+    let { exec = execSync, platform = process.platform } = opt
+    try {
+        if (platform === 'win32') {
+            return parseListenerPids(exec('netstat -ano', EXEC_OPT), port)
+        }
+        let out = exec(`lsof -nP -iTCP:${port} -sTCP:LISTEN -t`, EXEC_OPT)
+        return [...new Set(String(out).split(/\s+/).filter((s) => /^\d+$/.test(s)))]
+    }
+    catch (e) {
+        //lsof查無監聽者時以exit 1結束=無人; 其餘(工具不存在, 逾時等)=不可用
+        if (platform !== 'win32' &amp;&amp; e &amp;&amp; e.status === 1) return []
+        return null
+    }
+}
+
+
+export default listenerPids
+</code></pre>
+        </article>
+    </section>
+
+
+
+
+    
+    
+</div>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 4.0.5</a> on Tue Sep 29 2026 09:06:00 GMT+0800 (台北標準時間) using the <a href="https://github.com/clenemt/docdash">docdash</a> theme.
+</footer>
+
+<script>prettyPrint();</script>
+<script src="scripts/polyfill.js"></script>
+<script src="scripts/linenumber.js"></script>
+
+
+
+</body>
+</html>

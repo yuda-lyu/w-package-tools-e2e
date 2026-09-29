@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    
+    <meta charset="utf-8">
+    <title>maskRegions.mjs - Documentation</title>
+    
+    
+    <script src="scripts/prettify/prettify.js"></script>
+    <script src="scripts/prettify/lang-css.js"></script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc.css">
+    <script src="scripts/nav.js" defer></script>
+    
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+
+<input type="checkbox" id="nav-trigger" class="nav-trigger" />
+<label for="nav-trigger" class="navicon-button x">
+  <div class="navicon"></div>
+</label>
+
+<label for="nav-trigger" class="overlay"></label>
+
+<nav >
+    
+    
+    <h2><a href="index.html">Home</a></h2><h3>Global</h3><ul><li><a href="global.html#BOX_PAD">BOX_PAD</a></li><li><a href="global.html#INK_PAD">INK_PAD</a></li><li><a href="global.html#WPackageToolsE2e">WPackageToolsE2e</a></li><li><a href="global.html#assertBaselineMatch">assertBaselineMatch</a></li><li><a href="global.html#assertTextSpec">assertTextSpec</a></li><li><a href="global.html#canvasInkRects">canvasInkRects</a></li><li><a href="global.html#captureStable">captureStable</a></li><li><a href="global.html#captureStableWithBox">captureStableWithBox</a></li><li><a href="global.html#chromiumLaunchArgs">chromiumLaunchArgs</a></li><li><a href="global.html#collectDomText">collectDomText</a></li><li><a href="global.html#compareImageDirs">compareImageDirs</a></li><li><a href="global.html#createBaselineGate">createBaselineGate</a></li><li><a href="global.html#createKnownDefect">createKnownDefect</a></li><li><a href="global.html#createServiceManager">createServiceManager</a></li><li><a href="global.html#createTempSettings">createTempSettings</a></li><li><a href="global.html#cropRegion">cropRegion</a></li><li><a href="global.html#diffBaselineSnapshots">diffBaselineSnapshots</a></li><li><a href="global.html#findOrphanBaselines">findOrphanBaselines</a></li><li><a href="global.html#getE2eMode">getE2eMode</a></li><li><a href="global.html#gridContentBox">gridContentBox</a></li><li><a href="global.html#isChildAlive">isChildAlive</a></li><li><a href="global.html#itemsUnionBox">itemsUnionBox</a></li><li><a href="global.html#killOwnTree">killOwnTree</a></li><li><a href="global.html#killPortListeners">killPortListeners</a></li><li><a href="global.html#launchBrowser">launchBrowser</a></li><li><a href="global.html#launchChromium">launchChromium</a></li><li><a href="global.html#launchChromiumCore">launchChromiumCore</a></li><li><a href="global.html#listenerPids">listenerPids</a></li><li><a href="global.html#maskRegions">maskRegions</a></li><li><a href="global.html#normalizeShots">normalizeShots</a></li><li><a href="global.html#openCasePage">openCasePage</a></li><li><a href="global.html#overlayImageAt">overlayImageAt</a></li><li><a href="global.html#overlayRegions">overlayRegions</a></li><li><a href="global.html#pageHasText">pageHasText</a></li><li><a href="global.html#parseListenerPids">parseListenerPids</a></li><li><a href="global.html#pidExists">pidExists</a></li><li><a href="global.html#pollUntil">pollUntil</a></li><li><a href="global.html#probeHttp">probeHttp</a></li><li><a href="global.html#registerCleanupHooks">registerCleanupHooks</a></li><li><a href="global.html#resetAgGridScroll">resetAgGridScroll</a></li><li><a href="global.html#rowBoxSel">rowBoxSel</a></li><li><a href="global.html#runBaselineCase">runBaselineCase</a></li><li><a href="global.html#runIsolatedE2e">runIsolatedE2e</a></li><li><a href="global.html#sleepSync">sleepSync</a></li><li><a href="global.html#snapshotBaselines">snapshotBaselines</a></li><li><a href="global.html#stepShots">stepShots</a></li><li><a href="global.html#typeIntoInput">typeIntoInput</a></li><li><a href="global.html#typeIntoNthInput">typeIntoNthInput</a></li><li><a href="global.html#waitAlertGone">waitAlertGone</a></li><li><a href="global.html#waitChildExit">waitChildExit</a></li><li><a href="global.html#waitColResizeOverlay">waitColResizeOverlay</a></li><li><a href="global.html#waitDrawerReady">waitDrawerReady</a></li><li><a href="global.html#waitGridIdle">waitGridIdle</a></li><li><a href="global.html#waitUntilExist">waitUntilExist</a></li></ul>
+    
+</nav>
+
+<div id="main">
+    
+    <h1 class="page-title">maskRegions.mjs</h1>
+    
+
+    
+
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>import sharp from 'sharp'
+
+
+/**
+ * 對截圖buffer之指定矩形填色(截圖後以sharp合成，不改動被測頁DOM)
+ *
+ * 用途限於DOM層凍不到之動態內容(例如img內SVG SMIL動畫、無法固定之即時數值)；絕不用來遮應被偵測之靜態UI。
+ * 預設黑色，一眼可辨為刻意遮蔽。矩形座標為buffer座標(全頁截圖時為視窗座標加捲動量)，超出buffer之部分自動裁切，寬或高為0者略過
+ *
+ * @param {Buffer} buf 輸入PNG之Buffer
+ * @param {Array} rects 輸入矩形陣列，每個元素為{x,y,w,h}
+ * @param {Object} [color={r:0,g:0,b:0}] 輸入填色物件，預設黑色
+ * @returns {Promise} 回傳Promise，resolve回傳填色後之PNG Buffer，無有效矩形時回傳原buffer
+ * @example
+ *
+ * import maskRegions from 'w-package-tools-e2e/src/maskRegions.mjs'
+ *
+ * let buf = await page.screenshot({ fullPage: true })
+ * buf = await maskRegions(buf, [{ x: 10, y: 20, w: 100, h: 30 }])
+ *
+ */
+async function maskRegions(buf, rects, color = { r: 0, g: 0, b: 0 }) {
+    //讀image邊界, 夾在buffer內, 避免sharp composite「Image to composite must have same dimensions or smaller」
+    let meta = await sharp(buf).metadata()
+    let imgW = meta.width
+    let imgH = meta.height
+    let composite = (rects || [])
+        .filter((r) => r.w > 0 &amp;&amp; r.h > 0)
+        .map((r) => {
+            let left = Math.max(0, Math.round(r.x))
+            let top = Math.max(0, Math.round(r.y))
+            let width = Math.min(Math.round(r.w), imgW - left)
+            let height = Math.min(Math.round(r.h), imgH - top)
+            return { left, top, width, height }
+        })
+        .filter((c) => c.width > 0 &amp;&amp; c.height > 0 &amp;&amp; c.left &lt; imgW &amp;&amp; c.top &lt; imgH)
+        .map((c) => ({
+            input: {
+                create: {
+                    width: c.width,
+                    height: c.height,
+                    channels: 3,
+                    background: color,
+                },
+            },
+            left: c.left,
+            top: c.top,
+        }))
+    if (composite.length === 0) {
+        return buf
+    }
+    return await sharp(buf).composite(composite).png().toBuffer()
+}
+
+
+export default maskRegions
+</code></pre>
+        </article>
+    </section>
+
+
+
+
+    
+    
+</div>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 4.0.5</a> on Tue Sep 29 2026 09:06:00 GMT+0800 (台北標準時間) using the <a href="https://github.com/clenemt/docdash">docdash</a> theme.
+</footer>
+
+<script>prettyPrint();</script>
+<script src="scripts/polyfill.js"></script>
+<script src="scripts/linenumber.js"></script>
+
+
+
+</body>
+</html>

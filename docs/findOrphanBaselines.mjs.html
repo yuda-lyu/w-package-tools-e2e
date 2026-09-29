@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    
+    <meta charset="utf-8">
+    <title>findOrphanBaselines.mjs - Documentation</title>
+    
+    
+    <script src="scripts/prettify/prettify.js"></script>
+    <script src="scripts/prettify/lang-css.js"></script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc.css">
+    <script src="scripts/nav.js" defer></script>
+    
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+
+<input type="checkbox" id="nav-trigger" class="nav-trigger" />
+<label for="nav-trigger" class="navicon-button x">
+  <div class="navicon"></div>
+</label>
+
+<label for="nav-trigger" class="overlay"></label>
+
+<nav >
+    
+    
+    <h2><a href="index.html">Home</a></h2><h3>Global</h3><ul><li><a href="global.html#BOX_PAD">BOX_PAD</a></li><li><a href="global.html#INK_PAD">INK_PAD</a></li><li><a href="global.html#WPackageToolsE2e">WPackageToolsE2e</a></li><li><a href="global.html#assertBaselineMatch">assertBaselineMatch</a></li><li><a href="global.html#assertTextSpec">assertTextSpec</a></li><li><a href="global.html#canvasInkRects">canvasInkRects</a></li><li><a href="global.html#captureStable">captureStable</a></li><li><a href="global.html#captureStableWithBox">captureStableWithBox</a></li><li><a href="global.html#chromiumLaunchArgs">chromiumLaunchArgs</a></li><li><a href="global.html#collectDomText">collectDomText</a></li><li><a href="global.html#compareImageDirs">compareImageDirs</a></li><li><a href="global.html#createBaselineGate">createBaselineGate</a></li><li><a href="global.html#createKnownDefect">createKnownDefect</a></li><li><a href="global.html#createServiceManager">createServiceManager</a></li><li><a href="global.html#createTempSettings">createTempSettings</a></li><li><a href="global.html#cropRegion">cropRegion</a></li><li><a href="global.html#diffBaselineSnapshots">diffBaselineSnapshots</a></li><li><a href="global.html#findOrphanBaselines">findOrphanBaselines</a></li><li><a href="global.html#getE2eMode">getE2eMode</a></li><li><a href="global.html#gridContentBox">gridContentBox</a></li><li><a href="global.html#isChildAlive">isChildAlive</a></li><li><a href="global.html#itemsUnionBox">itemsUnionBox</a></li><li><a href="global.html#killOwnTree">killOwnTree</a></li><li><a href="global.html#killPortListeners">killPortListeners</a></li><li><a href="global.html#launchBrowser">launchBrowser</a></li><li><a href="global.html#launchChromium">launchChromium</a></li><li><a href="global.html#launchChromiumCore">launchChromiumCore</a></li><li><a href="global.html#listenerPids">listenerPids</a></li><li><a href="global.html#maskRegions">maskRegions</a></li><li><a href="global.html#normalizeShots">normalizeShots</a></li><li><a href="global.html#openCasePage">openCasePage</a></li><li><a href="global.html#overlayImageAt">overlayImageAt</a></li><li><a href="global.html#overlayRegions">overlayRegions</a></li><li><a href="global.html#pageHasText">pageHasText</a></li><li><a href="global.html#parseListenerPids">parseListenerPids</a></li><li><a href="global.html#pidExists">pidExists</a></li><li><a href="global.html#pollUntil">pollUntil</a></li><li><a href="global.html#probeHttp">probeHttp</a></li><li><a href="global.html#registerCleanupHooks">registerCleanupHooks</a></li><li><a href="global.html#resetAgGridScroll">resetAgGridScroll</a></li><li><a href="global.html#rowBoxSel">rowBoxSel</a></li><li><a href="global.html#runBaselineCase">runBaselineCase</a></li><li><a href="global.html#runIsolatedE2e">runIsolatedE2e</a></li><li><a href="global.html#sleepSync">sleepSync</a></li><li><a href="global.html#snapshotBaselines">snapshotBaselines</a></li><li><a href="global.html#stepShots">stepShots</a></li><li><a href="global.html#typeIntoInput">typeIntoInput</a></li><li><a href="global.html#typeIntoNthInput">typeIntoNthInput</a></li><li><a href="global.html#waitAlertGone">waitAlertGone</a></li><li><a href="global.html#waitChildExit">waitChildExit</a></li><li><a href="global.html#waitColResizeOverlay">waitColResizeOverlay</a></li><li><a href="global.html#waitDrawerReady">waitDrawerReady</a></li><li><a href="global.html#waitGridIdle">waitGridIdle</a></li><li><a href="global.html#waitUntilExist">waitUntilExist</a></li></ul>
+    
+</nav>
+
+<div id="main">
+    
+    <h1 class="page-title">findOrphanBaselines.mjs</h1>
+    
+
+    
+
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>import fs from 'fs'
+import path from 'path'
+
+
+/**
+ * 依案例宣告找出標準圖目錄中之孤兒圖(靜態比對宣告，與實際執行了哪些案例無關)
+ *
+ * 目錄與檔名前後綴由pathOf(lang,key)推得(圖鍵須在檔名內)；目錄內符合「前綴…後綴」之檔案，若其圖鍵不是任何案例(含只比對案例)於該語系所宣告之圖鍵即為孤兒。
+ * 預期圖鍵：案例之語系(langs，預設全部)含該語系者之stages；未宣告stages者以案例鍵為單張圖鍵，並視以其編號(E2E-NNN)為前綴之圖鍵為該案所有(執行後才決定之多階段圖)。
+ * 以`_`開頭之貼圖參考片段不符前綴而自然排除。因不依賴執行紀錄，--grep／--names局部執行、案例失敗、knownDefect皆不致誤報。
+ * why：改名後重產只寫新名、從不刪舊名，舊圖成為無人產出亦無人比對之孤兒(PERM 2026-09-17 改版留下12張，至09-28才被發現)。
+ *
+ * @param {Object} opt 輸入設定物件
+ * @param {Array} opt.cases 輸入案例宣告陣列[{name,stages,langs}]或案例鍵字串
+ * @param {Array} opt.langs 輸入已宣告之語系陣列
+ * @param {Function} opt.pathOf 輸入標準圖路徑函數(lang,key)=>路徑字串，須與runBaselineCase之pathOf相同
+ * @param {RegExp} [opt.idPattern=/^(E2E-\d+)(?=-|$)/] 輸入自圖鍵取出案例編號之樣式，預設/^(E2E-\d+)(?=-|$)/
+ * @returns {Array} 回傳孤兒圖路徑陣列(依語系、檔名排序)
+ * @example
+ *
+ * import findOrphanBaselines from 'w-package-tools-e2e/src/findOrphanBaselines.mjs'
+ *
+ * let orphans = findOrphanBaselines({ cases, langs: ['eng', 'cht'], pathOf: (lang, key) => `./test/pics/login/login-${lang}-${key}.png` })
+ * console.log(orphans)
+ * // => [] 或 ['test\\pics\\login\\login-eng-E2E-099-old.png', ...]
+ *
+ */
+function findOrphanBaselines(opt = {}) {
+    let { cases, langs, pathOf, idPattern = /^(E2E-\d+)(?=-|$)/ } = opt
+    if (!Array.isArray(cases)) {
+        throw new Error('findOrphanBaselines: cases 須為陣列')
+    }
+    if (!Array.isArray(langs) || langs.length === 0) {
+        throw new Error('findOrphanBaselines: langs 須為非空陣列')
+    }
+    if (typeof pathOf !== 'function') {
+        throw new Error('findOrphanBaselines: pathOf 須為函數')
+    }
+    let decls = cases.map((c) => (typeof c === 'string' ? { name: c } : c))
+    let idOf = (key) => {
+        let m = String(key).match(idPattern)
+        return m ? m[1] : null
+    }
+    let MARK = '__ORPHAN_KEY_MARK__'
+    let out = []
+    for (let lang of langs) {
+        let tpl = String(pathOf(lang, MARK))
+        let base = path.basename(tpl)
+        let j = base.indexOf(MARK)
+        if (j &lt; 0) {
+            throw new Error(`findOrphanBaselines: pathOf(${lang}, key) 之圖鍵須在檔名內 (實得 ${tpl})`)
+        }
+        let dir = path.dirname(tpl)
+        let prefix = base.slice(0, j)
+        let suffix = base.slice(j + MARK.length)
+
+        //預期圖鍵與開放編號
+        let expected = new Set()
+        let openIds = new Set()
+        for (let c of decls) {
+            let cl = Array.isArray(c.langs) ? c.langs : langs
+            if (!cl.includes(lang)) {
+                continue
+            }
+            if (Array.isArray(c.stages)) {
+                for (let s of c.stages) {
+                    expected.add(s)
+                }
+            }
+            else {
+                expected.add(c.name)
+                let id = idOf(c.name)
+                if (id) {
+                    openIds.add(id)
+                }
+            }
+        }
+
+        if (!fs.existsSync(dir)) {
+            continue
+        }
+        for (let f of fs.readdirSync(dir).sort()) {
+            if (!f.startsWith(prefix) || !f.endsWith(suffix) || f.length &lt;= prefix.length + suffix.length) {
+                continue
+            }
+            let key = f.slice(prefix.length, f.length - suffix.length)
+            if (expected.has(key)) {
+                continue
+            }
+            let id = idOf(key)
+            if (id &amp;&amp; openIds.has(id)) {
+                continue
+            }
+            out.push(path.join(dir, f))
+        }
+    }
+    return out
+}
+
+
+export default findOrphanBaselines
+</code></pre>
+        </article>
+    </section>
+
+
+
+
+    
+    
+</div>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 4.0.5</a> on Tue Sep 29 2026 09:06:00 GMT+0800 (台北標準時間) using the <a href="https://github.com/clenemt/docdash">docdash</a> theme.
+</footer>
+
+<script>prettyPrint();</script>
+<script src="scripts/polyfill.js"></script>
+<script src="scripts/linenumber.js"></script>
+
+
+
+</body>
+</html>

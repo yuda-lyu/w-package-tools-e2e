@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    
+    <meta charset="utf-8">
+    <title>createTempSettings.mjs - Documentation</title>
+    
+    
+    <script src="scripts/prettify/prettify.js"></script>
+    <script src="scripts/prettify/lang-css.js"></script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc.css">
+    <script src="scripts/nav.js" defer></script>
+    
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+
+<input type="checkbox" id="nav-trigger" class="nav-trigger" />
+<label for="nav-trigger" class="navicon-button x">
+  <div class="navicon"></div>
+</label>
+
+<label for="nav-trigger" class="overlay"></label>
+
+<nav >
+    
+    
+    <h2><a href="index.html">Home</a></h2><h3>Global</h3><ul><li><a href="global.html#BOX_PAD">BOX_PAD</a></li><li><a href="global.html#INK_PAD">INK_PAD</a></li><li><a href="global.html#WPackageToolsE2e">WPackageToolsE2e</a></li><li><a href="global.html#assertBaselineMatch">assertBaselineMatch</a></li><li><a href="global.html#assertTextSpec">assertTextSpec</a></li><li><a href="global.html#canvasInkRects">canvasInkRects</a></li><li><a href="global.html#captureStable">captureStable</a></li><li><a href="global.html#captureStableWithBox">captureStableWithBox</a></li><li><a href="global.html#chromiumLaunchArgs">chromiumLaunchArgs</a></li><li><a href="global.html#collectDomText">collectDomText</a></li><li><a href="global.html#compareImageDirs">compareImageDirs</a></li><li><a href="global.html#createBaselineGate">createBaselineGate</a></li><li><a href="global.html#createKnownDefect">createKnownDefect</a></li><li><a href="global.html#createServiceManager">createServiceManager</a></li><li><a href="global.html#createTempSettings">createTempSettings</a></li><li><a href="global.html#cropRegion">cropRegion</a></li><li><a href="global.html#diffBaselineSnapshots">diffBaselineSnapshots</a></li><li><a href="global.html#findOrphanBaselines">findOrphanBaselines</a></li><li><a href="global.html#getE2eMode">getE2eMode</a></li><li><a href="global.html#gridContentBox">gridContentBox</a></li><li><a href="global.html#isChildAlive">isChildAlive</a></li><li><a href="global.html#itemsUnionBox">itemsUnionBox</a></li><li><a href="global.html#killOwnTree">killOwnTree</a></li><li><a href="global.html#killPortListeners">killPortListeners</a></li><li><a href="global.html#launchBrowser">launchBrowser</a></li><li><a href="global.html#launchChromium">launchChromium</a></li><li><a href="global.html#launchChromiumCore">launchChromiumCore</a></li><li><a href="global.html#listenerPids">listenerPids</a></li><li><a href="global.html#maskRegions">maskRegions</a></li><li><a href="global.html#normalizeShots">normalizeShots</a></li><li><a href="global.html#openCasePage">openCasePage</a></li><li><a href="global.html#overlayImageAt">overlayImageAt</a></li><li><a href="global.html#overlayRegions">overlayRegions</a></li><li><a href="global.html#pageHasText">pageHasText</a></li><li><a href="global.html#parseListenerPids">parseListenerPids</a></li><li><a href="global.html#pidExists">pidExists</a></li><li><a href="global.html#pollUntil">pollUntil</a></li><li><a href="global.html#probeHttp">probeHttp</a></li><li><a href="global.html#registerCleanupHooks">registerCleanupHooks</a></li><li><a href="global.html#resetAgGridScroll">resetAgGridScroll</a></li><li><a href="global.html#rowBoxSel">rowBoxSel</a></li><li><a href="global.html#runBaselineCase">runBaselineCase</a></li><li><a href="global.html#runIsolatedE2e">runIsolatedE2e</a></li><li><a href="global.html#sleepSync">sleepSync</a></li><li><a href="global.html#snapshotBaselines">snapshotBaselines</a></li><li><a href="global.html#stepShots">stepShots</a></li><li><a href="global.html#typeIntoInput">typeIntoInput</a></li><li><a href="global.html#typeIntoNthInput">typeIntoNthInput</a></li><li><a href="global.html#waitAlertGone">waitAlertGone</a></li><li><a href="global.html#waitChildExit">waitChildExit</a></li><li><a href="global.html#waitColResizeOverlay">waitColResizeOverlay</a></li><li><a href="global.html#waitDrawerReady">waitDrawerReady</a></li><li><a href="global.html#waitGridIdle">waitGridIdle</a></li><li><a href="global.html#waitUntilExist">waitUntilExist</a></li></ul>
+    
+</nav>
+
+<div id="main">
+    
+    <h1 class="page-title">createTempSettings.mjs</h1>
+    
+
+    
+
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>import fs from 'fs'
+import path from 'path'
+import JSON5 from 'json5'
+
+
+/**
+ * 建立臨時設定檔之產生器：以基底設定(JSON5)淺合併overrides後寫出純JSON，供e2e以不同設定重啟後端
+ *
+ * 落點須為測試中介資料目錄(例如test/_tmp，gitignore)，絕不可為AI暫存區./tmp(隨時被整個清除，後端讀不到設定即假失敗)。
+ * 檔名為`settings-e2e-&lt;pid>-&lt;序號>.json`；cleanupTempSettings逐一刪除本產生器建立之檔案，目錄空了再刪目錄。
+ * forbiddenKeys內之鍵不可覆寫(例如測試實例固定之port與log目錄)，覆寫即拋錯
+ *
+ * @param {Object} opt 輸入設定物件
+ * @param {String} opt.basePath 輸入基底設定檔路徑字串(JSON5)，於每次產生時讀取；相對路徑以當下工作目錄解析
+ * @param {String} opt.tmpDir 輸入臨時設定檔目錄字串
+ * @param {Array} [opt.forbiddenKeys=[]] 輸入不可覆寫之鍵陣列，預設[]
+ * @param {String} [opt.prefix='settings-e2e'] 輸入檔名前綴字串，預設'settings-e2e'
+ * @returns {Object} 回傳物件{genTempSettings(overrides),cleanupTempSettings(),files()}
+ * @example
+ *
+ * import createTempSettings from 'w-package-tools-e2e/src/createTempSettings.mjs'
+ *
+ * let { genTempSettings, cleanupTempSettings } = createTempSettings({ basePath: './settings.json', tmpDir: './test/_tmp' })
+ * let p = genTempSettings({ allowUserRegistration: false })
+ * //...以p重啟後端...
+ * cleanupTempSettings()
+ *
+ */
+function createTempSettings(opt = {}) {
+    let { basePath, tmpDir, forbiddenKeys = [], prefix = 'settings-e2e' } = opt
+    if (!basePath || !tmpDir) {
+        throw new Error('createTempSettings: basePath 與 tmpDir 為必填')
+    }
+    let seq = 0
+    let files = []
+
+    function genTempSettings(overrides = {}) {
+        for (let k of forbiddenKeys) {
+            if (k in overrides) {
+                throw new Error(`genTempSettings 不可覆寫 ${k}`)
+            }
+        }
+        let base = JSON5.parse(fs.readFileSync(basePath, 'utf8'))
+        let merged = { ...base, ...overrides }
+        if (!fs.existsSync(tmpDir)) {
+            fs.mkdirSync(tmpDir, { recursive: true })
+        }
+        let p = path.join(tmpDir, `${prefix}-${process.pid}-${seq++}.json`)
+        fs.writeFileSync(p, JSON.stringify(merged, null, 2))
+        files.push(p)
+        return p
+    }
+
+    function cleanupTempSettings() {
+        for (let p of files) {
+            try {
+                fs.rmSync(p, { force: true })
+            }
+            catch (err) {}
+        }
+        files = []
+        try {
+            if (fs.existsSync(tmpDir) &amp;&amp; fs.readdirSync(tmpDir).length === 0) {
+                fs.rmdirSync(tmpDir)
+            }
+        }
+        catch (err) {}
+    }
+
+    return {
+        genTempSettings,
+        cleanupTempSettings,
+        files: () => files.slice(),
+    }
+}
+
+
+export default createTempSettings
+</code></pre>
+        </article>
+    </section>
+
+
+
+
+    
+    
+</div>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 4.0.5</a> on Tue Sep 29 2026 09:06:00 GMT+0800 (台北標準時間) using the <a href="https://github.com/clenemt/docdash">docdash</a> theme.
+</footer>
+
+<script>prettyPrint();</script>
+<script src="scripts/polyfill.js"></script>
+<script src="scripts/linenumber.js"></script>
+
+
+
+</body>
+</html>

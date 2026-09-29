@@ -1,9 +1,14 @@
 #node toolg/addVersion.mjs
 node toolg/modifyReadme.mjs
 
+rm -r docs
+./node_modules/.bin/jsdoc -c .jsdoc
+
 git add .  -A
 git commit -m 'modify: '
 git push origin master:master
+
+npm run deploy
 
 #npm test
 

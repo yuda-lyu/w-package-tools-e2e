@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    
+    <meta charset="utf-8">
+    <title>runIsolatedE2e.mjs - Documentation</title>
+    
+    
+    <script src="scripts/prettify/prettify.js"></script>
+    <script src="scripts/prettify/lang-css.js"></script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc.css">
+    <script src="scripts/nav.js" defer></script>
+    
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+
+<input type="checkbox" id="nav-trigger" class="nav-trigger" />
+<label for="nav-trigger" class="navicon-button x">
+  <div class="navicon"></div>
+</label>
+
+<label for="nav-trigger" class="overlay"></label>
+
+<nav >
+    
+    
+    <h2><a href="index.html">Home</a></h2><h3>Global</h3><ul><li><a href="global.html#BOX_PAD">BOX_PAD</a></li><li><a href="global.html#INK_PAD">INK_PAD</a></li><li><a href="global.html#WPackageToolsE2e">WPackageToolsE2e</a></li><li><a href="global.html#assertBaselineMatch">assertBaselineMatch</a></li><li><a href="global.html#assertTextSpec">assertTextSpec</a></li><li><a href="global.html#canvasInkRects">canvasInkRects</a></li><li><a href="global.html#captureStable">captureStable</a></li><li><a href="global.html#captureStableWithBox">captureStableWithBox</a></li><li><a href="global.html#chromiumLaunchArgs">chromiumLaunchArgs</a></li><li><a href="global.html#collectDomText">collectDomText</a></li><li><a href="global.html#compareImageDirs">compareImageDirs</a></li><li><a href="global.html#createBaselineGate">createBaselineGate</a></li><li><a href="global.html#createKnownDefect">createKnownDefect</a></li><li><a href="global.html#createServiceManager">createServiceManager</a></li><li><a href="global.html#createTempSettings">createTempSettings</a></li><li><a href="global.html#cropRegion">cropRegion</a></li><li><a href="global.html#diffBaselineSnapshots">diffBaselineSnapshots</a></li><li><a href="global.html#findOrphanBaselines">findOrphanBaselines</a></li><li><a href="global.html#getE2eMode">getE2eMode</a></li><li><a href="global.html#gridContentBox">gridContentBox</a></li><li><a href="global.html#isChildAlive">isChildAlive</a></li><li><a href="global.html#itemsUnionBox">itemsUnionBox</a></li><li><a href="global.html#killOwnTree">killOwnTree</a></li><li><a href="global.html#killPortListeners">killPortListeners</a></li><li><a href="global.html#launchBrowser">launchBrowser</a></li><li><a href="global.html#launchChromium">launchChromium</a></li><li><a href="global.html#launchChromiumCore">launchChromiumCore</a></li><li><a href="global.html#listenerPids">listenerPids</a></li><li><a href="global.html#maskRegions">maskRegions</a></li><li><a href="global.html#normalizeShots">normalizeShots</a></li><li><a href="global.html#openCasePage">openCasePage</a></li><li><a href="global.html#overlayImageAt">overlayImageAt</a></li><li><a href="global.html#overlayRegions">overlayRegions</a></li><li><a href="global.html#pageHasText">pageHasText</a></li><li><a href="global.html#parseListenerPids">parseListenerPids</a></li><li><a href="global.html#pidExists">pidExists</a></li><li><a href="global.html#pollUntil">pollUntil</a></li><li><a href="global.html#probeHttp">probeHttp</a></li><li><a href="global.html#registerCleanupHooks">registerCleanupHooks</a></li><li><a href="global.html#resetAgGridScroll">resetAgGridScroll</a></li><li><a href="global.html#rowBoxSel">rowBoxSel</a></li><li><a href="global.html#runBaselineCase">runBaselineCase</a></li><li><a href="global.html#runIsolatedE2e">runIsolatedE2e</a></li><li><a href="global.html#sleepSync">sleepSync</a></li><li><a href="global.html#snapshotBaselines">snapshotBaselines</a></li><li><a href="global.html#stepShots">stepShots</a></li><li><a href="global.html#typeIntoInput">typeIntoInput</a></li><li><a href="global.html#typeIntoNthInput">typeIntoNthInput</a></li><li><a href="global.html#waitAlertGone">waitAlertGone</a></li><li><a href="global.html#waitChildExit">waitChildExit</a></li><li><a href="global.html#waitColResizeOverlay">waitColResizeOverlay</a></li><li><a href="global.html#waitDrawerReady">waitDrawerReady</a></li><li><a href="global.html#waitGridIdle">waitGridIdle</a></li><li><a href="global.html#waitUntilExist">waitUntilExist</a></li></ul>
+    
+</nav>
+
+<div id="main">
+    
+    <h1 class="page-title">runIsolatedE2e.mjs</h1>
+    
+
+    
+
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>import fs from 'fs'
+import path from 'path'
+import { spawnSync } from 'child_process'
+
+
+/**
+ * 逐檔隔離執行e2e：每個e2e檔以獨立之mocha行程執行，檔與檔之間由beforeEachFile換新後端等狀態
+ *
+ * why：多個e2e檔塞在單一mocha行程時，會共用被前面測試改過狀態之後端(記憶體內計數、快取、換過設定之實例、RPC正規化過之欄位順序)，
+ * 與各檔單獨產製標準圖之環境不同；逐檔各給全新後端即回到單獨執行之狀態。前端通常無狀態且啟動慢，由各檔之startServersOnce沿用。
+ * 測試檔以pattern於testDir動態列舉(新增之檔自動納入，不因寫死清單而靜默漏跑)，依檔名排序執行。
+ * 殺port等屬專案政策，一律以beforeEachFile/afterAll回呼注入，本函數不殺任何行程
+ *
+ * @param {Object} opt 輸入設定物件
+ * @param {String} opt.projRoot 輸入專案根目錄字串(mocha之工作目錄)
+ * @param {String} opt.testDir 輸入測試檔目錄字串
+ * @param {RegExp} [opt.pattern=/^e2e-.*\.test\.mjs$/] 輸入測試檔名樣式，預設/^e2e-.*\.test\.mjs$/
+ * @param {Function} [opt.beforeEachFile] 輸入每檔執行前之回呼(可回傳Promise)，傳入檔名，預設無動作
+ * @param {Function} [opt.afterAll] 輸入全部執行後之回呼(可回傳Promise)，預設無動作
+ * @param {Array} [opt.mochaArgs=['--reporter','list','--timeout','300000']] 輸入附加於檔案路徑後之mocha參數陣列
+ * @param {Function} [opt.spawnSyncFn=spawnSync] 輸入同步spawn函數(供測試注入)，預設spawnSync
+ * @param {Function} [opt.log=console.log] 輸入輸出函數，預設console.log
+ * @returns {Promise} 回傳Promise，resolve回傳物件{results,failed}，results為[{file,code}]，failed為失敗檔數
+ * @example
+ *
+ * import runIsolatedE2e from 'w-package-tools-e2e/src/runIsolatedE2e.mjs'
+ * import killPortListeners from 'w-package-tools-e2e/src/killPortListeners.mjs'
+ *
+ * let { failed } = await runIsolatedE2e({
+ *     projRoot, testDir,
+ *     beforeEachFile: async () => { killPortListeners(11007); await new Promise((r) => setTimeout(r, 2000)) },
+ *     afterAll: () => { killPortListeners(11007) },
+ * })
+ * process.exit(failed === 0 ? 0 : 1)
+ *
+ */
+async function runIsolatedE2e(opt = {}) {
+    let {
+        projRoot,
+        testDir,
+        pattern = /^e2e-.*\.test\.mjs$/,
+        beforeEachFile = async () => {},
+        afterAll = async () => {},
+        mochaArgs = ['--reporter', 'list', '--timeout', '300000'],
+        spawnSyncFn = spawnSync,
+        log = console.log,
+    } = opt
+    if (!projRoot || !testDir) {
+        throw new Error('runIsolatedE2e: projRoot 與 testDir 為必填')
+    }
+    let isWin = process.platform === 'win32'
+    let files = fs.readdirSync(testDir).filter((f) => pattern.test(f)).sort()
+    let rel = path.relative(projRoot, testDir)
+
+    let results = []
+    for (let f of files) {
+        await beforeEachFile(f)
+        log(`\n=== [run-e2e-isolated] 執行 ${f}（全新後端）===`)
+        let r = spawnSyncFn('npx', ['mocha', path.join(rel, f), ...mochaArgs], {
+            cwd: projRoot,
+            stdio: 'inherit',
+            shell: isWin,
+        })
+        results.push({ file: f, code: r.status })
+    }
+    await afterAll()
+
+    log('\n=== [run-e2e-isolated] 逐檔結果 ===')
+    let failed = 0
+    for (let { file, code } of results) {
+        log(`  ${code === 0 ? '✔' : '✘'} ${file} (exit ${code})`)
+        if (code !== 0) {
+            failed++
+        }
+    }
+    log(`\n${failed === 0 ? '✔ e2e 全部通過' : `✘ ${failed} 個 e2e 檔失敗`}`)
+    return { results, failed }
+}
+
+
+export default runIsolatedE2e
+</code></pre>
+        </article>
+    </section>
+
+
+
+
+    
+    
+</div>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 4.0.5</a> on Tue Sep 29 2026 09:06:00 GMT+0800 (台北標準時間) using the <a href="https://github.com/clenemt/docdash">docdash</a> theme.
+</footer>
+
+<script>prettyPrint();</script>
+<script src="scripts/polyfill.js"></script>
+<script src="scripts/linenumber.js"></script>
+
+
+
+</body>
+</html>

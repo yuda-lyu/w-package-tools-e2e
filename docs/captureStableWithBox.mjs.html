@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    
+    <meta charset="utf-8">
+    <title>captureStableWithBox.mjs - Documentation</title>
+    
+    
+    <script src="scripts/prettify/prettify.js"></script>
+    <script src="scripts/prettify/lang-css.js"></script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc.css">
+    <script src="scripts/nav.js" defer></script>
+    
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+
+<input type="checkbox" id="nav-trigger" class="nav-trigger" />
+<label for="nav-trigger" class="navicon-button x">
+  <div class="navicon"></div>
+</label>
+
+<label for="nav-trigger" class="overlay"></label>
+
+<nav >
+    
+    
+    <h2><a href="index.html">Home</a></h2><h3>Global</h3><ul><li><a href="global.html#BOX_PAD">BOX_PAD</a></li><li><a href="global.html#INK_PAD">INK_PAD</a></li><li><a href="global.html#WPackageToolsE2e">WPackageToolsE2e</a></li><li><a href="global.html#assertBaselineMatch">assertBaselineMatch</a></li><li><a href="global.html#assertTextSpec">assertTextSpec</a></li><li><a href="global.html#canvasInkRects">canvasInkRects</a></li><li><a href="global.html#captureStable">captureStable</a></li><li><a href="global.html#captureStableWithBox">captureStableWithBox</a></li><li><a href="global.html#chromiumLaunchArgs">chromiumLaunchArgs</a></li><li><a href="global.html#collectDomText">collectDomText</a></li><li><a href="global.html#compareImageDirs">compareImageDirs</a></li><li><a href="global.html#createBaselineGate">createBaselineGate</a></li><li><a href="global.html#createKnownDefect">createKnownDefect</a></li><li><a href="global.html#createServiceManager">createServiceManager</a></li><li><a href="global.html#createTempSettings">createTempSettings</a></li><li><a href="global.html#cropRegion">cropRegion</a></li><li><a href="global.html#diffBaselineSnapshots">diffBaselineSnapshots</a></li><li><a href="global.html#findOrphanBaselines">findOrphanBaselines</a></li><li><a href="global.html#getE2eMode">getE2eMode</a></li><li><a href="global.html#gridContentBox">gridContentBox</a></li><li><a href="global.html#isChildAlive">isChildAlive</a></li><li><a href="global.html#itemsUnionBox">itemsUnionBox</a></li><li><a href="global.html#killOwnTree">killOwnTree</a></li><li><a href="global.html#killPortListeners">killPortListeners</a></li><li><a href="global.html#launchBrowser">launchBrowser</a></li><li><a href="global.html#launchChromium">launchChromium</a></li><li><a href="global.html#launchChromiumCore">launchChromiumCore</a></li><li><a href="global.html#listenerPids">listenerPids</a></li><li><a href="global.html#maskRegions">maskRegions</a></li><li><a href="global.html#normalizeShots">normalizeShots</a></li><li><a href="global.html#openCasePage">openCasePage</a></li><li><a href="global.html#overlayImageAt">overlayImageAt</a></li><li><a href="global.html#overlayRegions">overlayRegions</a></li><li><a href="global.html#pageHasText">pageHasText</a></li><li><a href="global.html#parseListenerPids">parseListenerPids</a></li><li><a href="global.html#pidExists">pidExists</a></li><li><a href="global.html#pollUntil">pollUntil</a></li><li><a href="global.html#probeHttp">probeHttp</a></li><li><a href="global.html#registerCleanupHooks">registerCleanupHooks</a></li><li><a href="global.html#resetAgGridScroll">resetAgGridScroll</a></li><li><a href="global.html#rowBoxSel">rowBoxSel</a></li><li><a href="global.html#runBaselineCase">runBaselineCase</a></li><li><a href="global.html#runIsolatedE2e">runIsolatedE2e</a></li><li><a href="global.html#sleepSync">sleepSync</a></li><li><a href="global.html#snapshotBaselines">snapshotBaselines</a></li><li><a href="global.html#stepShots">stepShots</a></li><li><a href="global.html#typeIntoInput">typeIntoInput</a></li><li><a href="global.html#typeIntoNthInput">typeIntoNthInput</a></li><li><a href="global.html#waitAlertGone">waitAlertGone</a></li><li><a href="global.html#waitChildExit">waitChildExit</a></li><li><a href="global.html#waitColResizeOverlay">waitColResizeOverlay</a></li><li><a href="global.html#waitDrawerReady">waitDrawerReady</a></li><li><a href="global.html#waitGridIdle">waitGridIdle</a></li><li><a href="global.html#waitUntilExist">waitUntilExist</a></li></ul>
+    
+</nav>
+
+<div id="main">
+    
+    <h1 class="page-title">captureStableWithBox.mjs</h1>
+    
+
+    
+
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>import captureStable from './captureStable.mjs'
+import maskRegions from './maskRegions.mjs'
+import composeBox from './composeBox.mjs'
+
+
+/**
+ * 全頁穩定截圖並以紅框標注本張之觀看或操作區(截圖後以sharp合成，不注入DOM)，可另遮黑非決定性區域
+ *
+ * target：CSS選擇器字串、Playwright Locator、視窗座標矩形{x,y,width,height}、量測型目標{scroll,measure,label}，或以上混合之陣列(多個取聯集畫「一個」框)。
+ * 量測型目標：measure(page)回傳視窗矩形、矩形陣列或null，於「捲入與等待之後」呼叫(故量到的是截圖當下之版面)；scroll為捲入用之選擇器或Locator(可省略)；
+ * probe為被蓋住檢查用之選擇器或Locator(可省略，省略者不做被蓋住檢查)。
+ * 框對象須由頁面內容決定(例如表格之標頭與可見資料列、清單之可見項目)時用之，見gridContentBox、itemsUnionBox。
+ * 流程：第一個非矩形目標先捲入視窗(逾時不中斷) → 等待preWaitMs並把滑鼠移到(0,0) → 量各目標與遮罩之視窗矩形及捲動量(皆在截圖「之前」量) →
+ * capture(預設captureStable，其餘opt原樣透傳，例如strict、settle) → 遮罩(先) → 紅框(後，框永遠可見)。
+ * mask：選擇器字串，或{sel,fixedWidth}(自元素右緣往左取固定寬，數字位數變動時黑塊邊界不浮動)。
+ * clampTo：'buffer'(框夾在整張截圖內)或'viewport'(框夾在截圖當下之視窗內，全頁截圖時加捲動量)
+ * 靜默無框防護(2026-09-28)：目標全數找不到或量得尺寸為 0 時於截圖前拋錯；框夾邊後過小(composeBox 將不畫)時於合成後拋錯——
+ * 標準圖每張皆須有框(技能 §7.1)，原「找不到即回無框圖」會產出永遠比對通過之無框標準圖(SSO stainfor E2E-002 殷鑑)。
+ * 確屬設計如此者(極少)須顯式傳 allowNoBox:true。
+ * 被蓋住檢查(2026-09-28)：選擇器/Locator 目標(與量測型目標之 probe)之中心點(夾在視窗內)以 elementFromPoint 取最上層元素，
+ * 若非目標本身、其子孫或祖先(例如彈窗遮罩、蓋在上面之面板)即視為「框了被蓋住的東西」——技能 §7.3-4 規定改框蓋在上面者。
+ * coverCheck：'throw'(預設，可由環境變數 E2E_COVER_CHECK 覆寫)、'warn'(印 [box-covered] 告警，供全量盤查)、'off'(確屬設計者)。
+ *
+ * @param {Page} page 輸入Playwright之Page
+ * @param {String|Object|Array} target 輸入框選目標
+ * @param {Object} [opt={}] 輸入設定物件，預設{}，除下列鍵外皆透傳給capture
+ * @param {Array} [opt.mask=[]] 輸入遮罩目標陣列，預設[]
+ * @param {String} [opt.clampTo='buffer'] 輸入紅框夾邊範圍字串，'buffer'或'viewport'，預設'buffer'
+ * @param {Boolean} [opt.guardSmall=true] 輸入框過小時是否不畫布林值，預設true
+ * @param {Boolean} [opt.allowNoBox=false] 輸入是否容許無框(目標找不到或框過小時回傳無框圖而不拋錯)布林值，預設false
+ * @param {String} [opt.coverCheck] 輸入被蓋住檢查模式字串，'throw'、'warn'或'off'，預設讀環境變數E2E_COVER_CHECK，未設為'throw'
+ * @param {Object} [opt.boxOpts={}] 輸入透傳給composeBox之樣式參數物件(pad、margin、strokeWidth、color、radius)，預設{}
+ * @param {Number} [opt.scrollTimeoutMs=8000] 輸入捲入視窗之逾時毫秒數，預設8000
+ * @param {Boolean} [opt.scrollTall=true] 輸入目標比其可視區大且已部分入鏡時是否仍捲入布林值，預設true(向後相容，並印[box-scroll]告警)；false則不捲、框其可見部分
+ * @param {Number} [opt.preWaitMs=300] 輸入捲入後之等待毫秒數，預設300
+ * @param {Function} [opt.capture=captureStable] 輸入截圖函數(page,opt)=>Promise&lt;Buffer>，預設captureStable
+ * @returns {Promise} 回傳Promise，resolve回傳PNG之Buffer
+ * @example
+ *
+ * import captureStableWithBox from 'w-package-tools-e2e/src/captureStableWithBox.mjs'
+ *
+ * let buf = await captureStableWithBox(page, '.ag-root-wrapper')
+ * let buf2 = await captureStableWithBox(page, [page.locator('.ag-row').filter({ hasText: '帳號' })], { mask: [{ sel: '.clock', fixedWidth: 80 }] })
+ *
+ */
+async function captureStableWithBox(page, target, opt = {}) {
+    let {
+        mask = [],
+        clampTo = 'buffer',
+        guardSmall = true,
+        allowNoBox = false,
+        coverCheck = (process.env.E2E_COVER_CHECK || 'throw'),
+        boxOpts = {},
+        scrollTimeoutMs = 8000,
+        scrollTall = true,
+        preWaitMs = 300,
+        capture = captureStable,
+        ...captureOpts
+    } = opt
+    let items = Array.isArray(target) ? target : [target]
+    let isLoc = (x) => x &amp;&amp; typeof x === 'object' &amp;&amp; typeof x.boundingBox === 'function'
+    let isMeasure = (x) => x &amp;&amp; typeof x === 'object' &amp;&amp; !isLoc(x) &amp;&amp; typeof x.measure === 'function'
+    let isRect = (x) => x &amp;&amp; typeof x === 'object' &amp;&amp; !isLoc(x) &amp;&amp; !isMeasure(x) &amp;&amp; ['x', 'y', 'width', 'height'].every((k) => typeof x[k] === 'number')
+
+    //先把第一個目標捲進視窗(同組目標應在同一捲動位置); 矩形為已量得之視窗座標, 不捲動; 量測型目標捲其 scroll(未給則不捲)
+    //目標比其可視區(視窗與各層捲動/裁切容器之交集)大且已部分入鏡者(例：點分頁後整個檢視面板)，捲入只會改變版面而仍無法完整入鏡——
+    //使用者不會捲動，此為測試手段造成之假畫面(w-web-api display E2E-007 殷鑑：分頁列被捲出畫面、捲動並延續到下一張)。
+    //scrollTall:false 時不捲；預設沿用捲入(向後相容)並印 [box-scroll] 告警，由呼叫端逐案判斷使用者此刻會不會捲動：
+    //切分頁後之整個檢視面板不會(改傳 itemsUnionBox(loc, { scroll: null }) 或 scrollTall:false)；送出後出現在下方之回應卡會(照常捲入)
+    if (items.length > 0 &amp;&amp; !isRect(items[0])) {
+        let first = isMeasure(items[0]) ? items[0].scroll : items[0]
+        if (first) {
+            let firstLoc = isLoc(first) ? first.first() : page.locator(first).first()
+            let tall = (await firstLoc.count()) > 0 &amp;&amp; await firstLoc.evaluate((el) => {
+                let r = el.getBoundingClientRect()
+                let vis = { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight }
+                for (let p = el.parentElement; p &amp;&amp; p !== document.body &amp;&amp; p !== document.documentElement; p = p.parentElement) {
+                    let cs = window.getComputedStyle(p)
+                    if (/(auto|scroll|hidden)/.test(`${cs.overflowX} ${cs.overflowY}`)) {
+                        let pr = p.getBoundingClientRect()
+                        vis = { left: Math.max(vis.left, pr.left), top: Math.max(vis.top, pr.top), right: Math.min(vis.right, pr.right), bottom: Math.min(vis.bottom, pr.bottom) }
+                    }
+                }
+                let inView = r.right > vis.left &amp;&amp; r.left &lt; vis.right &amp;&amp; r.bottom > vis.top &amp;&amp; r.top &lt; vis.bottom
+                let tooBig = r.height > (vis.bottom - vis.top) + 1 || r.width > (vis.right - vis.left) + 1
+                return inView &amp;&amp; tooBig
+            }, null, { timeout: scrollTimeoutMs }).catch(() => false)
+            if (tall &amp;&amp; scrollTall === false) {
+                //不捲動：框其可見部分
+            }
+            else {
+                if (tall) {
+                    console.log(`[box-scroll] 目標比其可視區大且已部分入鏡，捲入會改變版面(假畫面)；框整個檢視區宜傳 itemsUnionBox(loc, { scroll: null }) 或 scrollTall:false`)
+                }
+                await firstLoc.scrollIntoViewIfNeeded({ timeout: scrollTimeoutMs }).catch(() => {})
+            }
+        }
+    }
+    await page.waitForTimeout(preWaitMs)
+    await page.mouse.move(0, 0)
+
+    //各目標之視窗矩形
+    let rects = []
+    for (let it of items) {
+        if (isRect(it)) {
+            rects.push(it)
+        }
+        else if (isMeasure(it)) {
+            let m = await it.measure(page)
+            let ms = Array.isArray(m) ? m : [m]
+            for (let r of ms) {
+                if (r &amp;&amp; ['x', 'y', 'width', 'height'].every((k) => typeof r[k] === 'number')) {
+                    rects.push(r)
+                }
+            }
+        }
+        else if (isLoc(it)) {
+            let bb = await it.first().boundingBox()
+            if (bb) {
+                rects.push(bb)
+            }
+        }
+        else {
+            let r = await page.evaluate((s) => {
+                let e = document.querySelector(s)
+                if (!e) {
+                    return null
+                }
+                let rc = e.getBoundingClientRect()
+                return { x: rc.left, y: rc.top, width: rc.width, height: rc.height }
+            }, it)
+            if (r) {
+                rects.push(r)
+            }
+        }
+    }
+
+    //被蓋住檢查: 選擇器/Locator 目標之中心點最上層元素須為目標本身、其子孫或祖先; 否則目標被他物(彈窗遮罩等)蓋住
+    if (coverCheck !== 'off') {
+        let hitTest = (el) => {
+            let r = el.getBoundingClientRect()
+            if (r.width &lt;= 0 || r.height &lt;= 0) {
+                return null
+            }
+            let cx = Math.min(Math.max(r.left + r.width / 2, 0), window.innerWidth - 1)
+            let cy = Math.min(Math.max(r.top + r.height / 2, 0), window.innerHeight - 1)
+            if (cx &lt; r.left || cx > r.right || cy &lt; r.top || cy > r.bottom) {
+                return null
+            }
+            let h = document.elementFromPoint(cx, cy)
+            if (!h || el.contains(h) || h.contains(el)) {
+                return null
+            }
+            let cls = (typeof h.className === 'string' &amp;&amp; h.className.trim()) ? `.${h.className.trim().split(/\s+/).slice(0, 2).join('.')}` : ''
+            let shield = (h.closest('[style*="overscroll-behavior"]') ? '(彈窗遮罩層內)' : '')
+            let txt = (h.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 30)
+            return `${h.tagName.toLowerCase()}${cls}${shield}${txt ? `「${txt}」` : ''}`
+        }
+        let covered = []
+        for (let t of items) {
+            //量測型目標帶 probe(Locator 或選擇器)者照常檢查(例：itemsUnionBox 包住單一 Locator); 其餘量測型與矩形不檢查
+            let it = isMeasure(t) ? (t.probe || null) : t
+            if (!it || isRect(it)) {
+                continue
+            }
+            let hit = null
+            if (isLoc(it)) {
+                hit = await it.first().evaluate(hitTest, null, { timeout: 2000 }).catch(() => null)
+            }
+            else {
+                let h = await page.$(it).catch(() => null)
+                hit = h ? await h.evaluate(hitTest).catch(() => null) : null
+            }
+            if (hit) {
+                covered.push(`${isLoc(it) ? 'Locator' : String(it)} 之中心被 ${hit} 蓋住`)
+            }
+        }
+        if (covered.length > 0) {
+            let msg = `captureStableWithBox: 紅框目標被其他元素蓋住(技能 §7.3-4 被蓋住就框蓋在上面的): ${covered.join('; ')}`
+            if (coverCheck === 'warn') {
+                console.warn(`[box-covered] ${msg}`)
+            }
+            else {
+                throw new Error(`${msg}; 確屬設計者請傳 coverCheck:'off'`)
+            }
+        }
+    }
+
+    //無框防護: 目標皆找不到或尺寸皆為 0 → 截圖前即拋錯(不產出無框圖); 聯集框仍以原 rects 計算(不改既有框幾何)
+    if (rects.filter((r) => r.width > 0 &amp;&amp; r.height > 0).length === 0 &amp;&amp; !allowNoBox) {
+        let desc = items.map((it) => (isRect(it) ? `rect(${it.x},${it.y},${it.width}x${it.height})` : isLoc(it) ? 'Locator' : isMeasure(it) ? (it.label || 'measure') : String(it))).join(' | ')
+        throw new Error(`captureStableWithBox: 紅框目標皆找不到或尺寸為 0 (${desc}); 標準圖每張皆須有框(技能 §7.1), 確屬設計者請傳 allowNoBox:true`)
+    }
+
+    //遮罩區之視窗矩形
+    let maskRects = await page.evaluate((ms) => {
+        let out = []
+        ms.forEach((s) => {
+            let sel = (typeof s === 'string') ? s : s.sel
+            let e = document.querySelector(sel)
+            if (!e) {
+                return
+            }
+            let r = e.getBoundingClientRect()
+            let left = r.left
+            let width = r.width
+            if (typeof s === 'object' &amp;&amp; s.fixedWidth) {
+                width = s.fixedWidth
+                left = (r.left + r.width) - width
+            }
+            out.push({ x: left, y: r.top, w: width, h: r.height })
+        })
+        return out
+    }, mask)
+
+    //全頁截圖座標 = 視窗座標 + 捲動量
+    let env = await page.evaluate(() => ({ vw: window.innerWidth, vh: window.innerHeight, sx: window.scrollX, sy: window.scrollY }))
+
+    let buf = await capture(page, captureOpts)
+    if (maskRects.length > 0) {
+        buf = await maskRegions(buf, maskRects.map((r) => ({ x: r.x + env.sx, y: r.y + env.sy, w: r.w, h: r.h })))
+    }
+    if (rects.length > 0) {
+        let bounds = clampTo === 'viewport' ? { left: env.sx, top: env.sy, right: env.sx + env.vw, bottom: env.sy + env.vh } : undefined
+        let skipped = null
+        buf = await composeBox(buf, {
+            left: Math.min(...rects.map((r) => r.x)) + env.sx,
+            top: Math.min(...rects.map((r) => r.y)) + env.sy,
+            right: Math.max(...rects.map((r) => r.x + r.width)) + env.sx,
+            bottom: Math.max(...rects.map((r) => r.y + r.height)) + env.sy,
+        }, {
+            ...boxOpts,
+            bounds,
+            guardSmall,
+            onSkip: (reason) => {
+                skipped = reason
+            },
+        })
+        if (skipped &amp;&amp; !allowNoBox) {
+            throw new Error(`captureStableWithBox: 紅框未畫出——${skipped}; 標準圖每張皆須有框(技能 §7.1), 目標須先捲入可視範圍(技能 §7.3-5), 確屬設計者請傳 allowNoBox:true`)
+        }
+    }
+    return buf
+}
+
+
+export default captureStableWithBox
+</code></pre>
+        </article>
+    </section>
+
+
+
+
+    
+    
+</div>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 4.0.5</a> on Tue Sep 29 2026 09:06:00 GMT+0800 (台北標準時間) using the <a href="https://github.com/clenemt/docdash">docdash</a> theme.
+</footer>
+
+<script>prettyPrint();</script>
+<script src="scripts/polyfill.js"></script>
+<script src="scripts/linenumber.js"></script>
+
+
+
+</body>
+</html>
