@@ -24,6 +24,7 @@ import pageHasText from './pageHasText.mjs'
 import assertTextSpec from './assertTextSpec.mjs'
 import waitColResizeOverlay from './waitColResizeOverlay.mjs'
 import waitDrawerReady from './waitDrawerReady.mjs'
+import probeStuckTooltip from './probeStuckTooltip.mjs'
 import resetAgGridScroll from './resetAgGridScroll.mjs'
 import rowBoxSel from './rowBoxSel.mjs'
 import gridContentBox from './gridContentBox.mjs'
@@ -63,7 +64,7 @@ import compareImageDirs from './compareImageDirs.mjs'
 /**
  * e2e 測試與標準圖(pixel baseline)共用設施
  *
- * @returns {Object} 回傳物件，其內含截圖與影像(launchChromium、launchChromiumCore、chromiumLaunchArgs、launchBrowser、captureStable、captureStableWithBox、itemsUnionBox、inkRect、waitAlertGone、canvasInkRects、composeBox、stepShots、maskRegions、overlayRegions、overlayImageAt、cropRegion、assertBaselineMatch、typeIntoInput、typeIntoNthInput、waitUntilExist、pollUntil、collectDomText、pageHasText、assertTextSpec、waitColResizeOverlay、waitDrawerReady、resetAgGridScroll、rowBoxSel、gridContentBox、waitGridIdle)、產製與比對管線(getE2eMode、createBaselineGate、findOrphanBaselines、runBaselineCase、normalizeShots、openCasePage、createKnownDefect)、生命週期與行程(createServiceManager、registerCleanupHooks、probeHttp、createTempSettings、runIsolatedE2e、killOwnTree、isChildAlive、waitChildExit、pidExists、sleepSync、killPortListeners、listenerPids、parseListenerPids)、驗證工具(snapshotBaselines、diffBaselineSnapshots、compareImageDirs)，以及框幾何常數BOX_PAD、BOX_STROKE、INK_PAD
+ * @returns {Object} 回傳物件，其內含截圖與影像(launchChromium、launchChromiumCore、chromiumLaunchArgs、launchBrowser、captureStable、captureStableWithBox、itemsUnionBox、inkRect、waitAlertGone、canvasInkRects、composeBox、stepShots、maskRegions、overlayRegions、overlayImageAt、cropRegion、assertBaselineMatch、typeIntoInput、typeIntoNthInput、waitUntilExist、pollUntil、collectDomText、pageHasText、assertTextSpec、waitColResizeOverlay、waitDrawerReady、probeStuckTooltip、resetAgGridScroll、rowBoxSel、gridContentBox、waitGridIdle)、產製與比對管線(getE2eMode、createBaselineGate、findOrphanBaselines、runBaselineCase、normalizeShots、openCasePage、createKnownDefect)、生命週期與行程(createServiceManager、registerCleanupHooks、probeHttp、createTempSettings、runIsolatedE2e、killOwnTree、isChildAlive、waitChildExit、pidExists、sleepSync、killPortListeners、listenerPids、parseListenerPids)、驗證工具(snapshotBaselines、diffBaselineSnapshots、compareImageDirs)，以及框幾何常數BOX_PAD、BOX_STROKE、INK_PAD
  * @example
  *
  * import wpte from 'w-package-tools-e2e/src/WPackageToolsE2e.mjs'
@@ -110,6 +111,7 @@ let WPackageToolsE2e = {
     assertTextSpec,
     waitColResizeOverlay,
     waitDrawerReady,
+    probeStuckTooltip,
     resetAgGridScroll,
     rowBoxSel,
     gridContentBox,

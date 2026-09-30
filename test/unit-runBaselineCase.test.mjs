@@ -152,6 +152,24 @@ describe('runBaselineCase', function() {
         gate.finalize()
     })
 
+    it('產製端日誌: 寫出者印 [write](配 gate 時附 decideWrite 之原因), 與保留者之 [keep] 對稱', async function() {
+        let logs = []
+        let { opt } = baseOpt([], { log: (s) => logs.push(s) })
+        await runBaselineCase(opt)
+        assert.strict.deepStrictEqual(logs, ['  [write] eng-E2E-005-1-a', '  [write] eng-E2E-005-2-b'])
+        let gate = createBaselineGate({
+            langs: ['eng'],
+            cases: [{ name: 'E2E-005-grant', stages: ['E2E-005-1-a', 'E2E-005-2-b'] }],
+            argv: ['node', 'x', '--baseline'],
+            env: {},
+        })
+        let logs2 = []
+        let { opt: opt2 } = baseOpt([], { gate, log: (s) => logs2.push(s) })
+        await runBaselineCase(opt2)
+        assert.strict.deepStrictEqual(logs2, ['  [write] eng-E2E-005-1-a (all)', '  [write] eng-E2E-005-2-b (all)'])
+        gate.finalize()
+    })
+
     it('比對端: 逐張 match(不寫檔); 預設首張不符即拋, compareAll 則比完再彙總', async function() {
         let log = []
         let { opt, matches, writes } = baseOpt(log, { mode: 'compare' })

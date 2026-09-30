@@ -350,4 +350,151 @@ describe('runIsolatedE2e', function() {
         await assert.rejects(runIsolatedE2e({ testDir }), /必填/)
     })
 
+    it('有本地mocha時以node直接執行(不經shell, 正則參數原樣傳入); 無則沿用npx', async function() {
+        let projRoot = path.dirname(testDir)
+        let bin = path.join(projRoot, 'node_modules', 'mocha', 'bin', 'mocha.js')
+        fs.mkdirSync(path.dirname(bin), { recursive: true })
+        fs.writeFileSync(bin, '')
+        try {
+            let got = []
+            await runIsolatedE2e({
+                projRoot,
+                testDir,
+                targets: [{ file: 'e2e-b.test.mjs', grep: 'E2E-0(0[2-9]|1[0-5])-' }],
+                spawnSyncFn: (cmd, args, o) => {
+                    got.push([cmd, args, o.shell])
+                    return { status: 0 }
+                },
+                log: () => {},
+            })
+            assert.strict.deepStrictEqual(got, [[process.execPath, [bin, path.join('test', 'e2e-b.test.mjs'), '--reporter', 'list', '--timeout', '300000', '--grep', 'E2E-0(0[2-9]|1[0-5])-', '--fail-zero'], false]])
+        }
+        finally {
+            fs.rmSync(path.join(projRoot, 'node_modules'), { recursive: true, force: true })
+        }
+    })
+
+    it('targets: 依給定順序只跑列出之檔(不用pattern), 有grep者加--grep與--fail-zero, 結果含grep; 檔案不存在即拋錯且一個都不跑', async function() {
+        let projRoot = path.dirname(testDir)
+        let seq = []
+        let logs = []
+        let r = await runIsolatedE2e({
+            projRoot,
+            testDir,
+            targets: [{ file: 'e2e-b.test.mjs', grep: 'E2E-004-' }, 'api-x.test.mjs'],
+            beforeEachFile: (f) => {
+                seq.push(['before', f])
+            },
+            spawnSyncFn: (cmd, args) => {
+                seq.push(['spawn', args.slice(1)])
+                return { status: args.includes('E2E-004-') ? 0 : 1 }
+            },
+            log: (s) => logs.push(s),
+        })
+        assert.strict.deepStrictEqual(seq, [
+            ['before', 'e2e-b.test.mjs'],
+            ['spawn', [path.join('test', 'e2e-b.test.mjs'), '--reporter', 'list', '--timeout', '300000', '--grep', 'E2E-004-', '--fail-zero']],
+            ['before', 'api-x.test.mjs'],
+            ['spawn', [path.join('test', 'api-x.test.mjs'), '--reporter', 'list', '--timeout', '300000']],
+        ])
+        assert.strict.deepStrictEqual(r, { results: [{ file: 'e2e-b.test.mjs', grep: 'E2E-004-', code: 0 }, { file: 'api-x.test.mjs', code: 1 }], failed: 1 })
+        assert.strict.ok(logs.some((s) => s.includes('e2e-b.test.mjs --grep E2E-004-')))
+        let called = 0
+        await assert.rejects(runIsolatedE2e({
+            projRoot,
+            testDir,
+            targets: ['e2e-a.test.mjs', 'e2e-none.test.mjs'],
+            spawnSyncFn: () => {
+                called++
+                return { status: 0 }
+            },
+            log: () => {},
+        }), /targets 之檔案不存在: e2e-none\.test\.mjs/)
+        assert.strict.equal(called, 0)
+    })
+
+    it('mochaBin: 相對路徑以projRoot解析為絕對路徑(spawn之cwd為projRoot, projRoot本身為相對路徑亦同); 明確給定而不存在即拋錯且一個都不跑', async function() {
+        let projRoot = path.dirname(testDir)
+        let binRel = path.join('tools', 'my-mocha.js')
+        fs.mkdirSync(path.join(projRoot, 'tools'), { recursive: true })
+        fs.writeFileSync(path.join(projRoot, binRel), '')
+        try {
+            let got = []
+            await runIsolatedE2e({
+                projRoot: path.relative(process.cwd(), projRoot),
+                testDir,
+                targets: ['e2e-a.test.mjs'],
+                mochaBin: binRel,
+                spawnSyncFn: (cmd, args, o) => {
+                    got.push([cmd, args.slice(0, 2), o.shell])
+                    return { status: 0 }
+                },
+                log: () => {},
+            })
+            assert.strict.deepStrictEqual(got, [[process.execPath, [path.join(projRoot, binRel), path.join('test', 'e2e-a.test.mjs')], false]])
+        }
+        finally {
+            fs.rmSync(path.join(projRoot, 'tools'), { recursive: true, force: true })
+        }
+        let called = 0
+        await assert.rejects(runIsolatedE2e({
+            projRoot,
+            testDir,
+            mochaBin: path.join('node_modules', 'none', 'mocha.js'),
+            beforeEachFile: () => {
+                called++
+            },
+            spawnSyncFn: () => {
+                called++
+                return { status: 0 }
+            },
+            log: () => {},
+        }), /mochaBin 不存在/)
+        assert.strict.equal(called, 0)
+    })
+
+    it('無本地mocha而於Windows經npx(cmd.exe)時: 參數含空白或 " & | < > ^ % 即拋錯且一個都不跑; 無此類字元或非Windows照常以npx執行', async function() {
+        let projRoot = path.dirname(testDir)
+        let called = 0
+        await assert.rejects(runIsolatedE2e({
+            projRoot,
+            testDir,
+            targets: [{ file: 'e2e-a.test.mjs', grep: 'E2E-001-' }, { file: 'e2e-b.test.mjs', grep: 'E2E-0(0[2-9]|1[0-5])-' }],
+            platform: 'win32',
+            beforeEachFile: () => {
+                called++
+            },
+            spawnSyncFn: () => {
+                called++
+                return { status: 0 }
+            },
+            log: () => {},
+        }), /會被改寫: E2E-0\(0\[2-9\]\|1\[0-5\]\)-;/)
+        assert.strict.equal(called, 0)
+        for (let [grep, bad] of [['^E2E-001-', '^E2E-001-'], ['E2E-001 登入', 'E2E-001 登入'], ['a>b', 'a>b'], ['x%OS%y', 'x%OS%y']]) {
+            await assert.rejects(runIsolatedE2e({ projRoot, testDir, targets: [{ file: 'e2e-a.test.mjs', grep }], platform: 'win32', spawnSyncFn: () => ({ status: 0 }), log: () => {} }), (err) => {
+                assert.strict.ok(err.message.includes(`會被改寫: ${bad};`), err.message)
+                return true
+            })
+        }
+        let got = []
+        for (let [platform, grep] of [['win32', 'E2E-0(0[2-9])-[a-z]!'], ['linux', '^E2E-0(0[2-9]|1[0-5])-']]) {
+            await runIsolatedE2e({
+                projRoot,
+                testDir,
+                targets: [{ file: 'e2e-b.test.mjs', grep }],
+                platform,
+                spawnSyncFn: (cmd, args, o) => {
+                    got.push([cmd, args.slice(-3), o.shell])
+                    return { status: 0 }
+                },
+                log: () => {},
+            })
+        }
+        assert.strict.deepStrictEqual(got, [
+            ['npx', ['--grep', 'E2E-0(0[2-9])-[a-z]!', '--fail-zero'], true],
+            ['npx', ['--grep', '^E2E-0(0[2-9]|1[0-5])-', '--fail-zero'], false],
+        ])
+    })
+
 })

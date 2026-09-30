@@ -71,8 +71,9 @@ let browser2 = await wpte.launchBrowser()
 | `pollUntil(label, fn, { timeout, interval })` | 測試行程端之偵測驅動等待：反覆執行 `fn`（可 async、可用閉包；拋錯視為未成立）直到回 truthy，回傳該值；逾時拋錯含判斷次數與最後一次錯誤。用於瀏覽器外之非同步結果——後端週期計時器寫入資料庫（封鎖、補登記）、背景程序產檔——取代「固定等 N 秒再讀」（計時器於負載高時延遲）；頁面內條件仍用 `waitUntilExist`。預設 30000／200ms | 單元（2026-09-28 自 w-web-sso autoblock 抽出） |
 | `collectDomText` / `pageHasText` / `assertTextSpec` | 以 spec 衍生之期望文字做語意斷言（走訪 DOM 文字節點，不判可見性） | sso 實跑（tokens）、瀏覽器 |
 | 【w-component-vue】`waitColResizeOverlay` / `waitDrawerReady` | WDrawer 拖曳分隔條 opacity=1 / 抽屜 `[state]` 終態（C12） | sso 實跑、瀏覽器 |
+| 【w-component-vue】`probeStuckTooltip(page, {rootSel, createError})` | 截圖前掛鉤（`captureStable` 之 `beforeShots`）：游標已移開後仍顯示之 hover 型提示框（WTooltip `mode='tooltip'`，文字不限）即拋錯，殘留畫面不凍結為標準圖；點開型浮層（`mode='popup'`：WPopup、下拉清單）不在此列。成因為點擊時游標下之節點被移除替換，而 Playwright ≤1.62 預設停用 `BoundaryEventDispatchTracksNodeRemoval`，mouseleave 未送達觸發區（w-component-vue 2.5.24 已修正 WButtonCircle 之成因，本函數為回歸守門）。以 WTooltip 內部結構辨識（`$refs.divTrigger`／`divContent`、`props.mode`、`data.valueTrans`），元件改寫時會靜默失效，升級 w-component-vue 須以真元件頁複驗 | 瀏覽器（2026-09-30 新增，收斂四專案各自手寫之同一實作） |
 | 【ag-grid】`resetAgGridScroll` / `rowBoxSel` | 截圖前水平捲動歸零 / 整列框選兩選擇器（`order` 決定捲動對象） | perm / task 實跑、瀏覽器、單元（sso 未用） |
-| 【ag-grid】`gridContentBox(gridSel, {noRowsSel})` | 量測型目標：標頭 ∪ 可見資料列（空表為標頭 ∪「無資料」訊息），夾在表格框內；取代直接框 `.ag-root-wrapper`（列少時框進大片空白，SKILL §7.2 表格列）；欄位未撐滿表格寬、右側空白 ≥ 200px 且 ≥ 框寬 30% 時右緣收在最後一欄（撐滿者右側僅捲軸槽，不收） | 瀏覽器（2026-09-28 新增；同日加欄寬收邊） |
+| 【ag-grid】`gridContentBox(gridSel, {noRowsSel, noRowsPad})` | 量測型目標：標頭 ∪ 可見資料列（空表為標頭 ∪「無資料」訊息），夾在表格框內；取代直接框 `.ag-root-wrapper`（列少時框進大片空白，SKILL §7.2 表格列）；欄位未撐滿表格寬、右側空白 ≥ 200px 且 ≥ 框寬 30% 時右緣收在最後一欄（撐滿者右側僅捲軸槽，不收）；空表之「無資料」訊息為無可見邊界之文字，外擴 `noRowsPad`（預設 `INK_PAD`=4）後再取聯集，與 `itemsUnionBox` 之 `fit`、`inkRect` 同一條文字留白規則（`noRowsPad:0` 為舊行為） | 瀏覽器（2026-09-28 新增；同日加欄寬收邊；2026-09-30 加空表訊息外擴） |
 | 【ag-grid】`waitGridIdle(page, opt)` | 表格靜止：列內容＋容器 / 標頭 / 列幾何＋捲動量簽章連續 `stableMs` 相同；`minCells>0` 時表格未出現亦視為未就緒；取代雙重 rAF（SKILL §8.1 列為無效手法） | 瀏覽器（sso 5 檔 26 處替換中） |
 
 ### 1.2 產製與比對管線
@@ -95,7 +96,7 @@ let browser2 = await wpte.launchBrowser()
 | `registerCleanupHooks(cleanup, opt)` | root after＋exit / SIGINT / SIGTERM；**須於模組頂層呼叫** | sso 實跑、單元 |
 | `probeHttp(url, opt)` | 任何 HTTP 回應即 true；`accept` / `identify` 可收緊 | sso 實跑、單元 |
 | `createTempSettings(opt)` | 臨時設定檔（JSON5 基底淺合併、tmpDir 必填、forbiddenKeys） | sso 實跑、單元 |
-| `runIsolatedE2e(opt)` | 逐檔獨立 mocha 行程（殺 port 以回呼注入） | sso 實跑、單元 |
+| `runIsolatedE2e(opt)` | 逐檔獨立 mocha 行程（殺 port 以回呼注入）；`targets` 逐檔指定檔案與 `--grep`（依差異範圍只重跑受影響案例，每檔仍換新後端，並自動加 `--fail-zero`，grep 對不到任何案例即失敗）；有 mocha 執行檔（`mochaBin`，預設 `node_modules/mocha/bin/mocha.js`，以 `projRoot` 解析）時以 node 直接執行、不經 shell，否則沿用 `npx`（Windows 下經 cmd.exe 重新解析參數：`\|` `&` 切出另一指令、`<` `>` 轉向、`^` `"` 被吃掉、空白拆開、`%名稱%` 展開；故此時參數含空白或 `"` `&` `\|` `<` `>` `^` `%` 即於執行前拋錯；括號與 `[ ]` 不受影響）；明確給定之 `mochaBin` 不存在即拋錯 | sso 實跑、單元（2026-09-30 加 `targets`、node 直接執行、npx 退路之參數守門） |
 | 所有權原語 `killOwnTree` / `isChildAlive` / `waitChildExit` / `pidExists` / `sleepSync` | 只殺自建且仍存活之子行程樹（同步）與回驗 | killOwnTree sso 實跑；其餘單元（移植自 w-web-task 並帶其測試） |
 | port 政策原語 `killPortListeners` | 殺監聽某 port 之行程——**只可用於專案專屬且已於映射表明文登錄之 port** | sso 實跑、單元 |
 | `listenerPids` / `parseListenerPids` | netstat 完整解析（含 IPv6、在地化狀態字）/ POSIX 只取 LISTEN；工具不可用回 null | sso 實跑、單元 |
@@ -119,6 +120,7 @@ let browser2 = await wpte.launchBrowser()
 prepare(ctx) → launch() → openPage(browser) → beforeRun(ctx) → run(page, lang, ctx) → normalizeShots
   → semantic(ctx) → verify(ctx)
   → regen：逐張 gate.shouldWrite → gate.decideWrite(write-mode) → 寫入 gate.outPath(pathOf())
+    （逐張印日誌：未點名 [skip]、保留 [keep] (原因)、寫出 [write] (原因，如 diff=661px)）
     compare：逐張 match(buf, pathOf(), labelOf())（預設首張不符即拋；compareAll 則比完彙總）
   → finally：關瀏覽器（含 run 中換的 ctx.browserRef.current）→ afterCase(ctx)
 ```
@@ -238,6 +240,7 @@ let captureStableWithBox = (page, target, opts = {}) => pkgCaptureStableWithBox(
 - 新增函數、新增選項（預設值維持原行為）不影響既有標準圖；一向以「預設值取 w-web-sso 現行行為、其他專案以選項重現」擴充。
 - 依賴升版（playwright 帶入之 Chromium、sharp 之 SVG 光柵化）亦可能改變截圖或紅框像素（推測，需實測確認）；升版後使用端依 §4 等價驗證。
 - 首次收錄（2026-09-29）之 `src/` 與四專案 2026-09-28 22:52 起實跑之版本行為相同：51 檔中 48 檔逐位元相同，其餘 3 檔只改註解或等值字面（`compareImageDirs`、`runBaselineCase` 之 JSDoc，`itemsUnionBox` 之字串字面）。
+- 2026-09-30（1.0.2 之下一版）：`gridContentBox` 空表之「無資料」訊息改為外擴 `INK_PAD` 後再取聯集，**空表截圖之紅框底下移 4px**（原字形墨跡距框內緣僅 3–4px，低於技能要求之約 5px）。只影響「無資料列」之截圖（有資料列之分支未改）；使用端升版後跑一次比對，失敗者即為全部受影響之圖，取得授權後以 `--write-mode changed` 重產並逐張審；`noRowsPad:0` 可重現舊行為供等價對照。同版其餘變更（`probeStuckTooltip`、`runBaselineCase` 之 `[write]` 日誌、`runIsolatedE2e` 之 `targets` 與啟動方式）不影響截圖像素。
 
 ## 6. 開發與測試
 

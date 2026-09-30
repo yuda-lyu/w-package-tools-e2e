@@ -28,6 +28,7 @@ import pageHasText from '../src/pageHasText.mjs'
 import assertTextSpec from '../src/assertTextSpec.mjs'
 import waitColResizeOverlay from '../src/waitColResizeOverlay.mjs'
 import waitDrawerReady from '../src/waitDrawerReady.mjs'
+import probeStuckTooltip from '../src/probeStuckTooltip.mjs'
 import resetAgGridScroll from '../src/resetAgGridScroll.mjs'
 import rowBoxSel from '../src/rowBoxSel.mjs'
 import gridContentBox from '../src/gridContentBox.mjs'
@@ -98,6 +99,7 @@ describe('WPackageToolsE2e', function() {
             'assertTextSpec',
             'waitColResizeOverlay',
             'waitDrawerReady',
+            'probeStuckTooltip',
             'resetAgGridScroll',
             'rowBoxSel',
             'gridContentBox',
@@ -176,6 +178,7 @@ describe('WPackageToolsE2e', function() {
             assertTextSpec,
             waitColResizeOverlay,
             waitDrawerReady,
+            probeStuckTooltip,
             resetAgGridScroll,
             rowBoxSel,
             gridContentBox,

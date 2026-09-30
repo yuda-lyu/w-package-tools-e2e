@@ -142,6 +142,7 @@ async function runBaselineCase(opt = {}) {
                     continue
                 }
                 let base = pathOf(lang, s.key)
+                let reason = ''
                 if (gate) {
                     gate.noteProduced(lang, name, s.key)
                     let d = gate.decideWrite(s.buf, base)
@@ -150,10 +151,13 @@ async function runBaselineCase(opt = {}) {
                         log(`  [keep] ${lang}-${s.key} (${d.reason})`)
                         continue
                     }
+                    reason = d.reason
                 }
                 let target = gate ? gate.outPath(base) : base
                 writeFile(target, s.buf)
                 out.written.push(s.key)
+                //寫出者亦印出(含 decideWrite 之原因, 如 diff=661px), 與 [keep] 對稱; 否則只能以檔案時間回推哪些圖被重產
+                log(`  [write] ${lang}-${s.key}${reason ? ` (${reason})` : ''}`)
             }
             return out
         }

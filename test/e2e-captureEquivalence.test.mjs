@@ -622,7 +622,18 @@ describe('量測型目標: gridContentBox、itemsUnionBox(無伺服器)', functi
         await page.setContent(GRID_PAGE([], '<span class="ag-overlay-no-rows-center">No Rows To Show</span>'))
         let e = await gridContentBox('.ag-root-wrapper').measure(page)
         let span = await page.evaluate(() => document.querySelector('.ag-overlay-no-rows-center').getBoundingClientRect().bottom)
-        assert.strict.deepStrictEqual([e.y, e.y + e.height], [61, span], '空表: 標頭頂至訊息底')
+        //訊息為無可見邊界之文字, 外擴 INK_PAD(4): 框底取訊息底 + 4, 框內緣(目標外擴 6、描邊 5 內縮)距訊息行框 5px(2026-09-30)
+        assert.strict.deepStrictEqual([e.y, e.y + e.height], [61, span + 4], '空表: 標頭頂至訊息底外擴 4px')
+        let f = await gridContentBox('.ag-root-wrapper', { noRowsPad: 0 }).measure(page)
+        assert.strict.deepStrictEqual(f.y + f.height, span, 'noRowsPad:0 時為訊息底(舊行為)')
+    })
+
+    it('gridContentBox: 空表之「無資料」訊息外擴後仍夾在表格框內', async function() {
+        //訊息貼齊資料捲動區底(表格框 60..462 含 1px 邊框, 捲動區底 461): 外擴 4 後 465 超出, 夾回表格框底 462
+        await page.setContent(GRID_PAGE([], '<span class="ag-overlay-no-rows-center" style="top:auto; bottom:0px;">No Rows To Show</span>'))
+        let e = await gridContentBox('.ag-root-wrapper').measure(page)
+        let [span, rr] = await page.evaluate(() => [document.querySelector('.ag-overlay-no-rows-center').getBoundingClientRect().bottom, document.querySelector('.ag-root-wrapper').getBoundingClientRect().bottom])
+        assert.strict.deepStrictEqual([span, e.y + e.height], [461, rr], `訊息底 ${span}, 框底夾在表格框底 ${rr}`)
     })
 
     it('gridContentBox: 欄位未撐滿表格寬(右側空白 ≥200px 且 ≥30%)時右緣收在最後一欄; 撐滿者(右側僅捲軸槽)不收', async function() {
