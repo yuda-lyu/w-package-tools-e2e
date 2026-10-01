@@ -1,6 +1,6 @@
 {
   "name": "w-package-tools-e2e",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "dependencies": {
     "dotenv": "^18.0.5",
     "json5": "^2.2.3",
@@ -13,7 +13,8 @@
     "w-package-tools": "^1.1.16"
   },
   "scripts": {
-    "test": "mocha --no-parallel \"test/*.test.mjs\" --timeout 180000"
+    "test": "mocha --no-parallel \"test/*.test.mjs\" --timeout 180000",
+    "deploy": "gh-pages -d docs"
   },
   "repository": {
     "type": "git",
