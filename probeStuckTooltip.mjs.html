@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    
+    <meta charset="utf-8">
+    <title>probeStuckTooltip.mjs - Documentation</title>
+    
+    
+    <script src="scripts/prettify/prettify.js"></script>
+    <script src="scripts/prettify/lang-css.js"></script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc.css">
+    <script src="scripts/nav.js" defer></script>
+    
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+
+<input type="checkbox" id="nav-trigger" class="nav-trigger" />
+<label for="nav-trigger" class="navicon-button x">
+  <div class="navicon"></div>
+</label>
+
+<label for="nav-trigger" class="overlay"></label>
+
+<nav >
+    
+    
+    <h2><a href="index.html">Home</a></h2><h3>Global</h3><ul><li><a href="global.html#BOX_PAD">BOX_PAD</a></li><li><a href="global.html#INK_PAD">INK_PAD</a></li><li><a href="global.html#WPackageToolsE2e">WPackageToolsE2e</a></li><li><a href="global.html#assertBaselineMatch">assertBaselineMatch</a></li><li><a href="global.html#assertTextSpec">assertTextSpec</a></li><li><a href="global.html#canvasInkRects">canvasInkRects</a></li><li><a href="global.html#captureStable">captureStable</a></li><li><a href="global.html#captureStableWithBox">captureStableWithBox</a></li><li><a href="global.html#chromiumLaunchArgs">chromiumLaunchArgs</a></li><li><a href="global.html#collectDomText">collectDomText</a></li><li><a href="global.html#compareImageDirs">compareImageDirs</a></li><li><a href="global.html#createBaselineGate">createBaselineGate</a></li><li><a href="global.html#createKnownDefect">createKnownDefect</a></li><li><a href="global.html#createServiceManager">createServiceManager</a></li><li><a href="global.html#createTempSettings">createTempSettings</a></li><li><a href="global.html#cropRegion">cropRegion</a></li><li><a href="global.html#diffBaselineSnapshots">diffBaselineSnapshots</a></li><li><a href="global.html#findOrphanBaselines">findOrphanBaselines</a></li><li><a href="global.html#getE2eMode">getE2eMode</a></li><li><a href="global.html#gridContentBox">gridContentBox</a></li><li><a href="global.html#isChildAlive">isChildAlive</a></li><li><a href="global.html#itemsUnionBox">itemsUnionBox</a></li><li><a href="global.html#killOwnTree">killOwnTree</a></li><li><a href="global.html#killPortListeners">killPortListeners</a></li><li><a href="global.html#launchBrowser">launchBrowser</a></li><li><a href="global.html#launchChromium">launchChromium</a></li><li><a href="global.html#launchChromiumCore">launchChromiumCore</a></li><li><a href="global.html#listenerPids">listenerPids</a></li><li><a href="global.html#maskRegions">maskRegions</a></li><li><a href="global.html#normalizeShots">normalizeShots</a></li><li><a href="global.html#openCasePage">openCasePage</a></li><li><a href="global.html#overlayImageAt">overlayImageAt</a></li><li><a href="global.html#overlayRegions">overlayRegions</a></li><li><a href="global.html#pageHasText">pageHasText</a></li><li><a href="global.html#parseListenerPids">parseListenerPids</a></li><li><a href="global.html#pidExists">pidExists</a></li><li><a href="global.html#pollUntil">pollUntil</a></li><li><a href="global.html#probeHttp">probeHttp</a></li><li><a href="global.html#probeStuckTooltip">probeStuckTooltip</a></li><li><a href="global.html#registerCleanupHooks">registerCleanupHooks</a></li><li><a href="global.html#resetAgGridScroll">resetAgGridScroll</a></li><li><a href="global.html#rowBoxSel">rowBoxSel</a></li><li><a href="global.html#runBaselineCase">runBaselineCase</a></li><li><a href="global.html#runIsolatedE2e">runIsolatedE2e</a></li><li><a href="global.html#sleepSync">sleepSync</a></li><li><a href="global.html#snapshotBaselines">snapshotBaselines</a></li><li><a href="global.html#stepShots">stepShots</a></li><li><a href="global.html#typeIntoInput">typeIntoInput</a></li><li><a href="global.html#typeIntoNthInput">typeIntoNthInput</a></li><li><a href="global.html#waitAlertGone">waitAlertGone</a></li><li><a href="global.html#waitChildExit">waitChildExit</a></li><li><a href="global.html#waitColResizeOverlay">waitColResizeOverlay</a></li><li><a href="global.html#waitDrawerReady">waitDrawerReady</a></li><li><a href="global.html#waitGridIdle">waitGridIdle</a></li><li><a href="global.html#waitUntilExist">waitUntilExist</a></li></ul>
+    
+</nav>
+
+<div id="main">
+    
+    <h1 class="page-title">probeStuckTooltip.mjs</h1>
+    
+
+    
+
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>/**
+ * 【w-component-vue】截圖前偵測提示框殘留(captureStable之beforeShots掛鉤)：captureStable已將游標移至(0,0)並初始等待後，仍顯示之hover型提示框(w-component-vue WTooltip mode='tooltip')必為殘留，
+ * 即mouseleave未送達其觸發區，拋錯使該案失敗(殘留畫面不得凍結為標準圖)。點開型浮層(mode='popup'：WPopup、下拉清單)為刻意開啟，不在此列；
+ * display:none與visibility:hidden(popper之data-popper-reference-hidden)皆非畫面可見。
+ *
+ * 背景：w-component-vue ≤2.5.23之WButtonCircle於點擊時以v-if換掉游標下之圖示(promiseUnlock或loading之載入圖示、停用遮罩)，其後出現全頁遮罩或游標隨即移開時，
+ * 未採「命中節點被移除後以最近仍在DOM之祖先為目標」之瀏覽器(Chrome 144以前；Playwright ≤1.62之預設啟動參數停用BoundaryEventDispatchTracksNodeRemoval)不派發mouseleave，
+ * 提示框殘留；2.5.24起圖示層與停用遮罩pointer-events:none已修正。本函數為回歸守門，亦涵蓋他處同型成因(自寫元件之內層被移除替換)。
+ * 以提示文字判斷殘留會漏(對話框標題列Save鈕等其他文字之提示框)，且.WPopperFix亦用於下拉浮層，故依元件設定(mode)辨識，文字不限。
+ *
+ * WTooltip未宣告name，以結構辨識：$refs含divTrigger與divContent、props.mode、data.valueTrans(w-component-vue 2.5.24之WTooltip.vue)。
+ * 本函數依賴上述內部欄位：元件改名或改寫時會找不到任何提示框而一律通過(靜默失效)，升級w-component-vue時須以真元件頁複驗(hover中偵測得到、移開後為空、已開之WPopup不誤判)。
+ * 根實例：opt.rootSel有給時取該元素之__vue__；否則取window.$vo(應用掛上者)，再否則取body直屬元素之__vue__；皆無則不檢查(非Vue頁面)。
+ *
+ * @param {Object} page 輸入Playwright頁面物件
+ * @param {Object} [opt={}] 輸入設定物件，預設{}
+ * @param {String} [opt.rootSel=''] 輸入掛有Vue 2根實例(__vue__)之元素選擇器字串，預設''(用window.$vo或body直屬元素之__vue__)
+ * @param {Function} [opt.createError] 輸入依殘留文字陣列產生錯誤物件之函數(texts)=>Error，預設產生一般Error(訊息列出各提示文字)
+ * @returns {Promise} 回傳Promise，無殘留時resolve回傳空陣列；有殘留時reject回傳錯誤物件
+ * @example
+ *
+ * import captureStable from 'w-package-tools-e2e/src/captureStable.mjs'
+ * import probeStuckTooltip from 'w-package-tools-e2e/src/probeStuckTooltip.mjs'
+ *
+ * let buf = await captureStable(page, { beforeShots: [probeStuckTooltip] })
+ *
+ */
+async function probeStuckTooltip(page, opt = {}) {
+    let rootSel = opt.rootSel || ''
+    let createError = typeof opt.createError === 'function' ? opt.createError : (texts) => new Error(`游標已移開，提示框「${texts.join('」「')}」仍顯示(提示框殘留：mouseleave未送達觸發區)`)
+    let texts = await page.evaluate((rootSel) => {
+        let out = []
+        let walk = (vm) => {
+            let refs = vm.$refs || {}
+            if (refs.divTrigger &amp;&amp; refs.divContent &amp;&amp; vm.$props &amp;&amp; vm.$props.mode === 'tooltip' &amp;&amp; vm.valueTrans === true) {
+                let el = refs.divContent
+                let cs = window.getComputedStyle(el)
+                let r = el.getBoundingClientRect()
+                if (cs.display !== 'none' &amp;&amp; cs.visibility !== 'hidden' &amp;&amp; r.width > 0 &amp;&amp; r.height > 0) {
+                    out.push((el.innerText || '').trim())
+                }
+            }
+            for (let c of vm.$children || []) {
+                walk(c)
+            }
+        }
+        let root = null
+        if (rootSel) {
+            let el = document.querySelector(rootSel)
+            root = el &amp;&amp; el.__vue__ ? el.__vue__.$root : null
+        }
+        else if (window.$vo) {
+            root = window.$vo.$root
+        }
+        else {
+            for (let el of document.querySelectorAll('body > *')) {
+                if (el.__vue__) {
+                    root = el.__vue__.$root
+                    break
+                }
+            }
+        }
+        if (root) {
+            walk(root)
+        }
+        return out
+    }, rootSel)
+    if (texts.length > 0) {
+        throw createError(texts)
+    }
+    return texts
+}
+
+
+export default probeStuckTooltip
+</code></pre>
+        </article>
+    </section>
+
+
+
+
+    
+    
+</div>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 4.0.5</a> on Thu Oct 01 2026 14:11:24 GMT+0800 (台北標準時間) using the <a href="https://github.com/clenemt/docdash">docdash</a> theme.
+</footer>
+
+<script>prettyPrint();</script>
+<script src="scripts/polyfill.js"></script>
+<script src="scripts/linenumber.js"></script>
+
+
+
+</body>
+</html>

@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    
+    <meta charset="utf-8">
+    <title>normalizeShots.mjs - Documentation</title>
+    
+    
+    <script src="scripts/prettify/prettify.js"></script>
+    <script src="scripts/prettify/lang-css.js"></script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc.css">
+    <script src="scripts/nav.js" defer></script>
+    
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+
+<input type="checkbox" id="nav-trigger" class="nav-trigger" />
+<label for="nav-trigger" class="navicon-button x">
+  <div class="navicon"></div>
+</label>
+
+<label for="nav-trigger" class="overlay"></label>
+
+<nav >
+    
+    
+    <h2><a href="index.html">Home</a></h2><h3>Global</h3><ul><li><a href="global.html#BOX_PAD">BOX_PAD</a></li><li><a href="global.html#INK_PAD">INK_PAD</a></li><li><a href="global.html#WPackageToolsE2e">WPackageToolsE2e</a></li><li><a href="global.html#assertBaselineMatch">assertBaselineMatch</a></li><li><a href="global.html#assertTextSpec">assertTextSpec</a></li><li><a href="global.html#canvasInkRects">canvasInkRects</a></li><li><a href="global.html#captureStable">captureStable</a></li><li><a href="global.html#captureStableWithBox">captureStableWithBox</a></li><li><a href="global.html#chromiumLaunchArgs">chromiumLaunchArgs</a></li><li><a href="global.html#collectDomText">collectDomText</a></li><li><a href="global.html#compareImageDirs">compareImageDirs</a></li><li><a href="global.html#createBaselineGate">createBaselineGate</a></li><li><a href="global.html#createKnownDefect">createKnownDefect</a></li><li><a href="global.html#createServiceManager">createServiceManager</a></li><li><a href="global.html#createTempSettings">createTempSettings</a></li><li><a href="global.html#cropRegion">cropRegion</a></li><li><a href="global.html#diffBaselineSnapshots">diffBaselineSnapshots</a></li><li><a href="global.html#findOrphanBaselines">findOrphanBaselines</a></li><li><a href="global.html#getE2eMode">getE2eMode</a></li><li><a href="global.html#gridContentBox">gridContentBox</a></li><li><a href="global.html#isChildAlive">isChildAlive</a></li><li><a href="global.html#itemsUnionBox">itemsUnionBox</a></li><li><a href="global.html#killOwnTree">killOwnTree</a></li><li><a href="global.html#killPortListeners">killPortListeners</a></li><li><a href="global.html#launchBrowser">launchBrowser</a></li><li><a href="global.html#launchChromium">launchChromium</a></li><li><a href="global.html#launchChromiumCore">launchChromiumCore</a></li><li><a href="global.html#listenerPids">listenerPids</a></li><li><a href="global.html#maskRegions">maskRegions</a></li><li><a href="global.html#normalizeShots">normalizeShots</a></li><li><a href="global.html#openCasePage">openCasePage</a></li><li><a href="global.html#overlayImageAt">overlayImageAt</a></li><li><a href="global.html#overlayRegions">overlayRegions</a></li><li><a href="global.html#pageHasText">pageHasText</a></li><li><a href="global.html#parseListenerPids">parseListenerPids</a></li><li><a href="global.html#pidExists">pidExists</a></li><li><a href="global.html#pollUntil">pollUntil</a></li><li><a href="global.html#probeHttp">probeHttp</a></li><li><a href="global.html#probeStuckTooltip">probeStuckTooltip</a></li><li><a href="global.html#registerCleanupHooks">registerCleanupHooks</a></li><li><a href="global.html#resetAgGridScroll">resetAgGridScroll</a></li><li><a href="global.html#rowBoxSel">rowBoxSel</a></li><li><a href="global.html#runBaselineCase">runBaselineCase</a></li><li><a href="global.html#runIsolatedE2e">runIsolatedE2e</a></li><li><a href="global.html#sleepSync">sleepSync</a></li><li><a href="global.html#snapshotBaselines">snapshotBaselines</a></li><li><a href="global.html#stepShots">stepShots</a></li><li><a href="global.html#typeIntoInput">typeIntoInput</a></li><li><a href="global.html#typeIntoNthInput">typeIntoNthInput</a></li><li><a href="global.html#waitAlertGone">waitAlertGone</a></li><li><a href="global.html#waitChildExit">waitChildExit</a></li><li><a href="global.html#waitColResizeOverlay">waitColResizeOverlay</a></li><li><a href="global.html#waitDrawerReady">waitDrawerReady</a></li><li><a href="global.html#waitGridIdle">waitGridIdle</a></li><li><a href="global.html#waitUntilExist">waitUntilExist</a></li></ul>
+    
+</nav>
+
+<div id="main">
+    
+    <h1 class="page-title">normalizeShots.mjs</h1>
+    
+
+    
+
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>/**
+ * 把案例執行函數之各種回傳形狀正規化為截圖陣列[{key,buf}]
+ *
+ * 支援：①Buffer(單張，圖鍵為name)；②物件{圖鍵:Buffer}(多階段)；③陣列[{name,buf}]或[{key,buf}]；
+ * ④包裝物件{buf,page}或{shots,page}(執行中換頁者，page另由呼叫端取用)；⑤null或undefined(無截圖)。
+ * 圖鍵重複、元素不是Buffer一律拋錯
+ *
+ * @param {*} result 輸入案例執行函數之回傳值
+ * @param {String} name 輸入案例鍵字串(單張時作為圖鍵)
+ * @returns {Array} 回傳截圖陣列[{key,buf}]
+ * @example
+ *
+ * import normalizeShots from 'w-package-tools-e2e/src/normalizeShots.mjs'
+ *
+ * normalizeShots(buf, 'E2E-001-list-loaded')
+ * // => [{ key: 'E2E-001-list-loaded', buf }]
+ * normalizeShots({ 'E2E-002-1-a': b1, 'E2E-002-2-b': b2 }, 'E2E-002-x')
+ * // => [{ key: 'E2E-002-1-a', buf: b1 }, { key: 'E2E-002-2-b', buf: b2 }]
+ *
+ */
+function normalizeShots(result, name) {
+    let out = []
+    if (result === null || result === undefined) {
+        return out
+    }
+    if (Buffer.isBuffer(result)) {
+        out = [{ key: name, buf: result }]
+    }
+    else if (Array.isArray(result)) {
+        out = result.map((x, i) => {
+            let key = x &amp;&amp; (x.name !== undefined ? x.name : x.key)
+            if (!key) {
+                throw new Error(`normalizeShots: ${name} 第 ${i} 張缺 name/key`)
+            }
+            return { key: String(key), buf: x.buf }
+        })
+    }
+    else if (typeof result === 'object' &amp;&amp; ('buf' in result || 'shots' in result)) {
+        return normalizeShots('shots' in result ? result.shots : result.buf, name)
+    }
+    else if (typeof result === 'object') {
+        out = Object.entries(result).map(([key, buf]) => ({ key, buf }))
+    }
+    else {
+        throw new Error(`normalizeShots: ${name} 之回傳型別不支援 (${typeof result})`)
+    }
+    let keys = new Set()
+    for (let s of out) {
+        if (!Buffer.isBuffer(s.buf)) {
+            throw new Error(`normalizeShots: ${name} 之 ${s.key} 不是 Buffer`)
+        }
+        if (keys.has(s.key)) {
+            throw new Error(`normalizeShots: ${name} 之圖鍵重複 ${s.key}`)
+        }
+        keys.add(s.key)
+    }
+    return out
+}
+
+
+export default normalizeShots
+</code></pre>
+        </article>
+    </section>
+
+
+
+
+    
+    
+</div>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 4.0.5</a> on Thu Oct 01 2026 14:11:24 GMT+0800 (台北標準時間) using the <a href="https://github.com/clenemt/docdash">docdash</a> theme.
+</footer>
+
+<script>prettyPrint();</script>
+<script src="scripts/polyfill.js"></script>
+<script src="scripts/linenumber.js"></script>
+
+
+
+</body>
+</html>

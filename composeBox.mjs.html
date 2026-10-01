@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    
+    <meta charset="utf-8">
+    <title>composeBox.mjs - Documentation</title>
+    
+    
+    <script src="scripts/prettify/prettify.js"></script>
+    <script src="scripts/prettify/lang-css.js"></script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc.css">
+    <script src="scripts/nav.js" defer></script>
+    
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+
+<input type="checkbox" id="nav-trigger" class="nav-trigger" />
+<label for="nav-trigger" class="navicon-button x">
+  <div class="navicon"></div>
+</label>
+
+<label for="nav-trigger" class="overlay"></label>
+
+<nav >
+    
+    
+    <h2><a href="index.html">Home</a></h2><h3>Global</h3><ul><li><a href="global.html#BOX_PAD">BOX_PAD</a></li><li><a href="global.html#INK_PAD">INK_PAD</a></li><li><a href="global.html#WPackageToolsE2e">WPackageToolsE2e</a></li><li><a href="global.html#assertBaselineMatch">assertBaselineMatch</a></li><li><a href="global.html#assertTextSpec">assertTextSpec</a></li><li><a href="global.html#canvasInkRects">canvasInkRects</a></li><li><a href="global.html#captureStable">captureStable</a></li><li><a href="global.html#captureStableWithBox">captureStableWithBox</a></li><li><a href="global.html#chromiumLaunchArgs">chromiumLaunchArgs</a></li><li><a href="global.html#collectDomText">collectDomText</a></li><li><a href="global.html#compareImageDirs">compareImageDirs</a></li><li><a href="global.html#createBaselineGate">createBaselineGate</a></li><li><a href="global.html#createKnownDefect">createKnownDefect</a></li><li><a href="global.html#createServiceManager">createServiceManager</a></li><li><a href="global.html#createTempSettings">createTempSettings</a></li><li><a href="global.html#cropRegion">cropRegion</a></li><li><a href="global.html#diffBaselineSnapshots">diffBaselineSnapshots</a></li><li><a href="global.html#findOrphanBaselines">findOrphanBaselines</a></li><li><a href="global.html#getE2eMode">getE2eMode</a></li><li><a href="global.html#gridContentBox">gridContentBox</a></li><li><a href="global.html#isChildAlive">isChildAlive</a></li><li><a href="global.html#itemsUnionBox">itemsUnionBox</a></li><li><a href="global.html#killOwnTree">killOwnTree</a></li><li><a href="global.html#killPortListeners">killPortListeners</a></li><li><a href="global.html#launchBrowser">launchBrowser</a></li><li><a href="global.html#launchChromium">launchChromium</a></li><li><a href="global.html#launchChromiumCore">launchChromiumCore</a></li><li><a href="global.html#listenerPids">listenerPids</a></li><li><a href="global.html#maskRegions">maskRegions</a></li><li><a href="global.html#normalizeShots">normalizeShots</a></li><li><a href="global.html#openCasePage">openCasePage</a></li><li><a href="global.html#overlayImageAt">overlayImageAt</a></li><li><a href="global.html#overlayRegions">overlayRegions</a></li><li><a href="global.html#pageHasText">pageHasText</a></li><li><a href="global.html#parseListenerPids">parseListenerPids</a></li><li><a href="global.html#pidExists">pidExists</a></li><li><a href="global.html#pollUntil">pollUntil</a></li><li><a href="global.html#probeHttp">probeHttp</a></li><li><a href="global.html#probeStuckTooltip">probeStuckTooltip</a></li><li><a href="global.html#registerCleanupHooks">registerCleanupHooks</a></li><li><a href="global.html#resetAgGridScroll">resetAgGridScroll</a></li><li><a href="global.html#rowBoxSel">rowBoxSel</a></li><li><a href="global.html#runBaselineCase">runBaselineCase</a></li><li><a href="global.html#runIsolatedE2e">runIsolatedE2e</a></li><li><a href="global.html#sleepSync">sleepSync</a></li><li><a href="global.html#snapshotBaselines">snapshotBaselines</a></li><li><a href="global.html#stepShots">stepShots</a></li><li><a href="global.html#typeIntoInput">typeIntoInput</a></li><li><a href="global.html#typeIntoNthInput">typeIntoNthInput</a></li><li><a href="global.html#waitAlertGone">waitAlertGone</a></li><li><a href="global.html#waitChildExit">waitChildExit</a></li><li><a href="global.html#waitColResizeOverlay">waitColResizeOverlay</a></li><li><a href="global.html#waitDrawerReady">waitDrawerReady</a></li><li><a href="global.html#waitGridIdle">waitGridIdle</a></li><li><a href="global.html#waitUntilExist">waitUntilExist</a></li></ul>
+    
+</nav>
+
+<div id="main">
+    
+    <h1 class="page-title">composeBox.mjs</h1>
+    
+
+    
+
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>import sharp from 'sharp'
+
+
+/**
+ * 把紅框以sharp疊到截圖buffer上(截圖後合成，不注入DOM)，標注本張標準圖之觀看或操作區
+ *
+ * 幾何：目標區外擴pad(預設6)，四邊夾在bounds內並留margin(預設3)；SVG之stroke置中於路徑，
+ * 故外緣落在夾邊後之矩形上，等效DOM版border-box之5px內縮框線。框過小(寬或高不足stroke)時預設不畫、回傳原buffer(guardSmall=false則照畫，重現無此守門之專案)。
+ * why不注入DOM：插入後又移除之暫時DOM偶發使整頁光柵化偏1px，量測工具不得改動被測頁
+ *
+ * @param {Buffer} buf 輸入PNG之Buffer
+ * @param {Object} box 輸入目標區物件{left,top,right,bottom}(buffer座標，已含捲動量)
+ * @param {Object} [opt={}] 輸入設定物件，預設{}
+ * @param {Object} [opt.bounds] 輸入夾邊範圍物件{left,top,right,bottom}(buffer座標)，預設為整張buffer；只框視窗內者給視窗矩形加捲動量
+ * @param {Number} [opt.pad=6] 輸入外擴像素，預設6
+ * @param {Number} [opt.margin=3] 輸入夾邊時與邊界之距離像素，預設3
+ * @param {Number} [opt.strokeWidth=5] 輸入框線寬度像素，預設5
+ * @param {String} [opt.color='#f26'] 輸入框線顏色字串，預設'#f26'
+ * @param {Number} [opt.radius=4] 輸入圓角像素，預設4
+ * @param {Boolean} [opt.guardSmall=true] 輸入框過小時是否不畫布林值，預設true
+ * @param {Function} [opt.onSkip] 輸入框過小而未畫時之回呼函數(reason)=>void，預設無；呼叫端可據以拋錯(captureStableWithBox 以此偵測「靜默無框」)
+ * @returns {Promise} 回傳Promise，resolve回傳畫上紅框之PNG Buffer
+ * @example
+ *
+ * import composeBox from 'w-package-tools-e2e/src/composeBox.mjs'
+ *
+ * buf = await composeBox(buf, { left: 100, top: 50, right: 300, bottom: 120 })
+ *
+ */
+//框幾何預設值(外擴與框線寬)；itemsUnionBox 據以把框線置於相鄰項目之間隙正中，故集中於此一處
+export const BOX_PAD = 6
+export const BOX_STROKE = 5
+
+
+async function composeBox(buf, box, opt = {}) {
+    let { pad = BOX_PAD, margin = 3, strokeWidth = BOX_STROKE, color = '#f26', radius = 4, guardSmall = true } = opt
+    let meta = await sharp(buf).metadata()
+    let bounds = opt.bounds || { left: 0, top: 0, right: meta.width, bottom: meta.height }
+    let bl = Math.max(bounds.left + margin, box.left - pad)
+    let bt = Math.max(bounds.top + margin, box.top - pad)
+    let br = Math.min(bounds.right - margin, box.right + pad)
+    let bb = Math.min(bounds.bottom - margin, box.bottom + pad)
+    if (guardSmall &amp;&amp; (br - bl &lt;= strokeWidth || bb - bt &lt;= strokeWidth)) {
+        if (typeof opt.onSkip === 'function') {
+            opt.onSkip(`框過小(夾邊後 ${Math.round(br - bl)}x${Math.round(bb - bt)}px, 不足 stroke ${strokeWidth}px; 目標可能在畫面外或尺寸為 0)`)
+        }
+        return buf
+    }
+    let half = strokeWidth / 2
+    let svg = `&lt;svg width="${meta.width}" height="${meta.height}" xmlns="http://www.w3.org/2000/svg">` +
+        `&lt;rect x="${bl + half}" y="${bt + half}" width="${br - bl - strokeWidth}" height="${bb - bt - strokeWidth}" fill="none" stroke="${color}" stroke-width="${strokeWidth}" rx="${radius}" ry="${radius}"/>` +
+        `&lt;/svg>`
+    return await sharp(buf).composite([{ input: Buffer.from(svg), top: 0, left: 0 }]).png().toBuffer()
+}
+
+
+export default composeBox
+</code></pre>
+        </article>
+    </section>
+
+
+
+
+    
+    
+</div>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 4.0.5</a> on Thu Oct 01 2026 14:11:24 GMT+0800 (台北標準時間) using the <a href="https://github.com/clenemt/docdash">docdash</a> theme.
+</footer>
+
+<script>prettyPrint();</script>
+<script src="scripts/polyfill.js"></script>
+<script src="scripts/linenumber.js"></script>
+
+
+
+</body>
+</html>

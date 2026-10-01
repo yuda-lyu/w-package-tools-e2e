@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    
+    <meta charset="utf-8">
+    <title>captureStable.mjs - Documentation</title>
+    
+    
+    <script src="scripts/prettify/prettify.js"></script>
+    <script src="scripts/prettify/lang-css.js"></script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc.css">
+    <script src="scripts/nav.js" defer></script>
+    
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+
+<input type="checkbox" id="nav-trigger" class="nav-trigger" />
+<label for="nav-trigger" class="navicon-button x">
+  <div class="navicon"></div>
+</label>
+
+<label for="nav-trigger" class="overlay"></label>
+
+<nav >
+    
+    
+    <h2><a href="index.html">Home</a></h2><h3>Global</h3><ul><li><a href="global.html#BOX_PAD">BOX_PAD</a></li><li><a href="global.html#INK_PAD">INK_PAD</a></li><li><a href="global.html#WPackageToolsE2e">WPackageToolsE2e</a></li><li><a href="global.html#assertBaselineMatch">assertBaselineMatch</a></li><li><a href="global.html#assertTextSpec">assertTextSpec</a></li><li><a href="global.html#canvasInkRects">canvasInkRects</a></li><li><a href="global.html#captureStable">captureStable</a></li><li><a href="global.html#captureStableWithBox">captureStableWithBox</a></li><li><a href="global.html#chromiumLaunchArgs">chromiumLaunchArgs</a></li><li><a href="global.html#collectDomText">collectDomText</a></li><li><a href="global.html#compareImageDirs">compareImageDirs</a></li><li><a href="global.html#createBaselineGate">createBaselineGate</a></li><li><a href="global.html#createKnownDefect">createKnownDefect</a></li><li><a href="global.html#createServiceManager">createServiceManager</a></li><li><a href="global.html#createTempSettings">createTempSettings</a></li><li><a href="global.html#cropRegion">cropRegion</a></li><li><a href="global.html#diffBaselineSnapshots">diffBaselineSnapshots</a></li><li><a href="global.html#findOrphanBaselines">findOrphanBaselines</a></li><li><a href="global.html#getE2eMode">getE2eMode</a></li><li><a href="global.html#gridContentBox">gridContentBox</a></li><li><a href="global.html#isChildAlive">isChildAlive</a></li><li><a href="global.html#itemsUnionBox">itemsUnionBox</a></li><li><a href="global.html#killOwnTree">killOwnTree</a></li><li><a href="global.html#killPortListeners">killPortListeners</a></li><li><a href="global.html#launchBrowser">launchBrowser</a></li><li><a href="global.html#launchChromium">launchChromium</a></li><li><a href="global.html#launchChromiumCore">launchChromiumCore</a></li><li><a href="global.html#listenerPids">listenerPids</a></li><li><a href="global.html#maskRegions">maskRegions</a></li><li><a href="global.html#normalizeShots">normalizeShots</a></li><li><a href="global.html#openCasePage">openCasePage</a></li><li><a href="global.html#overlayImageAt">overlayImageAt</a></li><li><a href="global.html#overlayRegions">overlayRegions</a></li><li><a href="global.html#pageHasText">pageHasText</a></li><li><a href="global.html#parseListenerPids">parseListenerPids</a></li><li><a href="global.html#pidExists">pidExists</a></li><li><a href="global.html#pollUntil">pollUntil</a></li><li><a href="global.html#probeHttp">probeHttp</a></li><li><a href="global.html#probeStuckTooltip">probeStuckTooltip</a></li><li><a href="global.html#registerCleanupHooks">registerCleanupHooks</a></li><li><a href="global.html#resetAgGridScroll">resetAgGridScroll</a></li><li><a href="global.html#rowBoxSel">rowBoxSel</a></li><li><a href="global.html#runBaselineCase">runBaselineCase</a></li><li><a href="global.html#runIsolatedE2e">runIsolatedE2e</a></li><li><a href="global.html#sleepSync">sleepSync</a></li><li><a href="global.html#snapshotBaselines">snapshotBaselines</a></li><li><a href="global.html#stepShots">stepShots</a></li><li><a href="global.html#typeIntoInput">typeIntoInput</a></li><li><a href="global.html#typeIntoNthInput">typeIntoNthInput</a></li><li><a href="global.html#waitAlertGone">waitAlertGone</a></li><li><a href="global.html#waitChildExit">waitChildExit</a></li><li><a href="global.html#waitColResizeOverlay">waitColResizeOverlay</a></li><li><a href="global.html#waitDrawerReady">waitDrawerReady</a></li><li><a href="global.html#waitGridIdle">waitGridIdle</a></li><li><a href="global.html#waitUntilExist">waitUntilExist</a></li></ul>
+    
+</nav>
+
+<div id="main">
+    
+    <h1 class="page-title">captureStable.mjs</h1>
+    
+
+    
+
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>import sharp from 'sharp'
+import maskRegions from './maskRegions.mjs'
+
+
+//去掉 SVG 之 SMIL 動畫元素(自閉合與成對兩種寫法), 留下初始靜態影格
+function stripSmil(svg) {
+    return svg
+        .replace(/&lt;(animate|animateTransform|animateMotion|animateColor|set)\b[^>]*\/>/gi, '')
+        .replace(/&lt;(animate|animateTransform|animateMotion|animateColor|set)\b[^>]*>[\s\S]*?&lt;\/\1\s*>/gi, '')
+}
+
+
+/**
+ * 標準圖截圖之唯一入口：先排除「還沒穩定」與「穩定到錯的狀態」兩類成因，再連拍至相鄰兩張完全相同才回傳
+ *
+ * 順序(不可調換)：滑鼠移到(0,0)消除hover → 初始等待(涵蓋setTimeout延遲顯示與hover離開動畫，animations:'disabled'不快轉setTimeout) →
+ * settle掛鉤(元件狀態機優先，例如WDrawer之waitColResizeOverlay、waitDrawerReady) → 凍結inline SVG之SMIL動畫 → 等字型就緒 →
+ * beforeShots掛鉤(例如ag-grid水平捲動歸零) → 偵測&lt;img>內含&lt;animate>之SVG區域(截圖後貼上該SVG去掉動畫元素之靜態影格，兩端同區同圖) →
+ * 連拍：每張先遮罩再與前一張比對位元組，相同即回傳；重試用盡仍不同時，strict拋錯(產製端拒絕寫入未穩定畫面)，否則回傳最後一張交由比對揭露真實flake。
+ * strict之決定：opt.strict為布林值時依之；否則呼叫strictDefault()(於每次呼叫時求值，預設讀環境變數E2E_STRICT_CAPTURE為'1')。
+ * &lt;img>動畫區座標須與截圖之座標系一致：全頁截圖為頁面座標(視窗座標加捲動量)、視窗截圖為視窗座標，給clip時再減去clip原點
+ * (smilRectBasis預設'auto'即依shotOpts自動決定)。2026-09-28前四個姊妹專案之全頁截圖皆用視窗座標，頁面捲動時遮罩落錯位置、動畫露出，
+ * 且Chrome暫停視窗外之&lt;img>動畫而使連拍「穩定」於不固定影格。smilRectBasis設'viewport'可重現舊行為(僅供等價對照，不建議)
+ * &lt;img>動畫區之處理(imgSmilFill，2026-09-28)：'static'(預設)先以區外左側像素色填底，再貼上以sharp算繪之「去掉動畫元素之SVG」靜態影格——
+ * 手冊用圖看得到真實圖示(技能 §8.2「該讓讀者看到的畫面不填黑」，原填黑使連線中畫面之轉圈成黑方塊)，且輸入固定故輸出決定；
+ * 區域超出截圖邊界者退回填黑。'black'為2026-09-28前之行為(僅供等價對照)。
+ *
+ * @param {Page} page 輸入Playwright之Page
+ * @param {Object} [opt={}] 輸入設定物件，預設{}
+ * @param {Number} [opt.maxRetries=8] 輸入最多重拍次數，預設8
+ * @param {Number} [opt.intervalMs=200] 輸入重拍間隔毫秒數，預設200
+ * @param {Number} [opt.initialWaitMs=1500] 輸入初始等待毫秒數，預設1500
+ * @param {Boolean} [opt.strict] 輸入是否未穩定即拋錯布林值，未給(或null)時由strictDefault決定
+ * @param {Function} [opt.strictDefault] 輸入strict未給時之判斷函數()=>Boolean，預設()=>process.env.E2E_STRICT_CAPTURE==='1'
+ * @param {Array} [opt.settle=[]] 輸入settle掛鉤陣列，每個為async(page)
+ * @param {Array} [opt.beforeShots=[]] 輸入連拍前掛鉤陣列，每個為async(page)
+ * @param {Boolean} [opt.freezeSvg=true] 輸入是否凍結inline SVG之SMIL動畫布林值，預設true
+ * @param {Boolean} [opt.waitFonts=true] 輸入是否等document.fonts.ready布林值，預設true
+ * @param {Boolean} [opt.maskImgSmil=true] 輸入是否處理&lt;img>內之SVG動畫區布林值，預設true
+ * @param {String} [opt.imgSmilFill='static'] 輸入&lt;img>動畫區之處理方式字串，'static'(貼靜態影格)或'black'(填黑)，預設'static'
+ * @param {String} [opt.smilRectBasis='auto'] 輸入&lt;img>動畫區之座標基準字串，'auto'(全頁截圖用'page'、視窗截圖用'viewport')、'page'(視窗座標加捲動量)或'viewport'，預設'auto'；有shotOpts.clip時一律再減去clip原點
+ * @param {Object} [opt.shotOpts={fullPage:true,animations:'disabled'}] 輸入page.screenshot之參數物件，與預設值淺合併(例如{fullPage:false}或{clip})
+ * @param {Function} [opt.maskFn=maskRegions] 輸入遮罩函數，預設maskRegions
+ * @returns {Promise} 回傳Promise，resolve回傳PNG之Buffer
+ * @example
+ *
+ * import captureStable from 'w-package-tools-e2e/src/captureStable.mjs'
+ * import waitColResizeOverlay from 'w-package-tools-e2e/src/waitColResizeOverlay.mjs'
+ * import waitDrawerReady from 'w-package-tools-e2e/src/waitDrawerReady.mjs'
+ *
+ * let buf = await captureStable(page, { settle: [waitColResizeOverlay, waitDrawerReady] })
+ *
+ */
+async function captureStable(page, opt = {}) {
+    let {
+        maxRetries = 8,
+        intervalMs = 200,
+        initialWaitMs = 1500,
+        strict = null,
+        strictDefault = () => process.env.E2E_STRICT_CAPTURE === '1',
+        settle = [],
+        beforeShots = [],
+        freezeSvg = true,
+        waitFonts = true,
+        maskImgSmil = true,
+        imgSmilFill = 'static',
+        smilRectBasis = 'auto',
+        shotOpts = {},
+        maskFn = maskRegions,
+    } = opt
+    let isStrict = typeof strict === 'boolean' ? strict : !!strictDefault()
+    let so = { fullPage: true, animations: 'disabled', ...shotOpts }
+    //遮罩座標系＝截圖之座標系: 全頁→頁面座標, 視窗→視窗座標; clip 之原點與截圖同座標系, 一併扣除
+    let basis = smilRectBasis === 'auto' ? (so.fullPage ? 'page' : 'viewport') : smilRectBasis
+    let clipOrigin = so.clip ? { x: so.clip.x || 0, y: so.clip.y || 0 } : { x: 0, y: 0 }
+
+    //park mouse: 點擊後滑鼠留在被點元素上, hover態(按鈕/tooltip/表格列/抽屜邊緣)命中與否每次不同
+    await page.mouse.move(0, 0)
+
+    //初始等待: setTimeout延遲顯示(如300ms後才顯示之分隔條)與hover離開動畫, retry-until-stable治不了
+    await page.waitForTimeout(initialWaitMs)
+
+    for (let fn of settle) {
+        await fn(page)
+    }
+
+    //凍結inline &lt;svg>之SMIL動畫(animations:'disabled'只凍CSS)
+    if (freezeSvg) {
+        await page.evaluate(() => {
+            document.querySelectorAll('svg').forEach((svg) => {
+                if (typeof svg.pauseAnimations === 'function') {
+                    svg.pauseAnimations()
+                    if (typeof svg.setCurrentTime === 'function') {
+                        svg.setCurrentTime(0)
+                    }
+                }
+            })
+        })
+    }
+
+    //等web fonts(含icon字型)載入, 否則截到glyph未渲染之佔位
+    if (waitFonts) {
+        await page.evaluate(() => {
+            return document.fonts &amp;&amp; typeof document.fonts.ready?.then === 'function' ? document.fonts.ready : Promise.resolve()
+        })
+    }
+
+    for (let fn of beforeShots) {
+        await fn(page)
+    }
+
+    //&lt;img src="data:image/svg+xml...含&lt;animate>">之區域: 由image pipeline渲染、DOM凍不到, 改截圖後貼靜態影格(或填黑)
+    let animatedRects = []
+    if (maskImgSmil) {
+        animatedRects = await page.evaluate(({ basis, ox, oy }) => {
+            let rects = []
+            let sx = (basis === 'page' ? window.scrollX : 0) - ox
+            let sy = (basis === 'page' ? window.scrollY : 0) - oy
+            document.querySelectorAll('img').forEach((img) => {
+                let src = img.src || ''
+                if (!src.startsWith('data:image/svg+xml')) return
+                let decoded = ''
+                try {
+                    if (src.startsWith('data:image/svg+xml;base64,')) {
+                        decoded = atob(src.slice('data:image/svg+xml;base64,'.length))
+                    }
+                    else {
+                        //取第一個逗號之後(去掉 data:image/svg+xml[;charset=…], 前綴); 原只作 &lt;animate 偵測時連前綴解碼無妨, 靜態影格算繪須為純 SVG
+                        decoded = decodeURIComponent(src.slice(src.indexOf(',') + 1))
+                    }
+                }
+                catch (err) {
+                    decoded = ''
+                }
+                if (/&lt;animate/i.test(decoded)) {
+                    let r = img.getBoundingClientRect()
+                    rects.push({ x: r.left + sx, y: r.top + sy, w: r.width, h: r.height, svg: decoded })
+                }
+            })
+            return rects
+        }, { basis, ox: clipOrigin.x, oy: clipOrigin.y })
+    }
+
+    //靜態影格: 同一 SVG 同尺寸只算繪一次(連拍多張共用)
+    let frameCache = new Map()
+    let pasteStatic = async (b, rects) => {
+        let { data, info } = await sharp(b).raw().toBuffer({ resolveWithObject: true })
+        let comps = []
+        let fallback = []
+        for (let r of rects) {
+            let left = Math.round(r.x)
+            let top = Math.round(r.y)
+            let w = Math.round(r.w)
+            let h = Math.round(r.h)
+            if (w &lt;= 0 || h &lt;= 0 || left &lt; 0 || top &lt; 0 || left + w > info.width || top + h > info.height) {
+                fallback.push(r)
+                continue
+            }
+            //底色取動畫區左緣外 2px、垂直置中之像素(不在動畫區內, 各次截圖相同)
+            let sx = Math.max(0, left - 2)
+            let sy = Math.min(info.height - 1, top + Math.floor(h / 2))
+            let i = (sy * info.width + sx) * info.channels
+            let bg = { r: data[i], g: data[i + 1], b: data[i + 2] }
+            let key = `${w}x${h}:${r.svg}`
+            if (!frameCache.has(key)) {
+                frameCache.set(key, await sharp(Buffer.from(stripSmil(r.svg)), { density: 288 }).resize(w, h, { fit: 'fill' }).png().toBuffer())
+            }
+            comps.push({ input: { create: { width: w, height: h, channels: 3, background: bg } }, left, top })
+            comps.push({ input: frameCache.get(key), left, top })
+        }
+        if (fallback.length > 0) {
+            b = await maskFn(b, fallback)
+        }
+        return comps.length > 0 ? await sharp(b).composite(comps).png().toBuffer() : b
+    }
+
+    let shot = async () => {
+        let b = await page.screenshot(so)
+        if (animatedRects.length > 0) {
+            b = imgSmilFill === 'black' ? await maskFn(b, animatedRects) : await pasteStatic(b, animatedRects)
+        }
+        return b
+    }
+    let prev = await shot()
+    for (let i = 0; i &lt; maxRetries; i++) {
+        await page.waitForTimeout(intervalMs)
+        let curr = await shot()
+        if (curr.equals(prev)) {
+            return curr
+        }
+        prev = curr
+    }
+    if (isStrict) {
+        throw new Error(`captureStable ${maxRetries} 次仍未 settle (regen 拒絕寫入未穩定畫面)`)
+    }
+    return prev
+}
+
+
+export default captureStable
+</code></pre>
+        </article>
+    </section>
+
+
+
+
+    
+    
+</div>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 4.0.5</a> on Thu Oct 01 2026 14:11:24 GMT+0800 (台北標準時間) using the <a href="https://github.com/clenemt/docdash">docdash</a> theme.
+</footer>
+
+<script>prettyPrint();</script>
+<script src="scripts/polyfill.js"></script>
+<script src="scripts/linenumber.js"></script>
+
+
+
+</body>
+</html>
