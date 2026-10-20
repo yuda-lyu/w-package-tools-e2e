@@ -4124,13 +4124,16 @@ console.log(r.summary)
 與mocha REGEN型專案一致(2026-09-28前直跑型專案之產製端從不執行只比對案例)。
 孤兒檢查：給pathOf(或由runBaselineCase經usePathOf告知)時，finalize()以findOrphanBaselines靜態比對宣告圖鍵與標準圖目錄，有孤兒即拋錯並列出。
 --write-mode：all(預設，全寫)、missing(只寫標準圖不存在者，追加案例用)、changed(只寫與現行標準圖差異超過容差或尺寸不同者，避免重寫已審過之圖)。
-E2E_BASELINE_OUT_DIR：有值時寫檔改導至該目錄(等價驗證用)，比對端讀取之標準圖路徑不受影響</p></li></ul></dd>
+E2E_BASELINE_OUT_DIR：有值時寫檔改導至該目錄(等價驗證用)，比對端讀取之標準圖路徑不受影響。
+已知缺陷：runBaselineCase於已知缺陷分支自動呼叫noteKnownDefect(lang,caseName,{keys,message,ref})，記下因缺陷未產之圖鍵(keys省略或null代表整案未產)；
+finalize()不再把這類--names項目當成未命中(整案缺陷：該案被選中之全部項目；部分缺陷：命中keys所列缺陷步圖鍵之項目)，改於有紀錄時先以log印出「已知缺陷未產」摘要並回傳{knownDefects}；
+前段圖鍵由noteProduced判已產，不因缺陷步而放過；案例根本未執行(沒有紀錄)者仍視為未命中。自寫包裝若不經runBaselineCase須自行呼叫noteKnownDefect</p></li></ul></dd>
     
 
     
     <dt class="tag-source">Source:</dt>
     <dd class="tag-source"><ul class="dummy"><li>
-        <a href="createBaselineGate.mjs.html">createBaselineGate.mjs</a>, <a href="createBaselineGate.mjs.html#line75">line 75</a>
+        <a href="createBaselineGate.mjs.html">createBaselineGate.mjs</a>, <a href="createBaselineGate.mjs.html#line79">line 79</a>
     </li></ul></dd>
     
 
@@ -4192,7 +4195,7 @@ for (let lang of gate.langs) {
         //...執行案例, 每張圖以 gate.shouldWrite(lang, c.name, key) 決定是否寫檔...
     }
 }
-gate.finalize()</code></pre>
+let { knownDefects } = gate.finalize() //有已知缺陷紀錄時, 同時以 log 印出「已知缺陷未產」摘要</code></pre>
 
 
 
@@ -4616,6 +4619,46 @@ gate.finalize()</code></pre>
         </tr>
 
     
+
+        <tr>
+            
+                <td class="name"><code>log</code></td>
+            
+
+            <td class="type">
+            
+                
+<span class="param-type">function</span>
+
+
+
+            
+            </td>
+
+            
+                <td class="attributes">
+                
+                    &lt;optional><br>
+                
+
+                
+
+                
+                </td>
+            
+
+            
+                <td class="default">
+                
+                    <code>console.log</code>
+                
+                </td>
+            
+
+            <td class="description last"><p>輸入輸出函數，finalize()有已知缺陷紀錄時用以印摘要，預設console.log，給null代表不印</p></td>
+        </tr>
+
+    
     </tbody>
 </table>
 
@@ -4645,7 +4688,7 @@ gate.finalize()</code></pre>
 
         
 <div class="param-desc">
-    <p>回傳篩選器物件{filtered,langs,writeMode,outDir,casesFor(lang),shouldWrite(lang,caseName,stageKey),noteProduced(lang,caseName,stageKey),decideWrite(buf,baselinePath),outPath(baselinePath),usePathOf(fn),orphans(),finalize(),describe()}</p>
+    <p>回傳篩選器物件{filtered,langs,writeMode,outDir,casesFor(lang),shouldWrite(lang,caseName,stageKey),noteProduced(lang,caseName,stageKey),noteKnownDefect(lang,caseName,opt),decideWrite(buf,baselinePath),outPath(baselinePath),usePathOf(fn),orphans(),finalize(),describe()}；finalize()通過時回傳{knownDefects:[{lang,name,keys,message,ref}]}</p>
 </div>
 
 
@@ -4683,14 +4726,18 @@ gate.finalize()</code></pre>
     
     <dt class="tag-description">Description:</dt>
     <dd class="tag-description"><ul class="dummy"><li><p>建立「已知缺陷」錯誤：案例走到已登錄於spec〈已知落差〉之產品缺陷徵狀時拋出，
-產製端跳過該案例不寫圖(壞掉的畫面不得凍結為標準圖)，比對端交由測試框架標為pending</p>
-<p>錯誤物件帶knownDefect:true與ref(〈已知落差〉之條目識別)；runBaselineCase據此分流</p></li></ul></dd>
+產製端跳過缺陷畫面不寫圖(壞掉的畫面不得凍結為標準圖)，比對端交由測試框架標為pending</p>
+<p>錯誤物件帶knownDefect:true與ref(〈已知落差〉之條目識別)；runBaselineCase據此分流。
+缺陷落在案例後段時(部分已知缺陷)，可帶shots(缺陷之前已取得、畫面正常之截圖，格式同run之回傳)，錯誤物件即帶shots(同一參考)；
+runBaselineCase搭配stages與defectStages時，產製端照常寫出、比對端照常比對這些前段截圖，缺陷步之圖鍵不產不比。
+未帶shots者為整案已知缺陷(行為不變：產製端整案不寫、比對端不比任何一張)。
+帶shots之已知缺陷僅能由run拋出；1.0.8及之前shots被靜默忽略，此後生效</p></li></ul></dd>
     
 
     
     <dt class="tag-source">Source:</dt>
     <dd class="tag-source"><ul class="dummy"><li>
-        <a href="createKnownDefect.mjs.html">createKnownDefect.mjs</a>, <a href="createKnownDefect.mjs.html#line20">line 20</a>
+        <a href="createKnownDefect.mjs.html">createKnownDefect.mjs</a>, <a href="createKnownDefect.mjs.html#line29">line 29</a>
     </li></ul></dd>
     
 
@@ -4739,9 +4786,13 @@ gate.finalize()</code></pre>
     
     <pre class="prettyprint"><code>import createKnownDefect from 'w-package-tools-e2e/src/createKnownDefect.mjs'
 
+//整案已知缺陷
 if (await page.locator('.webpack-dev-server-client-overlay').count() > 0) {
     throw createKnownDefect('儲存後出現未捕捉例外覆蓋層', { ref: 'spec/流程_xxx.md 已知落差 2026-09-27' })
-}</code></pre>
+}
+
+//部分已知缺陷: 第4步才走到缺陷, 前3步之截圖(shots)照常產製與比對(runBaselineCase 須給 stages 與 defectStages)
+throw createKnownDefect('第4步全不選後出現空白表格', { ref: 'spec/流程_xxx.md 已知落差 2026-10-20', shots })</code></pre>
 
 
 
@@ -4911,6 +4962,50 @@ if (await page.locator('.webpack-dev-server-client-overlay').count() > 0) {
         </tr>
 
     
+
+        <tr>
+            
+                <td class="name"><code>shots</code></td>
+            
+
+            <td class="type">
+            
+                
+<span class="param-type">Buffer</span>
+|
+
+<span class="param-type">Object</span>
+|
+
+<span class="param-type">Array</span>
+
+
+
+            
+            </td>
+
+            
+                <td class="attributes">
+                
+                    &lt;optional><br>
+                
+
+                
+
+                
+                </td>
+            
+
+            
+                <td class="default">
+                
+                </td>
+            
+
+            <td class="description last"><p>輸入缺陷之前已取得之截圖，格式同run之回傳(Buffer、{圖鍵:Buffer}、[{name,buf}]、{shots,page})，預設不帶(整案已知缺陷)；給定時須為物件，否則拋錯</p></td>
+        </tr>
+
+    
     </tbody>
 </table>
 
@@ -4940,7 +5035,7 @@ if (await page.locator('.webpack-dev-server-client-overlay').count() > 0) {
 
         
 <div class="param-desc">
-    <p>回傳帶knownDefect標記之錯誤物件</p>
+    <p>回傳帶knownDefect標記之錯誤物件，有給shots時另帶shots</p>
 </div>
 
 
@@ -14095,14 +14190,23 @@ let buf2 = await captureStableWithBox(page, rowBoxSel(3, { order: ['center', 'pi
 <p>順序：prepare(開瀏覽器前，例如資料庫重置) → launch → openPage → beforeRun → run → 正規化截圖 → semantic → verify →
 產製端：依gate逐張決定是否寫檔(全部斷言通過後才寫，任何斷言失敗則該案一張都不寫)；比對端：逐張assertBaselineMatch →
 finally關閉瀏覽器(若run中換了瀏覽器，以ctx.browserRef.current為準)並呼叫afterCase。
-各掛鉤皆收到ctx物件{mode,lang,name,browser,browserRef,page,shots,result}，可依ctx.mode分流(例如只能在測試框架內執行之檢查)。
-已知缺陷(createKnownDefect)：產製端略過該案不寫圖並回傳status為'knownDefect'；比對端呼叫onKnownDefect(例如mocha之this.skip)，未給則原樣拋出</p></li></ul></dd>
+各掛鉤皆收到ctx物件{mode,lang,name,browser,browserRef,page,shots,result}，可依ctx.mode分流(例如只能在測試框架內執行之檢查)。</p>
+<p>已知缺陷(createKnownDefect)分兩種：
+整案已知缺陷(錯誤不帶shots，由run或掛鉤拋出皆可)：產製端略過該案不寫圖並回傳status為'knownDefect'，比對端呼叫onKnownDefect(例如mocha之this.skip)，未給則原樣拋出；
+部分已知缺陷(錯誤帶shots，缺陷落在案例後段，僅能由run拋出)：缺陷之前已取得之截圖(err.shots，形狀同run之回傳，含{shots,page}換頁)照常走同一條管線——須與stages及defectStages併用，
+圖鍵須三向相符(多：shots有而stages沒有；重疊：shots含defectStages之鍵；少：stages有而shots與defectStages都沒有，任一成立即拋錯，一張都不寫)，
+之後仍先過semantic與verify(ctx.knownDefect為該錯誤、ctx.shots為前段截圖，既有掛鉤須能分流)，
+產製端依gate寫出前段(缺陷步之圖鍵不產，印[known-defect]與未產圖鍵，回傳status仍為'knownDefect'並帶defectStages)，
+比對端逐張比對前段，全部一致才呼叫onKnownDefect(任一張不符或缺檔即拋比對錯誤，不呼叫onKnownDefect，前段回歸不被pending掩蓋)。
+帶shots之已知缺陷僅能由run拋出，由run之前之階段或semantic/verify拋出者視同一般錯。
+缺陷修復後run不再拋缺陷而走完全部階段，即回到正常路徑(stages檢查仍為全部圖鍵)。
+有給gate時，缺陷分支自動呼叫gate.noteKnownDefect記下因缺陷未產之圖鍵，使finalize不把它們當成--names未命中</p></li></ul></dd>
     
 
     
     <dt class="tag-source">Source:</dt>
     <dd class="tag-source"><ul class="dummy"><li>
-        <a href="runBaselineCase.mjs.html">runBaselineCase.mjs</a>, <a href="runBaselineCase.mjs.html#line53">line 53</a>
+        <a href="runBaselineCase.mjs.html">runBaselineCase.mjs</a>, <a href="runBaselineCase.mjs.html#line79">line 79</a>
     </li></ul></dd>
     
 
@@ -14156,7 +14260,22 @@ it(name, async function() {
     await runBaselineCase({ mode: 'compare', lang, name, launch: launchBrowser, run: fn, semantic, pathOf, onKnownDefect: () => this.skip() })
 })
 //產製端(直跑 --baseline)
-await runBaselineCase({ mode: 'regen', lang, name, launch: launchBrowser, run: fn, semantic, pathOf, gate })</code></pre>
+await runBaselineCase({ mode: 'regen', lang, name, launch: launchBrowser, run: fn, semantic, pathOf, gate })
+
+//部分已知缺陷: 第4步走到缺陷, 前3步之標準圖照常產製與比對
+let stages = ['E2E-018-1-a', 'E2E-018-2-b', 'E2E-018-3-c', 'E2E-018-4-d']
+let run = async (page, lang) => {
+    let shots = {}
+    shots['E2E-018-1-a'] = await captureStep1(page)
+    shots['E2E-018-2-b'] = await captureStep2(page)
+    shots['E2E-018-3-c'] = await captureStep3(page)
+    if (await hasDefectSymptom(page)) {
+        throw createKnownDefect('第4步全不選後出現空白表格', { ref: 'spec/流程_xxx.md 已知落差 2026-10-20', shots })
+    }
+    shots['E2E-018-4-d'] = await captureStep4(page)
+    return shots
+}
+await runBaselineCase({ mode: 'regen', lang, name, launch: launchBrowser, run, pathOf, gate, stages, defectStages: ['E2E-018-4-d'] })</code></pre>
 
 
 
@@ -14594,7 +14713,7 @@ await runBaselineCase({ mode: 'regen', lang, name, launch: launchBrowser, run: f
                 </td>
             
 
-            <td class="description last"><p>輸入語意斷言函數，async(ctx)，寫檔或比對前必過</p></td>
+            <td class="description last"><p>輸入語意斷言函數，async(ctx)，寫檔或比對前必過；部分已知缺陷時亦執行，ctx.knownDefect為該錯誤</p></td>
         </tr>
 
     
@@ -14632,7 +14751,7 @@ await runBaselineCase({ mode: 'regen', lang, name, launch: launchBrowser, run: f
                 </td>
             
 
-            <td class="description last"><p>輸入資料庫或端到端不變式檢查函數，async(ctx)，寫檔或比對前必過</p></td>
+            <td class="description last"><p>輸入資料庫或端到端不變式檢查函數，async(ctx)，寫檔或比對前必過；部分已知缺陷時亦執行，ctx.knownDefect為該錯誤</p></td>
         </tr>
 
     
@@ -14795,6 +14914,46 @@ await runBaselineCase({ mode: 'regen', lang, name, launch: launchBrowser, run: f
 
         <tr>
             
+                <td class="name"><code>defectStages</code></td>
+            
+
+            <td class="type">
+            
+                
+<span class="param-type">Array</span>
+
+
+
+            
+            </td>
+
+            
+                <td class="attributes">
+                
+                    &lt;optional><br>
+                
+
+                
+
+                
+                </td>
+            
+
+            
+                <td class="default">
+                
+                    <code>null</code>
+                
+                </td>
+            
+
+            <td class="description last"><p>輸入缺陷步之圖鍵字串陣列(須為stages之子集且須與stages併用，空陣列等同未給)，預設null；run拋帶shots之已知缺陷時，這些圖鍵不產不比，其餘stages須由shots補齊</p></td>
+        </tr>
+
+    
+
+        <tr>
+            
                 <td class="name"><code>compareOnly</code></td>
             
 
@@ -14948,7 +15107,7 @@ await runBaselineCase({ mode: 'regen', lang, name, launch: launchBrowser, run: f
                 </td>
             
 
-            <td class="description last"><p>輸入比對端遇已知缺陷之處理函數，async(err)，預設null代表原樣拋出</p></td>
+            <td class="description last"><p>輸入比對端遇已知缺陷之處理函數，async(err)，預設null代表原樣拋出；部分已知缺陷時於前段全部比對通過後才呼叫</p></td>
         </tr>
 
     
@@ -15099,7 +15258,7 @@ await runBaselineCase({ mode: 'regen', lang, name, launch: launchBrowser, run: f
 
         
 <div class="param-desc">
-    <p>回傳Promise，resolve回傳物件{status,shots,written,kept,skipped}，status為'regen'、'compare'、'compareOnly'或'knownDefect'</p>
+    <p>回傳Promise，resolve回傳物件{status,shots,written,kept,skipped}，status為'regen'、'compare'、'compareOnly'或'knownDefect'；部分已知缺陷時另帶defectStages(缺陷步圖鍵陣列)，shots為前段圖鍵</p>
 </div>
 
 
@@ -19343,7 +19502,7 @@ await waitUntilExist(page, '訊息', (t) => document.body.innerText.includes(t),
 <br class="clear">
 
 <footer>
-    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 4.0.5</a> on Mon Oct 19 2026 23:52:19 GMT+0800 (台北標準時間) using the <a href="https://github.com/clenemt/docdash">docdash</a> theme.
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 4.0.5</a> on Tue Oct 20 2026 09:42:43 GMT+0800 (台北標準時間) using the <a href="https://github.com/clenemt/docdash">docdash</a> theme.
 </footer>
 
 <script>prettyPrint();</script>
