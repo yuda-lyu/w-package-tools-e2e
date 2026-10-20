@@ -86,7 +86,10 @@ function readFlag(argv, flag) {
  * 與mocha REGEN型專案一致(2026-09-28前直跑型專案之產製端從不執行只比對案例)。
  * 孤兒檢查：給pathOf(或由runBaselineCase經usePathOf告知)時，finalize()以findOrphanBaselines靜態比對宣告圖鍵與標準圖目錄，有孤兒即拋錯並列出。
  * --write-mode：all(預設，全寫)、missing(只寫標準圖不存在者，追加案例用)、changed(只寫與現行標準圖差異超過容差或尺寸不同者，避免重寫已審過之圖)。
- * E2E_BASELINE_OUT_DIR：有值時寫檔改導至該目錄(等價驗證用)，比對端讀取之標準圖路徑不受影響
+ * E2E_BASELINE_OUT_DIR：有值時寫檔改導至該目錄(等價驗證用)，比對端讀取之標準圖路徑不受影響。
+ * 已知缺陷：runBaselineCase於已知缺陷分支自動呼叫noteKnownDefect(lang,caseName,{keys,message,ref})，記下因缺陷未產之圖鍵(keys省略或null代表整案未產)；
+ * finalize()不再把這類--names項目當成未命中(整案缺陷：該案被選中之全部項目；部分缺陷：命中keys所列缺陷步圖鍵之項目)，改於有紀錄時先以log印出「已知缺陷未產」摘要並回傳{knownDefects}；
+ * 前段圖鍵由noteProduced判已產，不因缺陷步而放過；案例根本未執行(沒有紀錄)者仍視為未命中。自寫包裝若不經runBaselineCase須自行呼叫noteKnownDefect
  *
  * @param {Object} opt 輸入設定物件
  * @param {Array} opt.langs 輸入已宣告之語系陣列
@@ -98,7 +101,8 @@ function readFlag(argv, flag) {
  * @param {Number} [opt.threshold=0.1] 輸入write-mode為changed時pixelmatch之色差門檻，預設0.1
  * @param {Number} [opt.maxDiffPixels=100] 輸入write-mode為changed時容許之真不同像素數，預設100
  * @param {Function} [opt.pathOf] 輸入標準圖路徑函數(lang,key)=>路徑字串，供孤兒檢查；省略時由runBaselineCase首次產製時經usePathOf告知，皆無則不檢查孤兒
- * @returns {Object} 回傳篩選器物件{filtered,langs,writeMode,outDir,casesFor(lang),shouldWrite(lang,caseName,stageKey),noteProduced(lang,caseName,stageKey),decideWrite(buf,baselinePath),outPath(baselinePath),usePathOf(fn),orphans(),finalize(),describe()}
+ * @param {Function} [opt.log=console.log] 輸入輸出函數，finalize()有已知缺陷紀錄時用以印摘要，預設console.log，給null代表不印
+ * @returns {Object} 回傳篩選器物件{filtered,langs,writeMode,outDir,casesFor(lang),shouldWrite(lang,caseName,stageKey),noteProduced(lang,caseName,stageKey),noteKnownDefect(lang,caseName,opt),decideWrite(buf,baselinePath),outPath(baselinePath),usePathOf(fn),orphans(),finalize(),describe()}；finalize()通過時回傳{knownDefects:[{lang,name,keys,message,ref}]}
  * @example
  *
  * import createBaselineGate from 'w-package-tools-e2e/src/createBaselineGate.mjs'
@@ -116,7 +120,7 @@ function readFlag(argv, flag) {
  *         //...執行案例, 每張圖以 gate.shouldWrite(lang, c.name, key) 決定是否寫檔...
  *     }
  * }
- * gate.finalize()
+ * let { knownDefects } = gate.finalize() //有已知缺陷紀錄時, 同時以 log 印出「已知缺陷未產」摘要
  *
  */
 function createBaselineGate(opt = {}) {
@@ -129,6 +133,7 @@ function createBaselineGate(opt = {}) {
         outDirEnv = 'E2E_BASELINE_OUT_DIR',
         threshold = 0.1,
         maxDiffPixels = 100,
+        log = console.log,
     } = opt
     let pathOf = typeof opt.pathOf === 'function' ? opt.pathOf : null
     if (!Array.isArray(langs) || langs.length === 0) {
@@ -181,6 +186,8 @@ function createBaselineGate(opt = {}) {
     //sel[lang][caseName] = { all, stages:Set, filters:[{fn,tokenIdx}], tokenIdxAll:[...], tokenIdxStage:Map(stage->[idx]) }
     let sel = {}
     let produced = [] //各 token 是否有產出
+    let defectCovered = [] //各 token 是否因已知缺陷而依協定未產出(noteKnownDefect 所設)
+    let known = [] //noteKnownDefect 之紀錄
     let pick = (lang, c) => {
         sel[lang] = sel[lang] || {}
         sel[lang][c.name] = sel[lang][c.name] || { all: false, allTokens: [], stages: new Map(), filters: [] }
@@ -345,6 +352,46 @@ function createBaselineGate(opt = {}) {
         }
     }
 
+    //案例被 --names 以任何方式選中之全部 token 索引(整案已知缺陷用)
+    function tokensOfCase(lang, caseName) {
+        let s = sel[lang] &amp;&amp; sel[lang][caseName]
+        if (!s) {
+            return []
+        }
+        let idx = [...s.allTokens]
+        for (let v of s.stages.values()) {
+            idx.push(...v)
+        }
+        for (let f of s.filters) {
+            idx.push(f.ti)
+        }
+        return idx
+    }
+
+    //記錄已知缺陷: keys 為本次因缺陷未產之圖鍵陣列(省略或 null 代表整案未產); 由 runBaselineCase 於缺陷分支自動呼叫
+    function noteKnownDefect(lang, caseName, o = {}) {
+        let { keys = null, message = '', ref = '' } = o
+        if (keys !== null &amp;&amp; (!Array.isArray(keys) || keys.some((k) => typeof k !== 'string' || k === ''))) {
+            throw new Error('createBaselineGate: noteKnownDefect 之 keys 須省略、null(整案)或圖鍵字串陣列')
+        }
+        known.push({ lang, name: caseName, keys: Array.isArray(keys) ? keys.slice() : null, message, ref })
+        if (!filtered) {
+            return
+        }
+        let idx = []
+        if (Array.isArray(keys)) {
+            for (let k of keys) {
+                idx.push(...matchTokens(lang, caseName, k))
+            }
+        }
+        else {
+            idx = tokensOfCase(lang, caseName)
+        }
+        for (let ti of idx) {
+            defectCovered[ti] = true
+        }
+    }
+
     //依 write-mode 決定是否寫出(比對對象為正式標準圖路徑)
     function decideWrite(buf, baselinePath) {
         if (writeMode === 'all') {
@@ -387,11 +434,18 @@ function createBaselineGate(opt = {}) {
         return findOrphanBaselines({ cases: decls, langs, pathOf, idPattern })
     }
 
-    //全部案例執行完後呼叫: 任何 --names 項目未產出即拋錯(不靜默略過); 標準圖目錄有孤兒圖亦拋錯(列出供確認後刪除)
+    //全部案例執行完後呼叫: 任何 --names 項目未產出即拋錯(不靜默略過; 因已知缺陷依協定未產者除外); 標準圖目錄有孤兒圖亦拋錯(列出供確認後刪除)
+    //有已知缺陷紀錄時先印「已知缺陷未產」摘要(有問題時摘要仍在輸出中); 通過時回傳 { knownDefects }
     function finalize() {
         let problems = []
+        let summary = known.map((k) => ({ ...k, keys: k.keys === null ? null : k.keys.slice() }))
+        if (summary.length > 0 &amp;&amp; typeof log === 'function') {
+            for (let k of summary) {
+                log(`[baseline-gate] 已知缺陷未產: ${k.lang}-${k.name}${k.keys ? ` → ${k.keys.length > 0 ? k.keys.join(', ') : '(部分缺陷; 未列缺陷步圖鍵)'}` : ' (整案)'}${k.ref ? ` (${k.ref})` : ''}`)
+            }
+        }
         if (filtered) {
-            let miss = tokens.filter((t, i) => !produced[i])
+            let miss = tokens.filter((t, i) => !produced[i] &amp;&amp; !defectCovered[i])
             if (miss.length > 0) {
                 problems.push(`--names 之下列項目執行後未產出任何圖(圖鍵不符或案例未執行): ${miss.join(', ')}`)
             }
@@ -403,6 +457,7 @@ function createBaselineGate(opt = {}) {
         if (problems.length > 0) {
             throw new Error(problems.join('\n'))
         }
+        return { knownDefects: summary }
     }
 
     function describe() {
@@ -427,6 +482,7 @@ function createBaselineGate(opt = {}) {
         casesFor,
         shouldWrite,
         noteProduced,
+        noteKnownDefect,
         decideWrite,
         outPath,
         usePathOf,
@@ -452,7 +508,7 @@ export default createBaselineGate
 <br class="clear">
 
 <footer>
-    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 4.0.5</a> on Mon Oct 19 2026 23:52:19 GMT+0800 (台北標準時間) using the <a href="https://github.com/clenemt/docdash">docdash</a> theme.
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 4.0.5</a> on Tue Oct 20 2026 09:42:43 GMT+0800 (台北標準時間) using the <a href="https://github.com/clenemt/docdash">docdash</a> theme.
 </footer>
 
 <script>prettyPrint();</script>

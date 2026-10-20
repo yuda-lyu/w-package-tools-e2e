@@ -3,6 +3,8 @@ import fs from 'fs'
 import path from 'path'
 import { PNG } from 'pngjs'
 import createBaselineGate from '../src/createBaselineGate.mjs'
+import runBaselineCase from '../src/runBaselineCase.mjs'
+import createKnownDefect from '../src/createKnownDefect.mjs'
 
 
 //篩選器之單元測試: 解析順序(階段圖鍵 → 案例鍵/邊界前綴 → 階段邊界前綴 → 依編號執行後驗證)、語系、未命中即拋錯、write-mode 與 outDir
@@ -228,4 +230,244 @@ describe('createBaselineGate', function() {
         })
     })
 
+})
+
+
+//已知缺陷之紀錄: runBaselineCase 於缺陷分支自動呼叫 gate.noteKnownDefect, finalize 據以不把「因缺陷未產」當 --names 未命中
+//(整案缺陷與部分缺陷共用同一套紀錄); 測試標題前綴 [B..] 對應 CLAUDE_rulebook.md 表 B
+describe('createBaselineGate 已知缺陷紀錄(noteKnownDefect 與 finalize)', function() {
+    let B = (s) => Buffer.from(s)
+    let S4 = ['E2E-018-1-a', 'E2E-018-2-b', 'E2E-018-3-c', 'E2E-018-4-d']
+    let front3 = () => ({ 'E2E-018-1-a': B('1'), 'E2E-018-2-b': B('2'), 'E2E-018-3-c': B('3') })
+    let caseDecl = [
+        { name: 'E2E-001-ok' },
+        { name: 'E2E-013-no-station', stages: ['E2E-013-1-x'] },
+        { name: 'E2E-018-x', stages: S4 },
+        { name: 'E2E-007-view' }, //未宣告 stages(④路徑)
+    ]
+    let fakeBrowser = () => ({
+        async newContext() {
+            return {
+                async newPage() {
+                    return { on() {} }
+                },
+            }
+        },
+        async close() {},
+    })
+    let runWhole = async () => {
+        throw createKnownDefect('整案缺陷', { ref: 'spec 已知落差' })
+    }
+    let runPartial = async () => {
+        throw createKnownDefect('第4步走到缺陷', { ref: 'spec 已知落差', shots: front3() })
+    }
+    let runFull = async () => ({ ...front3(), 'E2E-018-4-d': B('4') })
+    let gateOf = (names, logs = [], extra = []) => createBaselineGate({ langs: ['eng'], cases: caseDecl, argv: argvOf('--names', names, ...extra), env: {}, log: (s) => logs.push(s) })
+    let go = (gate, name, run, extra = {}) => runBaselineCase({
+        mode: 'regen',
+        lang: 'eng',
+        name,
+        launch: async () => fakeBrowser(),
+        run,
+        pathOf: (l, k) => `./test/pics/x/x-${l}-${k}.png`,
+        gate,
+        writeFile: () => {},
+        log: () => {},
+        ...extra,
+    })
+    let dirs = []
+    let tmpDir = (name) => {
+        let d = path.resolve('./test/_tmp', name)
+        fs.rmSync(d, { recursive: true, force: true })
+        fs.mkdirSync(d, { recursive: true })
+        dirs.push(d)
+        return d
+    }
+    after(function() {
+        for (let d of dirs) {
+            fs.rmSync(d, { recursive: true, force: true })
+        }
+        let parent = path.resolve('./test/_tmp')
+        if (fs.existsSync(parent) && fs.readdirSync(parent).length === 0) {
+            fs.rmdirSync(parent)
+        }
+    })
+
+    it('[B05/B06] --names 只命中整案缺陷案例(案例鍵 / 邊界前綴 / 階段圖鍵): finalize 不拋錯, 回傳與日誌列出「已知缺陷未產」', async function() {
+        for (let names of ['eng-E2E-013', 'E2E-013-no-station', 'eng-E2E-013-1-x']) {
+            let logs = []
+            let g = gateOf(names, logs)
+            let r = await go(g, 'E2E-013-no-station', runWhole)
+            assert.strict.equal(r.status, 'knownDefect')
+            let sum = g.finalize()
+            assert.strict.equal(sum.knownDefects.length, 1, names)
+            assert.strict.equal(sum.knownDefects[0].name, 'E2E-013-no-station')
+            assert.strict.equal(sum.knownDefects[0].keys, null)
+            assert.strict.ok(logs.some((l) => l.includes('已知缺陷未產') && l.includes('E2E-013-no-station') && l.includes('整案')), names)
+        }
+    })
+
+    it('[B03/B04] 不放過真正之未命中: ④案例 token 拼錯, 即使同批有缺陷案例仍由 finalize 拋; 宣告 stages 之拼錯於構造時拋', async function() {
+        let g = gateOf('eng-E2E-007-9-nope,eng-E2E-013')
+        await go(g, 'E2E-007-view', async () => ({ 'E2E-007-1-a': B('1') }))
+        await go(g, 'E2E-013-no-station', runWhole)
+        assert.throws(() => g.finalize(), (e) => /eng-E2E-007-9-nope/.test(e.message) && !/eng-E2E-013(,|\s|$)/.test(e.message))
+        assert.throws(() => gateOf('eng-E2E-013-1-xx'), /不符合任何案例或階段圖鍵/)
+    })
+
+    it('[B12] token 選中缺陷案例但案例未執行(沒走到 runBaselineCase): 仍拋(只有實際記下缺陷者才豁免)', function() {
+        let g = gateOf('eng-E2E-013')
+        assert.throws(() => g.finalize(), /eng-E2E-013/)
+    })
+
+    it('[B07-B09] 部分缺陷: 點名缺陷步圖鍵 / 前段圖鍵 / 案例鍵皆不拋, 摘要列出未產鍵', async function() {
+        for (let names of ['eng-E2E-018-4-d', 'eng-E2E-018-1-a', 'E2E-018']) {
+            let logs = []
+            let g = gateOf(names, logs)
+            let r = await go(g, 'E2E-018-x', runPartial, { stages: S4, defectStages: ['E2E-018-4-d'] })
+            assert.strict.equal(r.status, 'knownDefect')
+            let sum = g.finalize()
+            assert.strict.deepStrictEqual(sum.knownDefects[0].keys, ['E2E-018-4-d'], names)
+            assert.strict.ok(logs.some((l) => l.includes('E2E-018-4-d')), names)
+        }
+    })
+
+    it('[B10] 前段 token 本身未被產出仍判未命中(缺陷步豁免不及於前段), 訊息只列前段那個', function() {
+        let g = gateOf('eng-E2E-018-1-a,eng-E2E-018-4-d')
+        g.noteKnownDefect('eng', 'E2E-018-x', { keys: ['E2E-018-4-d'] })
+        assert.throws(() => g.finalize(), (e) => /eng-E2E-018-1-a/.test(e.message) && !/eng-E2E-018-4-d/.test(e.message.split('\n')[0]))
+    })
+
+    it('[B11] 缺陷已修復: 點名缺陷步圖鍵且 run 走完 → 正常寫出該張, finalize 通過, 無缺陷摘要', async function() {
+        let logs = []
+        let g = gateOf('eng-E2E-018-4-d', logs)
+        let r = await go(g, 'E2E-018-x', runFull, { stages: S4, defectStages: ['E2E-018-4-d'] })
+        assert.strict.equal(r.status, 'regen')
+        assert.strict.deepStrictEqual(r.written, ['E2E-018-4-d'])
+        assert.strict.deepStrictEqual(g.finalize().knownDefects, [])
+        assert.strict.equal(logs.length, 0)
+    })
+
+    it('[B13] 混合: 缺陷案例 token+正常案例 token——正常案例產出則通過; 未產出則只列正常案例那個', async function() {
+        let g = gateOf('eng-E2E-013,eng-E2E-001-ok')
+        await go(g, 'E2E-013-no-station', runWhole)
+        await go(g, 'E2E-001-ok', async () => B('1'))
+        assert.strict.equal(g.finalize().knownDefects.length, 1)
+        let g2 = gateOf('eng-E2E-013,eng-E2E-001-ok')
+        await go(g2, 'E2E-013-no-station', runWhole)
+        assert.throws(() => g2.finalize(), (e) => /eng-E2E-001-ok/.test(e.message) && !/eng-E2E-013(,|\s|$)/.test(e.message))
+    })
+
+    it('[B01] 未篩選(全跑): 只記錄不影響 finalize; 印摘要; log:null 不印; 無缺陷時回傳空陣列且不印', function() {
+        let logs = []
+        let g = createBaselineGate({ langs: ['eng'], cases: caseDecl, argv: argvOf(), env: {}, log: (s) => logs.push(s) })
+        g.noteKnownDefect('eng', 'E2E-013-no-station', { message: 'm', ref: 'r' })
+        let sum = g.finalize()
+        assert.strict.deepStrictEqual(sum.knownDefects, [{ lang: 'eng', name: 'E2E-013-no-station', keys: null, message: 'm', ref: 'r' }])
+        assert.strict.equal(logs.length, 1)
+        let g2 = createBaselineGate({ langs: ['eng'], cases: caseDecl, argv: argvOf(), env: {}, log: null })
+        g2.noteKnownDefect('eng', 'E2E-013-no-station')
+        assert.strict.equal(g2.finalize().knownDefects.length, 1)
+        let g3 = createBaselineGate({ langs: ['eng'], cases: caseDecl, argv: argvOf(), env: {}, log: () => assert.fail('不應印') })
+        assert.strict.deepStrictEqual(g3.finalize().knownDefects, [])
+    })
+
+    it('[B15] 已知限制: 未宣告 stages 之案例整案缺陷時, ④token(含拼錯者)無法驗證圖鍵 → 不拋, 摘要仍列出該案', async function() {
+        let logs = []
+        let g = gateOf('eng-E2E-007-9-nope', logs)
+        await go(g, 'E2E-007-view', runWhole)
+        let sum = g.finalize()
+        assert.strict.equal(sum.knownDefects[0].name, 'E2E-007-view')
+        assert.strict.ok(logs.some((l) => l.includes('E2E-007-view')))
+    })
+
+    it('[B18] 前段 token 配 --write-mode missing, 標準圖已存在: keep 仍算已產出, finalize 通過', async function() {
+        let dir = tmpDir('baselineGate-defect-wm')
+        fs.writeFileSync(path.join(dir, 'x-eng-E2E-018-1-a.png'), 'x')
+        let g = gateOf('eng-E2E-018-1-a', [], ['--write-mode', 'missing'])
+        let r = await go(g, 'E2E-018-x', runPartial, { stages: S4, defectStages: ['E2E-018-4-d'], pathOf: (l, k) => path.join(dir, `x-${l}-${k}.png`) })
+        assert.strict.deepStrictEqual(r.kept, ['E2E-018-1-a'])
+        g.finalize()
+    })
+
+    it('[B16] 孤兒檢查不受影響: 孤兒圖與缺陷紀錄並存時摘要先印、孤兒仍拋; 缺陷步之舊凍結圖屬宣告 stages, 不算孤兒', function() {
+        let dir = tmpDir('baselineGate-defect-orphans')
+        fs.writeFileSync(path.join(dir, 'x-eng-E2E-999-old.png'), '')
+        fs.writeFileSync(path.join(dir, 'x-eng-E2E-018-4-d.png'), '')
+        let logs = []
+        let g = createBaselineGate({ langs: ['eng'], cases: caseDecl, argv: argvOf(), env: {}, log: (s) => logs.push(s), pathOf: (l, k) => path.join(dir, `x-${l}-${k}.png`) })
+        g.noteKnownDefect('eng', 'E2E-018-x', { keys: ['E2E-018-4-d'] })
+        assert.throws(() => g.finalize(), (e) => /E2E-999-old/.test(e.message) && !/E2E-018-4-d/.test(e.message))
+        assert.strict.equal(logs.length, 1)
+    })
+
+    it('[B21] 已知限制: 豁免與產出皆以 token 為單位(any-of), 無語系前綴之 token 選中多語系 / 多案例時, 任一目標已產出或記缺陷即視為命中(與既有 noteProduced 同語意, 非本次引入)', async function() {
+        let two = (names, logs = []) => createBaselineGate({ langs: ['eng', 'cht'], cases: caseDecl, argv: argvOf('--names', names), env: {}, log: (s) => logs.push(s) })
+        //既有語意: 正常案例只跑 eng, cht 未執行, 無語系前綴之 token 仍判已產出
+        let g1 = two('E2E-001-ok')
+        g1.noteProduced('eng', 'E2E-001-ok', 'E2E-001-ok')
+        assert.strict.doesNotThrow(() => g1.finalize())
+        //延伸至缺陷: 只有 eng 記整案缺陷, cht 未執行, 同一 token 仍視為命中; 帶語系前綴者則各自獨立
+        let g2 = two('E2E-013')
+        g2.noteKnownDefect('eng', 'E2E-013-no-station')
+        assert.strict.equal(g2.finalize().knownDefects.length, 1)
+        let g3 = two('eng-E2E-013,cht-E2E-013')
+        g3.noteKnownDefect('eng', 'E2E-013-no-station')
+        assert.throws(() => g3.finalize(), /cht-E2E-013/)
+        //同一 token 以邊界前綴選中多案例: 一案記缺陷即豁免, 另一案(未執行)不被個別追蹤
+        let g4 = createBaselineGate({ langs: ['eng'], cases: [{ name: 'E2E-005-a' }, { name: 'E2E-005-b' }], argv: argvOf('--names', 'E2E-005'), env: {}, log: () => {} })
+        assert.strict.deepStrictEqual(g4.casesFor('eng').map((c) => c.name), ['E2E-005-a', 'E2E-005-b'])
+        g4.noteKnownDefect('eng', 'E2E-005-a')
+        assert.strict.equal(g4.finalize().knownDefects.length, 1) //E2E-005-b 未執行亦通過(token 層級)
+    })
+
+    it('[B22] 部分缺陷 + 未宣告 stages(經 runBaselineCase): 前段 token 已產出而通過; 點名缺陷步圖鍵(④)無法判定為缺陷, 仍由 finalize 以未產出拋; 摘要註明未列缺陷步圖鍵', async function() {
+        let partial = async () => {
+            throw createKnownDefect('x', { ref: 'r', shots: { 'E2E-007-1-a': B('1'), 'E2E-007-2-b': B('2') } })
+        }
+        let logs = []
+        let g = gateOf('eng-E2E-007-1-a', logs)
+        let r = await go(g, 'E2E-007-view', partial)
+        assert.strict.equal(r.status, 'knownDefect')
+        assert.strict.deepStrictEqual(r.defectStages, [])
+        assert.strict.equal(g.finalize().knownDefects[0].keys.length, 0)
+        assert.strict.ok(logs.some((l) => l.includes('未列缺陷步圖鍵')))
+        let g2 = gateOf('eng-E2E-007-3-d')
+        await go(g2, 'E2E-007-view', partial)
+        assert.throws(() => g2.finalize(), /eng-E2E-007-3-d/)
+    })
+
+    it('[B19] noteKnownDefect 之 keys 型別: 僅省略 / undefined / null(整案)或圖鍵字串陣列(含空陣列)合法; 其餘拋錯且不留紀錄, 不把部分豁免擴大成整案', function() {
+        for (let bad of ['E2E-018-4-d', {}, 0, ['E2E-018-4-d', 1], [''], [null]]) {
+            let g = gateOf('eng-E2E-018-1-a,eng-E2E-018-4-d')
+            assert.throws(() => g.noteKnownDefect('eng', 'E2E-018-x', { keys: bad }), /keys 須省略/, JSON.stringify(bad))
+            assert.throws(() => g.finalize(), /eng-E2E-018-1-a/) //前段 token 未被誤放
+            let g2 = createBaselineGate({ langs: ['eng'], cases: caseDecl, argv: argvOf(), env: {}, log: null })
+            assert.throws(() => g2.noteKnownDefect('eng', 'E2E-018-x', { keys: bad }), /keys 須省略/)
+            assert.strict.deepStrictEqual(g2.finalize().knownDefects, []) //不留紀錄
+        }
+        let ok = createBaselineGate({ langs: ['eng'], cases: caseDecl, argv: argvOf(), env: {}, log: null })
+        ok.noteKnownDefect('eng', 'E2E-018-x', { keys: [] })
+        ok.noteKnownDefect('eng', 'E2E-013-no-station', { keys: undefined })
+        ok.noteKnownDefect('eng', 'E2E-001-ok', { keys: null })
+        assert.strict.deepStrictEqual(ok.finalize().knownDefects.map((k) => k.keys), [[], null, null])
+    })
+
+    it('[B20] finalize 回傳為獨立快照: 改壞回傳之 keys 不影響再次 finalize 之摘要', function() {
+        let g = createBaselineGate({ langs: ['eng'], cases: caseDecl, argv: argvOf(), env: {}, log: null })
+        let keys = ['E2E-018-4-d']
+        g.noteKnownDefect('eng', 'E2E-018-x', { keys })
+        keys.push('mutated-input') //輸入端亦已複製
+        let r = g.finalize()
+        r.knownDefects[0].keys[0] = 'CORRUPTED'
+        r.knownDefects.push({ x: 1 })
+        assert.strict.deepStrictEqual(g.finalize().knownDefects.map((k) => k.keys), [['E2E-018-4-d']])
+    })
+
+    it('noteKnownDefect 對未選中 / 未知之案例與語系只記錄、不誤覆蓋其他 token', function() {
+        let g = gateOf('eng-E2E-001-ok')
+        g.noteKnownDefect('eng', 'E2E-013-no-station', {})
+        g.noteKnownDefect('cht', 'E2E-013-no-station', {})
+        assert.throws(() => g.finalize(), /eng-E2E-001-ok/)
+    })
 })

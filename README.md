@@ -81,12 +81,12 @@ let browser2 = await wpte.launchBrowser()
 | 檔 | 用途 | 狀態 |
 |---|---|---|
 | `getE2eMode(opt)` | `{ regen, diag, strictCapture }`；regen 且診斷 env 時拋錯（C13 閘門） | sso 實跑、單元 |
-| `createBaselineGate(opt)` | `--names` / `--langs` / `--write-mode` / `E2E_BASELINE_OUT_DIR` 之解析與截圖前篩選（§2.2）；`finalize()` 另做孤兒檢查 | sso 實跑（tokens）、單元 |
+| `createBaselineGate(opt)` | `--names` / `--langs` / `--write-mode` / `E2E_BASELINE_OUT_DIR` 之解析與截圖前篩選（§2.2）；`finalize()` 另做孤兒檢查，並依 `noteKnownDefect` 之紀錄不把「因已知缺陷未產」當未命中、回傳 `{ knownDefects }` | sso 實跑（tokens）、單元 |
 | `findOrphanBaselines(opt)` | 依案例宣告靜態比對標準圖目錄，列出不是任何案例宣告圖鍵之孤兒圖（與執行了哪些案例無關） | 單元（2026-09-28 新增；PERM 12 張孤兒殷鑑） |
 | `runBaselineCase(opt)` | 單一案例管線，產製端與比對端呼叫同一函數（§2.1） | sso 實跑（tokens）、單元 |
 | `normalizeShots(result, name)` | Buffer / 物件 / 陣列 / `{buf\|shots,page}` / null → `[{key,buf}]` | 單元 |
 | `openCasePage(browser, opt)` | 每案新 context＋頁面＋對話框處理器 | sso 實跑（tokens）、瀏覽器 |
-| `createKnownDefect(message, opt)` | 已知缺陷錯誤（SKILL §7.5；產製端不寫圖、比對端 pending） | 單元 |
+| `createKnownDefect(message, opt)` | 已知缺陷錯誤（SKILL §7.5）：整案缺陷產製端不寫圖、比對端 pending；帶 `shots` 者為部分缺陷，缺陷之前的圖照常產製與比對（§2.1） | 單元 |
 
 ### 1.3 生命週期與行程
 
@@ -132,7 +132,14 @@ prepare(ctx) → launch() → openPage(browser) → beforeRun(ctx) → run(page,
 - `compareOnly`（共用他案標準圖之案例，SKILL §7.8 ①）：產製端照跑流程與全部斷言、一張都不寫，回傳 `status:'compareOnly'`（避免同一張被兩案輪流重寫，w-web-api edit E2E-005 殷鑑）；比對端照常比對。案例直接宣告其比對之共用圖鍵為 `stages`，run 回傳 `{ 共用圖鍵: buf }`（裸 Buffer 以案例鍵命名，會與宣告不符）；fail-dump 標籤宜帶案例名以分辨哪一案失敗。
 - `gate` 給定時，`runBaselineCase` 以 `gate.usePathOf(pathOf)` 告知標準圖路徑函數，供 `finalize()` 之孤兒檢查。
 - `stages`：給定時產出圖鍵集合須與宣告相同，否則拋「多 [...] 少 [...]」（防宣告、產製、比對三處命名不同步）。
-- 已知缺陷：run 中拋 `createKnownDefect(...)` → 產製端不寫圖、回傳 `status:'knownDefect'`；比對端呼叫 `onKnownDefect`（mocha：`() => this.skip()`）。
+- 已知缺陷（整案）：run 中拋 `createKnownDefect(...)`（不帶 `shots`）→ 產製端不寫圖、回傳 `status:'knownDefect'`、有給 `gate` 時自動 `gate.noteKnownDefect(...)`；比對端呼叫 `onKnownDefect`（mocha：`() => this.skip()`），之前不比對任何一張。
+- 已知缺陷（部分，缺陷落在案例後段）：run 中拋 `createKnownDefect(msg, { ref, shots })`，`shots` 為缺陷**之前**已取得之截圖（格式同 run 之回傳），並給 `stages` 與 `defectStages`（缺陷步之圖鍵，須為 `stages` 之子集且須與 `stages` 併用，組態錯誤於開瀏覽器前拋錯）：
+  1. 圖鍵三向核對（`shots` 圖鍵 K、`stages` S、`defectStages` D）：多＝K−S（拼錯）、重疊＝K∩D（壞畫面混入）、少＝S−K−D（缺陷早於預期），任一非空即拋「已知缺陷時產出之圖鍵與宣告不符」，一張不寫、不呼叫 `onKnownDefect`；`stages` 已宣告而未給 `defectStages` 時 D 視為空（K 須等於 S）；`stages` 未宣告則不核對。
+  2. 前段仍先過 `semantic`、`verify`（`ctx.knownDefect` 為該錯誤、`ctx.shots` 為正規化後之前段截圖 `[{key,buf}]`，既有掛鉤須能以 `ctx.knownDefect` 分流；`ctx.knownDefect.shots` 為使用者原始形狀，掛鉤一律以 `ctx.shots` 為準）；掛鉤重新指定 `ctx.shots` 者，其後寫出／比對的是替換後之內容（與正常路徑一致）；`err.shots` 為 `{shots,page}` 形狀時，其後掛鉤與 `afterCase` 收到新 page（同正常路徑）；掛鉤拋一般錯則一張不寫；掛鉤另拋不帶 `shots` 之已知缺陷則降級為整案（`out.shots`／`ctx.shots` 仍為 run 已取得者且不寫，`out.defectStages` 與 `ctx.knownDefect` 移除）。前段為空而未宣告 `stages` 時與正常路徑一致須 `allowEmpty`；`defectStages` 給空陣列等同未給。
+  3. 產製端：前段走與正常路徑同一個寫檔迴圈（`gate` 篩選、`--write-mode`、`E2E_BASELINE_OUT_DIR` 皆同），印 `[known-defect] … 前段 N 張照常處理, 未產 [D]`，回傳 `status:'knownDefect'` 並帶 `defectStages`（該欄存在，含空陣列，即為部分缺陷；整案缺陷無此欄）；`compareOnly` 則只列 `skipped`、不寫。缺陷步之既有凍結標準圖保留、不再比對、不算孤兒，修復後首次比對若失敗，依全域技能 §7.9 判定是否重產。
+  4. 比對端：前段逐張比對（`compareAll` 同），**全部一致才呼叫 `onKnownDefect`**；任一張不符或標準圖缺檔即拋比對錯誤、不呼叫 `onKnownDefect`（前段回歸不被 pending 掩蓋）。
+  5. 帶 `shots` 之已知缺陷**僅能由 run 拋出**；由 run 之前（prepare／launch／openPage／beforeRun）或 `semantic`／`verify` 拋出者視同一般錯並載明原因。缺陷修復後 run 走完全部階段即回到正常路徑（`stages` 檢查仍為全部圖鍵）。
+  6. 未帶 `shots`、未給 `defectStages` 者，`runBaselineCase` 之行為（日誌、回傳欄位、`status`、`onKnownDefect` 時序）與 1.0.8 完全相同；與 `gate` 併用時 `gate.finalize()` 之變更見 §2.2。1.0.8 對 `createKnownDefect` 之 `shots` 為靜默忽略，此後生效。
 
 ### 2.2 篩選語法（`createBaselineGate`）
 
@@ -148,7 +155,12 @@ prepare(ctx) → launch() → openPage(browser) → beforeRun(ctx) → run(page,
 - `--langs` 須完全等於已宣告語系；與 `--names` 之語系前綴衝突即拋錯。旗標缺值或其值以 `--` 開頭即拋錯（防 `--names --langs cht`）。
 - `--write-mode all|missing|changed`：all（預設）全寫；missing 只寫標準圖不存在者（追加案例，SKILL §7.9）；changed 只寫與現行標準圖差異超過容差或尺寸不同者（不重寫已審過之圖）。
 - `E2E_BASELINE_OUT_DIR`：寫檔改導至該目錄（等價驗證用）；比對端讀取之標準圖路徑不受影響。**只涵蓋經 `runBaselineCase` 之寫檔**；參考片段自舉、測試檔自行 `fs.writeFileSync` 之處未遷移前不得用 outDir 做等價驗證。
-- 產製前印 `gate.describe()`；全部案例跑完呼叫 `gate.finalize()`。
+- 已知缺陷之紀錄：`gate.noteKnownDefect(lang, caseName, { keys, message, ref })` 由 `runBaselineCase` 於缺陷分支自動呼叫（自寫包裝若不經 `runBaselineCase` 須自行呼叫）；`keys` 省略或 `null` 代表整案未產，陣列則為本次因缺陷未產之圖鍵（`defectStages`）。`finalize()` 之 `--names` 未命中改為「未產出且未被已知缺陷涵蓋」：
+  - 整案缺陷：該案被 `--names` 選中之全部項目（案例鍵、邊界前綴、階段圖鍵）依協定不產圖，不再拋錯；
+  - 部分缺陷：命中缺陷步圖鍵之項目豁免，命中前段圖鍵之項目仍須由 `noteProduced` 判已產（`--write-mode` 之 keep 亦算）；
+  - 案例根本未被執行（沒有紀錄）、圖鍵拼錯之正常案例（宣告 `stages` 者於構造時即拋；未宣告 `stages` 之④路徑者由 `finalize` 拋）照舊拋錯；缺陷已修復則 run 走完、缺陷步照常寫出，無缺陷紀錄；
+  - 已知限制：①未宣告 `stages` 之案例整案缺陷時，④前綴項目（含拼錯者）無法驗證圖鍵、不拋，摘要仍列該案；部分缺陷而未宣告 `stages` 時缺陷步無從豁免（點名缺陷步圖鍵者由 `finalize` 以未產出拋），摘要註明「未列缺陷步圖鍵」——缺陷案例請宣告 `stages` 與 `defectStages`。②`produced` 與缺陷涵蓋皆以 `--names` 項目為單位（any-of）：無語系前綴之項目選中多語系／多案例時，任一目標已產出或記缺陷即視為命中，其餘目標若根本未被執行不會被個別追蹤（`noteProduced` 一向如此）；要逐目標嚴格請帶 `<語系>-` 前綴逐案點名。③`noteKnownDefect` 僅由產製端（`mode:'regen'`）通知，`keys` 須省略／`null`（整案）或圖鍵字串陣列（含空陣列），其餘型別拋錯。④`finalize()` 回傳為獨立快照，無冪等保證（每次呼叫皆重印摘要）。
+- 產製前印 `gate.describe()`（跑案例前呼叫，不含缺陷紀錄）；全部案例跑完呼叫 `gate.finalize()`：有缺陷紀錄時先以 `log`（`createBaselineGate` 選項，預設 `console.log`，給 `null` 不印）印出「已知缺陷未產」摘要，再判未命中與孤兒；通過時回傳 `{ knownDefects: [{ lang, name, keys, message, ref }] }`。
 
 ### 2.3 截圖穩定化序列（`captureStable`，C6）
 
@@ -238,6 +250,7 @@ let captureStableWithBox = (page, target, opts = {}) => pkgCaptureStableWithBox(
 
 - **框幾何**（`composeBox` 之 `BOX_PAD`／`BOX_STROKE`／圓角、`itemsUnionBox` 之 `fit` 規則與 `inkPad`、`inkRect`、`gridContentBox`、`canvasInkRects` 之墨跡判定）、**截圖序列**（`captureStable` 之 settle、`<img>` 動畫區之靜態影格、遮罩）與**啟動旗標**（`chromiumLaunchArgs`，改動即全量重產）決定各專案標準圖之像素；變更後使用端須重產受影響之圖並逐張審（全域技能 role-coder-for-test-e2e §7.9），發版說明請明列。
 - 新增函數、新增選項（預設值維持原行為）不影響既有標準圖；一向以「預設值取 w-web-sso 現行行為、其他專案以選項重現」擴充。
+- 已知缺陷之部分截圖與 `--names`（Gitea issue #4、#5）：新增 opt-in（`createKnownDefect` 之 `shots`、`runBaselineCase` 之 `defectStages`、`gate.noteKnownDefect`、`createBaselineGate` 之 `log`），**不影響既有標準圖**，使用端不需重產。唯一語意變更：`createKnownDefect(msg, { shots })` 於 1.0.8 靜默忽略 `shots`，此後生效；`gate.finalize()` 回傳值由 undefined 改為 `{ knownDefects }`，有缺陷紀錄時多印摘要；整案缺陷 + `--names` 只命中它時，`finalize` 不再拋錯（離開碼 1 → 0）。部分缺陷路徑會呼叫 `semantic`／`verify`（`ctx.knownDefect` 為該錯誤），自寫包裝遷移時掛鉤須能分流。
 - 依賴升版（playwright 帶入之 Chromium、sharp 之 SVG 光柵化）亦可能改變截圖或紅框像素（推測，需實測確認）；升版後使用端依 §4 等價驗證。
 - 首次收錄（2026-09-29）之 `src/` 與四專案 2026-09-28 22:52 起實跑之版本行為相同：51 檔中 48 檔逐位元相同，其餘 3 檔只改註解或等值字面（`compareImageDirs`、`runBaselineCase` 之 JSDoc，`itemsUnionBox` 之字串字面）。
 - 2026-09-30（1.0.2 之下一版）：`gridContentBox` 空表之「無資料」訊息改為外擴 `INK_PAD` 後再取聯集，**空表截圖之紅框底下移 4px**（原字形墨跡距框內緣僅 3–4px，低於技能要求之約 5px）。只影響「無資料列」之截圖（有資料列之分支未改）；使用端升版後跑一次比對，失敗者即為全部受影響之圖，取得授權後以 `--write-mode changed` 重產並逐張審；`noRowsPad:0` 可重現舊行為供等價對照。同版其餘變更（`probeStuckTooltip`、`runBaselineCase` 之 `[write]` 日誌、`runIsolatedE2e` 之 `targets` 與啟動方式）不影響截圖像素。
