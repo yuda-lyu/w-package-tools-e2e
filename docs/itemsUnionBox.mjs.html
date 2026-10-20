@@ -72,6 +72,20 @@ import { BOX_PAD, BOX_STROKE } from './composeBox.mjs'
  *   浮層範圍外最近之可見內容(文字、晶片／按鈕／觸發區級之有邊界元件、圖示與表單元件；大容器之底色與整張圖表不算；遮罩後之背景不算)，
  *   框線置於與其間隙正中；浮層本身為目標時以其內容之可見範圍計，框線可退入浮層內距；四周無內容者照常外擴
  *   (同日首版一律畫在浮層內側，內距小之清單框線反而貼字：PERM 時間清單下緣 2px、關聯模式清單左緣 1px)。
+ * ③圖形內容(2026-10-20，Gitea issue #6：浮層疊在大型 svg/canvas 圖表上，框線蓋到其下之資料波形)：②之命中測試遇祖先寬 > 480 或高 > 120 即中止，
+ *   故大型 svg 內之圖形與 canvas 像素原判為無內容。graphics(預設開)另以不依賴命中測試之方式找浮層四周之圖形墨跡——
+ *   svg 圖形(path/line/polyline/polygon/rect/circle/ellipse/text)以 getScreenCTM 反矩陣 + isPointInStroke/isPointInFill 幾何判定
+ *   (pointer-events:none 之 Plotly、opacity:0 或全透明追蹤線之 Highcharts 皆正確)，可見性含累積 opacity、stroke/fill 透明度、漸層色標、祖先 overflow 裁切、
+ *   clip-path、被有底色之層蓋住；撐滿圖表之 rect 與填色同背後底色者(圖表背景)不算內容；2d canvas 以 drawImage 分塊讀像素(不對來源呼叫 getContext)，
+ *   與其所在 16x16 小格之背景色有對比者為墨跡(均勻大色塊視為背景)。
+ *   只增不減：②回非 null 之點結果不變，圖形規則另行掃描、逐邊取較近者；只在框線帶(目標矩形邊外 1 至 6px，另含緊鄰矩形邊之一列/行作守距)內有墨跡時才介入，
+ *   沿矩形邊全長逐 px 取樣，四向同一算法；矩形內(含 inkPad 區)之內容框線蓋不到，不介入(框線四角 6x6 不掃，角落處孤立之內容為已知限制)；
+ *   候選範圍為浮層外層矩形與框矩形之聯集外擴 64px。框線外緣退到內容前 1px(剛好不蓋；不似 HTML 鄰項取間隙正中——圖形遍布整個繪圖區，浮層又常比其文字寬，
+ *   取正中會使框縮到只剩文字)，框內緣不越過文字，放不下 5px 描邊時退回間隙正中；圖形夾制使框夾到沒有尺寸時只撤銷圖形之夾制(HTML 規則之結果保留)。
+ *   寬與高皆不大於 480x120 之小 svg/canvas(圖示、迷你圖)②已以整個元素框為內容，不重複判定。
+ *   不自動判定者(已知限制)：img、video、WebGL(未保留繪圖緩衝區者讀得空白)與跨域污染之 canvas、含旋轉/翻轉變換之 canvas、object-position 非置中之 object-fit canvas、
+ *   svg 之 use/image/marker、shadow DOM、iframe 內之圖表，以 graphicAreas 宣告整區視為內容。graphics:false 逐位元重現 1.0.9 之行為。
+ *   會動使用端標準圖：fixed 浮層之框線帶內有圖形墨跡者框線改退入，使用端須重產受影響之圖並逐張審。
  *
  * @param {String|Array|Object} itemSel 輸入項目之選擇器字串、其陣列，或Playwright Locator
  * @param {Object} [opt={}] 輸入設定物件，預設{}
@@ -79,6 +93,8 @@ import { BOX_PAD, BOX_STROKE } from './composeBox.mjs'
  * @param {String|Object} [opt.scroll] 輸入先捲入視窗之選擇器字串或Locator，預設同within；within亦未給時，項目為Locator者捲該Locator，否則不捲動
  * @param {Boolean} [opt.fit=false] 輸入無可見邊界之項目是否改量其內容範圍並外擴文字墨跡布林值，預設false
  * @param {Number} [opt.inkPad=4] 輸入fit下文字墨跡之外擴像素，預設4
+ * @param {Boolean} [opt.graphics=true] 輸入fit下浮層四周是否判定svg圖形與可讀2d canvas像素為框外內容布林值，預設true；false逐位元重現1.0.9
+ * @param {String|Array} [opt.graphicAreas=null] 輸入整區視為框外內容之選擇器字串或其陣列(img、video、WebGL或跨域污染之canvas、地圖、熱圖等無從自動判定者)，預設null；空字串或非字串項拋錯
  * @returns {Object} 回傳量測型目標物件{label,scroll,measure}
  * @example
  *
@@ -86,10 +102,16 @@ import { BOX_PAD, BOX_STROKE } from './composeBox.mjs'
  *
  * let buf = await captureStableWithBox(page, itemsUnionBox('.tree-item', { within: '[data-fmid="channel-tree"]' }))
  * let buf2 = await captureStableWithBox(page, ['img.spinner', itemsUnionBox(page.getByText('Connecting...').first(), { fit: true })])
+ * //下拉清單浮在Highcharts/ECharts圖表上：框線自動退到不蓋資料線(graphics預設開)；浮在地圖(WebGL)上則宣告地圖區為內容
+ * let buf3 = await captureStableWithBox(page, itemsUnionBox('.WPopperFix:visible', { fit: true, graphicAreas: '#map canvas' }))
  *
  */
 function itemsUnionBox(itemSel, opt = {}) {
-    let { within = '', scroll, fit = false, inkPad = INK_PAD } = opt
+    let { within = '', scroll, fit = false, inkPad = INK_PAD, graphics = true, graphicAreas = null } = opt
+    let areaSels = graphicAreas === null || graphicAreas === undefined || graphicAreas === false ? [] : (Array.isArray(graphicAreas) ? graphicAreas : [graphicAreas])
+    if (!areaSels.every((s) => typeof s === 'string' &amp;&amp; s.trim() !== '')) {
+        throw new Error('itemsUnionBox: graphicAreas 須為非空選擇器字串或其陣列')
+    }
     let isLoc = !!itemSel &amp;&amp; typeof itemSel === 'object' &amp;&amp; !Array.isArray(itemSel) &amp;&amp; typeof itemSel.evaluateAll === 'function'
     let sel = isLoc ? '' : (Array.isArray(itemSel) ? itemSel.join(', ') : itemSel)
     if (!isLoc &amp;&amp; (typeof sel !== 'string' || sel.trim() === '')) {
@@ -108,7 +130,7 @@ function itemsUnionBox(itemSel, opt = {}) {
         measure: async (page) => {
             let loc = isLoc ? itemSel : (within ? page.locator(within).first().locator(sel) : page.locator(sel))
             //頁內量測(選擇器與 Locator 共用此一函式)
-            let measureEls = (els, { within, fit, inkPad, edge, strokeHalf, debug }) => {
+            let measureEls = (els, { within, fit, inkPad, edge, strokeHalf, debug, graphics, areaSels }) => {
                 let dbg = []
                 let uni = (a, b) => (!a ? b : !b ? a : { left: Math.min(a.left, b.left), top: Math.min(a.top, b.top), right: Math.max(a.right, b.right), bottom: Math.max(a.bottom, b.bottom) })
                 //元素自身有可見邊界(底色異於其背後底色、邊框、陰影、背景圖，或圖片/表單等替換元素)：其邊界即視覺邊界
@@ -245,6 +267,507 @@ function itemsUnionBox(itemSel, opt = {}) {
                     }
                     return null
                 }
+                //圖形內容(svg 圖形、canvas 像素、使用端宣告之繪圖區)：與舊規則(elementsFromPoint 取命中元素)分開、另以幾何與像素判定，兩者結果取較近者(只增不減)。
+                //svg 圖形：getScreenCTM 反矩陣 + isPointInStroke/isPointInFill，不依賴命中測試——pointer-events:none 之圖形(Plotly 之 .main-svg)命中不到、
+                //opacity:0 之圖形與全透明追蹤線(Highcharts 之 tracker)命中得到卻看不見；canvas：以 drawImage 取其像素至離屏小畫布(不對來源呼叫 getContext，
+                //免替從未繪製之 canvas 建立 2d context 而使其後之 webgl 失效)；img/video/跨域污染之 canvas(WebGL 未保留繪圖緩衝區者讀得空白)無從自動判定，
+                //由 graphicAreas 宣告整區視為內容
+                let gnear = {} //debug 用：各邊命中之最近圖形(描述@視窗座標)
+                let gLast = ''
+                let gNote = (d) => {
+                    gLast = d
+                }
+                let gDesc = (e) => `${e.tagName.toLowerCase()}${e.id ? `#${e.id}` : ''}${(typeof e.className === 'string' ? e.className : (e.className &amp;&amp; e.className.baseVal) || '').trim().split(/\s+/).filter(Boolean).slice(0, 2).map((c) => `.${c}`).join('')}`
+                let G_MIN_ALPHA = 0.1
+                let rectInter = (a, b) => (!a ? b : !b ? a : { left: Math.max(a.left, b.left), top: Math.max(a.top, b.top), right: Math.min(a.right, b.right), bottom: Math.min(a.bottom, b.bottom) })
+                //顏色解析(圖形規則專用)：計算樣式之色多為 rgb()/rgba()，但 color(srgb|display-p3 …)、lab()、oklch() 等現代色彩空間不在此列——
+                //舊 rgbaOf 把不認得者一律當不透明黑，使全透明之 P3 色線被當內容。alpha 取「/ a」之 a(可為百分比)；rgb 僅 rgb()、color(srgb …) 可得，其餘為 null(不做底色比對)
+                let gColor = (c) => {
+                    let s = String(c || '').trim()
+                    if (s === '' || s === 'none' || s === 'transparent') {
+                        return { rgb: null, a: 0 }
+                    }
+                    let num = (t) => (String(t).endsWith('%') ? parseFloat(t) / 100 : Number(t))
+                    let m = s.match(/^rgba?\(([^)]+)\)$/)
+                    if (m) {
+                        let p = m[1].split(/[\s,/]+/).filter((t) => t !== '')
+                        let a = p.length >= 4 ? num(p[3]) : 1
+                        return { rgb: [Number(p[0]), Number(p[1]), Number(p[2])], a: Number.isNaN(a) ? 1 : a }
+                    }
+                    let ma = s.match(/\/\s*([\d.]+%?)\s*\)\s*$/)
+                    let a = ma ? num(ma[1]) : 1
+                    let ms = s.match(/^color\(\s*srgb\s+([-\d.e]+)\s+([-\d.e]+)\s+([-\d.e]+)/)
+                    return { rgb: ms ? [Number(ms[1]) * 255, Number(ms[2]) * 255, Number(ms[3]) * 255] : null, a: Number.isNaN(a) ? 1 : a }
+                }
+                //自元素至文件根之累積 opacity、是否經 clip-path、是否含旋轉/翻轉/斜切之 CSS 變換、overflow 非 visible 之祖先矩形交集(裁切範圍)
+                //(以節點為鍵記憶，千個圖形共用祖先之計算)
+                let gUp = new Map()
+                let gUpOf = (n) => {
+                    if (!n || n.nodeType !== 1) {
+                        return { op: 1, clip: false, warp: false, box: null }
+                    }
+                    let m = gUp.get(n)
+                    if (!m) {
+                        let cs = window.getComputedStyle(n)
+                        let up = gUpOf(n.parentElement)
+                        let warp = up.warp
+                        if (!warp &amp;&amp; cs.transform &amp;&amp; cs.transform !== 'none') {
+                            try {
+                                let mx = new DOMMatrix(cs.transform)
+                                warp = Math.abs(mx.b) > 1e-6 || Math.abs(mx.c) > 1e-6 || mx.a &lt; 0 || mx.d &lt; 0
+                            }
+                            catch (err) {
+                                warp = true
+                            }
+                        }
+                        let box = up.box
+                        if ((cs.overflowX !== 'visible' || cs.overflowY !== 'visible') &amp;&amp; !n.ownerSVGElement) { //巢狀 svg 之視埠矩形無從由 getBoundingClientRect 取得(回內容外接框)，不裁
+                            let r = n.getBoundingClientRect()
+                            box = rectInter(box, { left: r.left, top: r.top, right: r.right, bottom: r.bottom })
+                        }
+                        m = { op: Number(cs.opacity) * up.op, clip: up.clip || (!!cs.clipPath &amp;&amp; cs.clipPath !== 'none'), warp, box }
+                        gUp.set(n, m)
+                    }
+                    return m
+                }
+                let gVisible = (e) => {
+                    let cs = window.getComputedStyle(e)
+                    return cs.display !== 'none' &amp;&amp; cs.visibility !== 'hidden' &amp;&amp; gUpOf(e).op >= G_MIN_ALPHA
+                }
+                //漸層/圖樣填色(url(#id))：參考不存在視同 none；漸層之色標全為透明視同 none；其餘視為可見
+                let gServerAlpha = (v) => {
+                    let mt = v.match(/url\(\s*["']?#([^"')\s]+)/)
+                    let ref = mt ? document.getElementById(mt[1]) : null
+                    if (!ref) {
+                        return 0
+                    }
+                    let tn = ref.tagName.toLowerCase()
+                    if (tn !== 'lineargradient' &amp;&amp; tn !== 'radialgradient') {
+                        return 1
+                    }
+                    let stops = ref.querySelectorAll('stop')
+                    if (stops.length === 0) {
+                        let hr = ref.getAttribute('href') || ref.getAttribute('xlink:href')
+                        let tg = hr &amp;&amp; hr.startsWith('#') ? document.getElementById(hr.slice(1)) : null
+                        stops = tg ? tg.querySelectorAll('stop') : []
+                    }
+                    let best = 0
+                    for (let s of stops) {
+                        let scs = window.getComputedStyle(s)
+                        best = Math.max(best, gColor(scs.stopColor).a * Number(scs.stopOpacity))
+                    }
+                    return best
+                }
+                let gPaint = (v, opa, acc) => {
+                    if (!v || v === 'none') {
+                        return 0
+                    }
+                    return (v.startsWith('url(') ? gServerAlpha(v) : gColor(v).a) * opa * acc
+                }
+                let gCtxs = new Map()
+                //掃描範圍(目標與浮層外層矩形之聯集外擴 64px，見 nearestOutside)內之候選：與之相交之 svg 根(及 overflow 可見者：內容可畫在根框外)、canvas、使用端宣告之繪圖區；
+                //每次量測只掃描全頁一遍，之後逐取樣點只查此小清單(頁面有數萬個 svg 圖示時不致逐點全掃)
+                let gCtxOf = (region) => {
+                    let key = `${region.left},${region.top},${region.right},${region.bottom}`
+                    let c = gCtxs.get(key)
+                    if (!c) {
+                        let near = (r) => r.width > 0 &amp;&amp; r.height > 0 &amp;&amp; r.right >= region.left &amp;&amp; r.left &lt;= region.right &amp;&amp; r.bottom >= region.top &amp;&amp; r.top &lt;= region.bottom
+                        c = { roots: [], canvases: [], areas: [], shapes: new Map(), canvas: new Map() }
+                        //圖形規則補的是舊規則「祖先寬 > 480 或高 > 120 即中止」之盲區：寬 ≤ 480 且高 ≤ 120 之小 svg/canvas(圖示、迷你圖)舊規則已以整個元素框為內容
+                        //(hasBoundary)，不在此重複(頁面有數萬個 svg 圖示時亦免逐個列舉)。svg 根：與範圍相交之大者收；宣告 overflow:visible(內容可畫在根框外)者收——
+                        //小根只認屬性與行內樣式(不對每個圖示取計算樣式)，大根另認樣式表規則(計算樣式)
+                        let big = (r) => r.width > 480 || r.height > 120
+                        for (let s of document.querySelectorAll('svg')) {
+                            if (s.ownerSVGElement) {
+                                continue
+                            }
+                            let sr = s.getBoundingClientRect()
+                            let isBig = big(sr)
+                            let visibleOverflow = s.getAttribute('overflow') === 'visible' || s.style.overflow === 'visible' || s.style.overflowX === 'visible' || s.style.overflowY === 'visible'
+                            if (!visibleOverflow &amp;&amp; isBig &amp;&amp; !near(sr)) {
+                                let scs = window.getComputedStyle(s)
+                                visibleOverflow = scs.overflowX === 'visible' || scs.overflowY === 'visible'
+                            }
+                            if (((near(sr) &amp;&amp; isBig) || visibleOverflow) &amp;&amp; window.getComputedStyle(s).display !== 'none') {
+                                c.roots.push(s)
+                            }
+                        }
+                        for (let cv of document.querySelectorAll('canvas')) {
+                            let cr = cv.getBoundingClientRect()
+                            if (near(cr) &amp;&amp; big(cr)) {
+                                c.canvases.push(cv)
+                            }
+                        }
+                        for (let sel of areaSels) {
+                            for (let a of document.querySelectorAll(sel)) {
+                                if (near(a.getBoundingClientRect())) {
+                                    c.areas.push(a)
+                                }
+                            }
+                        }
+                        gCtxs.set(key, c)
+                    }
+                    return c
+                }
+                //一個 svg 根內與掃描範圍相交之可見圖形。bbox 不含線寬：先以 200px 寬之預篩(線寬 > 400px 者不認)，取得線寬後再以精確之 pad 複核
+                let gShapesOf = (ctx, root, region) => {
+                    let cached = ctx.shapes.get(root)
+                    if (cached) {
+                        return cached
+                    }
+                    let rr = root.getBoundingClientRect()
+                    let rootArea = rr.width * rr.height
+                    let all = [...root.querySelectorAll('path,line,polyline,polygon,rect,circle,ellipse,text')].map((el) => ({ el, q0: el.getBoundingClientRect() }))
+                    //圖表自身之底色：最上層撐滿(面積 ≥ 根面積 50%)且不透明之 rect 之色(深色主題之黑底：白色形狀與黑底不同，不可與頁面底色比)；無則取根之祖先底色
+                    let svgBg = backdropOf(root).slice(0, 3)
+                    for (let { el, q0 } of all) {
+                        if (el.tagName.toLowerCase() === 'rect' &amp;&amp; q0.width * q0.height >= rootArea * 0.5 &amp;&amp; !el.closest('defs,clipPath,mask,pattern,marker,symbol')) {
+                            let bcs = window.getComputedStyle(el)
+                            let bc = gColor(bcs.fill)
+                            if (bc.rgb &amp;&amp; bc.a * Number(bcs.fillOpacity) >= 0.9 &amp;&amp; bcs.display !== 'none' &amp;&amp; bcs.visibility !== 'hidden') {
+                                svgBg = bc.rgb
+                            }
+                        }
+                    }
+                    let list = []
+                    for (let { el, q0 } of all) {
+                        if (q0.right + 200 &lt; region.left || q0.left - 200 > region.right || q0.bottom + 200 &lt; region.top || q0.top - 200 > region.bottom) {
+                            continue
+                        }
+                        if (el.closest('defs,clipPath,mask,pattern,marker,symbol,linearGradient,radialGradient,filter')) {
+                            continue
+                        }
+                        let cs = window.getComputedStyle(el)
+                        if (cs.display === 'none' || cs.visibility === 'hidden') {
+                            continue
+                        }
+                        let up = gUpOf(el)
+                        let acc = up.op
+                        let m = el.getScreenCTM()
+                        if (!m || acc &lt; G_MIN_ALPHA) {
+                            continue
+                        }
+                        let inv = null
+                        try {
+                            inv = m.inverse()
+                        }
+                        catch (err) {
+                            continue
+                        }
+                        let tn = el.tagName.toLowerCase()
+                        let isText = tn === 'text'
+                        let sw = parseFloat(cs.strokeWidth)
+                        let strokeOK = !isText &amp;&amp; sw > 0 &amp;&amp; gPaint(cs.stroke, Number(cs.strokeOpacity), acc) >= G_MIN_ALPHA
+                        let fillA = gPaint(cs.fill, Number(cs.fillOpacity), acc)
+                        let fillOK = !isText &amp;&amp; fillA >= G_MIN_ALPHA
+                        if (fillOK) {
+                            //底色：撐滿圖表之矩形(背景、繪圖區底色，任何顏色)、或填色與圖表底色相同(白底圖表上之白色形狀：背景 path、白色遮片)皆不算內容；其邊框仍算
+                            //(同舊規則之「大型容器之底色不算內容」「底色與背後相同則無可見邊界」)
+                            if (tn === 'rect' &amp;&amp; q0.width * q0.height >= rootArea * 0.5) {
+                                fillOK = false
+                            }
+                            else if (!cs.fill.startsWith('url(')) {
+                                let fc = gColor(cs.fill)
+                                if (fc.rgb) {
+                                    let k = Math.min(1, fillA)
+                                    if ([0, 1, 2].every((i) => Math.abs((fc.rgb[i] * k + svgBg[i] * (1 - k)) - svgBg[i]) &lt;= 8)) {
+                                        fillOK = false
+                                    }
+                                }
+                            }
+                        }
+                        let sc = Math.max(Math.hypot(m.a, m.b), Math.hypot(m.c, m.d))
+                        let pad = (sw > 0 ? sw * sc * 1.5 : 0) + 1
+                        let rects = null
+                        let q = { left: q0.left - pad, top: q0.top - pad, right: q0.right + pad, bottom: q0.bottom + pad }
+                        if (isText) {
+                            //文字取各文字節點之字行框(同舊規則之 textRectAt)，並依該節點所屬元素(text 或 tspan)自身之樣式判可見(fill 或 stroke 有可見色、非透明、非隱藏)；
+                            //舊規則只認命中測試得到者，此處不依賴命中測試：被透明層蓋住、pointer-events:none 之文字亦算
+                            rects = []
+                            let tw = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+                            for (let tnode = tw.nextNode(); tnode; tnode = tw.nextNode()) {
+                                let pe = tnode.parentElement
+                                if (!tnode.nodeValue || tnode.nodeValue.trim() === '' || !pe) {
+                                    continue
+                                }
+                                let pcs = window.getComputedStyle(pe)
+                                let pacc = gUpOf(pe).op
+                                if (pcs.display === 'none' || pcs.visibility === 'hidden' || pacc &lt; G_MIN_ALPHA) {
+                                    continue
+                                }
+                                if (gPaint(pcs.fill, Number(pcs.fillOpacity), pacc) &lt; G_MIN_ALPHA &amp;&amp; !(parseFloat(pcs.strokeWidth) > 0 &amp;&amp; gPaint(pcs.stroke, Number(pcs.strokeOpacity), pacc) >= G_MIN_ALPHA)) {
+                                    continue
+                                }
+                                let rg = document.createRange()
+                                rg.selectNodeContents(tnode)
+                                rects.push(...[...rg.getClientRects()].filter((r) => r.width > 0 &amp;&amp; r.height > 0))
+                            }
+                            if (rects.length === 0) {
+                                continue
+                            }
+                            q = { left: Math.min(...rects.map((r) => r.left)) - 1, top: Math.min(...rects.map((r) => r.top)) - 1, right: Math.max(...rects.map((r) => r.right)) + 1, bottom: Math.max(...rects.map((r) => r.bottom)) + 1 }
+                        }
+                        else if (!strokeOK &amp;&amp; !fillOK) {
+                            continue
+                        }
+                        if (q.right &lt; region.left || q.left > region.right || q.bottom &lt; region.top || q.top > region.bottom) {
+                            continue
+                        }
+                        //經 clip-path 者(Highcharts 之繪圖區裁切)：圖形可能被裁掉看不見，能命中測試者(pointer-events 非 none)以命中堆疊確認
+                        list.push({ el, isText, rects, strokeOK, fillOK, inv, box: up.box, clip: up.clip &amp;&amp; cs.pointerEvents !== 'none', q })
+                    }
+                    ctx.shapes.set(root, list)
+                    return list
+                }
+                //canvas 像素：以 drawImage 分塊(64x64 裝置像素)取至離屏小畫布按需讀取(不整張讀，地圖級 canvas 數百萬像素；不對來源呼叫 getContext)；
+                //每個 canvas 各用一張離屏畫布(跨域污染之 canvas 會污染其離屏畫布，不可與其他 canvas 共用)；背景色取各像素所在 16x16 小格之眾數(見 gCanvasInk)。
+                //座標對應須扣 border 與 padding(位圖只畫在內容盒)並依 object-fit 換算；含旋轉/翻轉之 CSS 變換者、object-position 非置中者與跨域污染者無從判定
+                let gCanvasOf = (ctx, c) => {
+                    if (ctx.canvas.has(c)) {
+                        return ctx.canvas.get(c)
+                    }
+                    let st = null
+                    try {
+                        let up = gUpOf(c)
+                        let cs = window.getComputedStyle(c)
+                        if (gVisible(c) &amp;&amp; !up.warp &amp;&amp; c.width > 0 &amp;&amp; c.height > 0) {
+                            let r = c.getBoundingClientRect()
+                            let px = (k) => parseFloat(cs[k]) || 0
+                            let cb = { left: r.left + px('borderLeftWidth') + px('paddingLeft'), top: r.top + px('borderTopWidth') + px('paddingTop'), width: r.width - px('borderLeftWidth') - px('paddingLeft') - px('borderRightWidth') - px('paddingRight'), height: r.height - px('borderTopWidth') - px('paddingTop') - px('borderBottomWidth') - px('paddingBottom') }
+                            let fit = cs.objectFit || 'fill'
+                            let map = null
+                            if (cb.width > 0 &amp;&amp; cb.height > 0) {
+                                if (fit === 'fill') {
+                                    map = { ox: cb.left, oy: cb.top, dw: cb.width, dh: cb.height, sx: c.width / cb.width, sy: c.height / cb.height }
+                                }
+                                else if (['contain', 'cover', 'none', 'scale-down'].includes(fit) &amp;&amp; cs.objectPosition === '50% 50%') {
+                                    let k = fit === 'contain' ? Math.min(cb.width / c.width, cb.height / c.height) : fit === 'cover' ? Math.max(cb.width / c.width, cb.height / c.height) : fit === 'none' ? 1 : Math.min(1, cb.width / c.width, cb.height / c.height)
+                                    let dw = c.width * k
+                                    let dh = c.height * k
+                                    map = { ox: cb.left + (cb.width - dw) / 2, oy: cb.top + (cb.height - dh) / 2, dw, dh, sx: 1 / k, sy: 1 / k }
+                                }
+                            }
+                            if (map) {
+                                let scratch = document.createElement('canvas')
+                                scratch.width = 64
+                                scratch.height = 64
+                                st = { c, w: c.width, h: c.height, tiles: new Map(), box: up.box, clip: up.clip &amp;&amp; cs.pointerEvents !== 'none', map, scratch }
+                            }
+                        }
+                    }
+                    catch (err) {
+                        st = null //無從自動判定
+                    }
+                    ctx.canvas.set(c, st)
+                    return st
+                }
+                //讀 canvas 位圖座標(cx, cy)之像素：回傳 { d(該塊資料), o(位移), t(塊), lx, ly } 或 null(無法讀取)
+                let gCanvasRead = (st, cx, cy) => {
+                    let tx = Math.floor(cx / 64)
+                    let ty = Math.floor(cy / 64)
+                    let k = `${tx},${ty}`
+                    let t = st.tiles.get(k)
+                    if (t === undefined) {
+                        try {
+                            let tw = Math.min(64, st.w - tx * 64)
+                            let th = Math.min(64, st.h - ty * 64)
+                            let sx = st.scratch.getContext('2d', { willReadFrequently: true })
+                            sx.clearRect(0, 0, 64, 64)
+                            sx.drawImage(st.c, tx * 64, ty * 64, tw, th, 0, 0, tw, th)
+                            t = sx.getImageData(0, 0, tw, th)
+                        }
+                        catch (err) {
+                            t = null //跨域污染：此後各塊皆同
+                        }
+                        st.tiles.set(k, t)
+                    }
+                    if (!t) {
+                        return null
+                    }
+                    let lx = cx - tx * 64
+                    let ly = cy - ty * 64
+                    return { d: t.data, o: (ly * t.width + lx) * 4, t, lx, ly }
+                }
+                //像素有墨跡：alpha 不足(透明處，見到的是其下頁面)不算；背景眾數透明者(未繪製處透明之圖表)以 alpha 判定，
+                //背景眾數有色者(含半透明或不透明底)以與背景之色差/alpha 差判定(同 canvasInkRects 之 alpha/bg 判準)
+                let gCanvasInk = (st, cx, cy) => {
+                    let px = gCanvasRead(st, cx, cy)
+                    if (!px) {
+                        return false
+                    }
+                    let { d, o, t, lx, ly } = px
+                    if (d[o + 3] &lt; 40) {
+                        return false
+                    }
+                    //背景色取該像素所在 16x16 小格之眾數(各色量化至 8 階後計數；漸層底、大片均勻底之任一處皆以其周遭為背景，不受整張畫布之色分布影響)
+                    let cell = (ly >> 4) * 4 + (lx >> 4)
+                    t.modes = t.modes || []
+                    let mode = t.modes[cell]
+                    if (!mode) {
+                        let cnt = new Map()
+                        let bestN = 0
+                        for (let yy = (ly >> 4) &lt;&lt; 4; yy &lt; Math.min(t.height, ((ly >> 4) + 1) &lt;&lt; 4); yy++) {
+                            for (let xx = (lx >> 4) &lt;&lt; 4; xx &lt; Math.min(t.width, ((lx >> 4) + 1) &lt;&lt; 4); xx++) {
+                                let p = (yy * t.width + xx) * 4
+                                let key = ((d[p] >> 3) &lt;&lt; 15) | ((d[p + 1] >> 3) &lt;&lt; 10) | ((d[p + 2] >> 3) &lt;&lt; 5) | (d[p + 3] >> 3)
+                                let n = (cnt.get(key) || 0) + 1
+                                cnt.set(key, n)
+                                if (n > bestN) {
+                                    bestN = n
+                                    mode = [d[p], d[p + 1], d[p + 2], d[p + 3]]
+                                }
+                            }
+                        }
+                        t.modes[cell] = mode
+                    }
+                    if (mode[3] &lt; 40) {
+                        return true //背景為透明(未繪製處透明之圖表)：有 alpha 即墨跡
+                    }
+                    return Math.max(Math.abs(d[o] - mode[0]), Math.abs(d[o + 1] - mode[1]), Math.abs(d[o + 2] - mode[2]), Math.abs(d[o + 3] - mode[3])) > 24
+                }
+                //視窗座標(x, y)對應之 canvas 位圖座標；落在內容盒之外(或 object-fit 之留白處)回 null
+                let gCanvasPoint = (st, x, y) => {
+                    let m = st.map
+                    if (x &lt; m.ox || x >= m.ox + m.dw || y &lt; m.oy || y >= m.oy + m.dh) {
+                        return null
+                    }
+                    return [Math.min(st.w - 1, Math.max(0, Math.floor((x - m.ox) * m.sx))), Math.min(st.h - 1, Math.max(0, Math.floor((y - m.oy) * m.sy)))]
+                }
+                //graphicAt(x, y, fx, fr, region)：取樣點(左上角整數座標 x, y)之圖形內容；fx、fr 為浮層(fixed 元素與其矩形)；region 為候選範圍
+                let graphicAt = (x, y, fx, fr, region) => {
+                    let ctx = gCtxOf(region)
+                    let inRect = (r) => x + 0.5 >= r.left &amp;&amp; x + 0.5 &lt; r.right &amp;&amp; y + 0.5 >= r.top &amp;&amp; y + 0.5 &lt; r.bottom
+                    //遮蓋判定(stack 為該點之命中堆疊，自上而下)：排在「圖形自身或其祖先」之前者即疊在其上；視為蓋住者——有自身底色(含遮罩之淡底，alpha 乘累積 opacity > 0.05)、
+                    //背景圖、img/video/iframe、位圖在該點不透明之可讀 canvas(不可讀者保守視為蓋住)、不透明填色(alpha ≥ 0.9)之 svg 圖形(白色遮片；彩色者本身即內容，輪到它時另判)；
+                    //完全透明或 opacity 近 0 之層(文字標籤、透明點擊攔截層)不算(穿透，同舊規則)
+                    //命中堆疊取於整數座標 (x, y)：document.elementsFromPoint 對 HTML 方塊之命中區為 [x, x+1) x [y, y+1)(實測：小數座標之區塊向右下延伸，
+                    //x+0.5 會把右/下一像素之元素也算進來，如緊貼浮層左緣之圖形被判成浮層蓋住)，即本像素；svg 圖形之命中則是精確幾何，另以實際命中之取樣點 at 取 fine 堆疊，
+                    //供裁切確認(細於 1px 之線在整數點上可能不命中)與 svg 遮片之疊序判定
+                    let occluded = (el, stack, fine) => {
+                        let inFine = fine.includes(el)
+                        for (let h of stack) {
+                            if (h === el || h.contains(el)) {
+                                break
+                            }
+                            if (h.ownerSVGElement || h.tagName.toLowerCase() === 'svg') {
+                                continue //svg 內之圖形見下
+                            }
+                            let hcs = window.getComputedStyle(h)
+                            let hop = gUpOf(h).op
+                            if (hop &lt; G_MIN_ALPHA) {
+                                continue
+                            }
+                            if (h.tagName === 'CANVAS') {
+                                let hst = gCanvasOf(ctx, h)
+                                let hp = hst ? gCanvasPoint(hst, x + 0.5, y + 0.5) : null
+                                let hpx = hp ? gCanvasRead(hst, hp[0], hp[1]) : null
+                                if (!hpx || hpx.d[hpx.o + 3] * hop >= 230) {
+                                    return true
+                                }
+                                continue
+                            }
+                            if (['IMG', 'VIDEO', 'IFRAME'].includes(h.tagName) || gColor(hcs.backgroundColor).a * hop > 0.05 || (hcs.backgroundImage &amp;&amp; hcs.backgroundImage !== 'none')) {
+                                return true
+                            }
+                        }
+                        //不透明填色之 svg 圖形(白色遮片)：圖形自身在命中堆疊內者，堆疊順序即疊序(排在前者在上，含他根之遮片)；圖形不在堆疊內(pointer-events:none)
+                        //則疊序不明，僅認同一 svg 內文件順序居後者(svg 圖形之疊序即文件順序)
+                        for (let h of fine) {
+                            if (h === el || h.contains(el)) {
+                                break
+                            }
+                            if (!h.ownerSVGElement) {
+                                continue
+                            }
+                            let hcs = window.getComputedStyle(h)
+                            let hop = gUpOf(h).op
+                            if (hop >= G_MIN_ALPHA &amp;&amp; gPaint(hcs.fill, Number(hcs.fillOpacity), hop) >= 0.9 &amp;&amp; !hcs.fill.startsWith('url(') &amp;&amp; (inFine || (h.ownerSVGElement === el.ownerSVGElement &amp;&amp; !!(el.compareDocumentPosition(h) &amp; Node.DOCUMENT_POSITION_FOLLOWING)))) {
+                                return true
+                            }
+                        }
+                        return false
+                    }
+                    //q：命中內容之矩形(預設點大小：nearestOutside 取 max(top, y-1) 等，與舊規則命中元素之 1px 守距一致)；at：實際命中之取樣點(svg 圖形用之；其餘為 (x, y))
+                    let hit = (d, el, clip, q, at) => {
+                        let stack = document.elementsFromPoint(x, y)
+                        if (stack.some((h) => fx.contains(h))) {
+                            return 'covered' //浮層蓋著此點(面板可大於 fixed 外層)：其後之內容看不見
+                        }
+                        let fine = at[0] === x &amp;&amp; at[1] === y ? stack : document.elementsFromPoint(at[0], at[1])
+                        if ((clip &amp;&amp; !fine.includes(el)) || occluded(el, stack, fine)) {
+                            return null
+                        }
+                        gNote(d)
+                        return q || { left: x - 1, top: y - 1, right: x + 1, bottom: y + 1 }
+                    }
+                    let center = [x + 0.5, y + 0.5]
+                    let corner = [x, y]
+                    //使用端宣告之繪圖區：整區(與其裁切範圍之交集)視為內容
+                    for (let a of ctx.areas) {
+                        if (fx.contains(a) || !gVisible(a)) {
+                            continue
+                        }
+                        let ar = a.getBoundingClientRect()
+                        if (inRect(rectInter({ left: ar.left, top: ar.top, right: ar.right, bottom: ar.bottom }, gUpOf(a).box))) {
+                            let r = hit(`area:${gDesc(a)}`, a, gUpOf(a).clip &amp;&amp; window.getComputedStyle(a).pointerEvents !== 'none', null, corner)
+                            if (r) {
+                                return r === 'covered' ? null : r
+                            }
+                        }
+                    }
+                    //svg 圖形
+                    for (let root of ctx.roots) {
+                        if (fx.contains(root)) {
+                            continue
+                        }
+                        for (let s of gShapesOf(ctx, root, region)) {
+                            if (x + 1 &lt; s.q.left || x > s.q.right || y + 1 &lt; s.q.top || y > s.q.bottom || fx.contains(s.el) || (s.box &amp;&amp; !inRect(s.box))) {
+                                continue
+                            }
+                            if (s.isText) {
+                                //字行框：取樣點(左上角)落在框內(同舊規則 textRectAt 之含邊界判定)，回傳該框
+                                let tr = s.rects.find((q) => x >= q.left &amp;&amp; x &lt;= q.right &amp;&amp; y >= q.top &amp;&amp; y &lt;= q.bottom)
+                                if (tr) {
+                                    let r = hit(`svg:${gDesc(s.el)}`, s.el, s.clip, tr, center)
+                                    if (r) {
+                                        return r === 'covered' ? null : r
+                                    }
+                                }
+                                continue
+                            }
+                            //取樣足跡：像素中心加其上下左右各距中心 0.45px 之四點(皆在本像素內)——細於 1px 之線落在像素內不致漏掉，又不越過像素邊界把相鄰一列(行)像素之內容算進本列(緊貼浮層邊之平行線不致誤退左右(上下)邊)
+                            for (let [px, py] of [[x + 0.5, y + 0.5], [x + 0.05, y + 0.5], [x + 0.95, y + 0.5], [x + 0.5, y + 0.05], [x + 0.5, y + 0.95]]) {
+                                let p = new DOMPoint(px, py).matrixTransform(s.inv)
+                                if ((s.strokeOK &amp;&amp; s.el.isPointInStroke(p)) || (s.fillOK &amp;&amp; s.el.isPointInFill(p))) {
+                                    let r = hit(`svg:${gDesc(s.el)}`, s.el, s.clip, null, [px, py])
+                                    if (r) {
+                                        return r === 'covered' ? null : r
+                                    }
+                                    break
+                                }
+                            }
+                        }
+                    }
+                    //canvas 像素
+                    for (let c of ctx.canvases) {
+                        if (fx.contains(c)) {
+                            continue
+                        }
+                        let st = gCanvasOf(ctx, c)
+                        if (!st || (st.box &amp;&amp; !inRect(st.box))) {
+                            continue
+                        }
+                        let cp = gCanvasPoint(st, x + 0.5, y + 0.5)
+                        if (cp &amp;&amp; gCanvasInk(st, cp[0], cp[1])) {
+                            let rr = hit(`canvas:${gDesc(c)}`, c, st.clip, null, corner)
+                            if (rr) {
+                                return rr === 'covered' ? null : rr
+                            }
+                        }
+                    }
+                    return null
+                }
+                //舊規則(HTML 內容)：點在視窗外、浮層外層矩形內者無內容；其餘取命中堆疊交 legacyContentAt
                 let contentAt = (x, y, fx, fr) => {
                     let vw = window.innerWidth
                     let vh = window.innerHeight
@@ -254,7 +777,14 @@ function itemsUnionBox(itemSel, opt = {}) {
                     if (x >= fr.left &amp;&amp; x &lt; fr.right &amp;&amp; y >= fr.top &amp;&amp; y &lt; fr.bottom) {
                         return null
                     }
-                    for (let h of document.elementsFromPoint(x, y)) {
+                    return legacyContentAt(x, y, fx, document.elementsFromPoint(x, y))
+                }
+                //舊規則本體(1.0.9 之 contentAt，逐字不改；圖形規則不得改變其回傳)：自命中堆疊逐元素沿祖先找文字行框或有可見邊界之小元件，
+                //遇祖先寬 > 480 或高 > 120 之大容器即止(此即大型 svg/canvas 內圖形之盲區，由 graphicAt 補)
+                let legacyContentAt = (x, y, fx, stack) => {
+                    let vw = window.innerWidth
+                    let vh = window.innerHeight
+                    for (let h of stack) {
                         if (fx.contains(h)) {
                             return null //浮層自身蓋著此點(面板可大於 fixed 外層)：其後之頁面內容看不見，不算
                         }
@@ -281,7 +811,8 @@ function itemsUnionBox(itemSel, opt = {}) {
                     return null
                 }
                 //目標四周(自其可見範圍向外，掃至預設框線外緣外 2px)、浮層範圍外最近之可見內容；每邊沿線每 4px 取一點，回傳各邊內容之對邊位置(無者 null)。
-                //內容一部分被浮層蓋住時，以浮層外第一個可見點為界
+                //內容一部分被浮層蓋住時，以浮層外第一個可見點為界。另回傳 g：圖形(svg 圖形、canvas 像素、宣告區)之各邊最近內容(見下方圖形掃描)，
+                //與 HTML 內容分開記——兩者之退入規則不同(HTML 取間隙正中、圖形取剛好不蓋)
                 let nearestOutside = (inner, box, fx, fr) => {
                     let res = { top: null, bottom: null, left: null, right: null }
                     let lim = edge + strokeHalf + 2
@@ -328,6 +859,80 @@ function itemsUnionBox(itemSel, opt = {}) {
                                 let p = Math.min(q.bottom, y + 1)
                                 res.top = res.top === null ? p : Math.max(res.top, p)
                                 break
+                            }
+                        }
+                    }
+                    //圖形(svg 圖形、canvas 像素、宣告區)：資料線可橫貫浮層下方任一處，不只在文字內容之正下方，故沿**框線全長**取樣
+                    //(框矩形邊的全長，逐 px)，而非只取內容範圍 inner 之寬高(舊規則：晶片、按鈕等鄰項緊貼文字列才有意義)。
+                    //只掃框線帶本身(框矩形邊外 1 至 BOX_PAD px，四向同一算法：像素列/行與帶相交者)，不自內容邊起——框矩形內(含 inkPad 區)之內容框線蓋不到，
+                    //讓它介入只會使框線退入文字；框線四角之 BOX_PAD x BOX_PAD 小方格不掃——角落旁側之內容屬左右(上下)兩邊之事，
+                    //掃角落會使平行於浮層邊之橫(縱)線誤退左右(上下)邊，而落在角落之孤立點至多被圓角描邊蓋住數 px²(已知限制)
+                    if (graphics) {
+                        let glim = edge + strokeHalf //圖形只在框線帶(外緣)內才介入：不像舊規則另留 2px，免得距框線外緣數 px 之淡格線等使既有標準圖無謂改動
+                        //候選範圍：浮層外層矩形與框矩形之聯集外擴 64px(取整至 128px 格，同範圍之多個目標共用候選清單)；面板可大於 fixed 外層(0x0 之外層包 absolute 面板)，
+                        //框矩形不在外層矩形內，故須計入
+                        let gReg = {
+                            left: Math.floor((Math.min(fr.left, box.left) - 64) / 128) * 128,
+                            top: Math.floor((Math.min(fr.top, box.top) - 64) / 128) * 128,
+                            right: Math.ceil((Math.max(fr.right, box.right) + 64) / 128) * 128,
+                            bottom: Math.ceil((Math.max(fr.bottom, box.bottom) + 64) / 128) * 128
+                        }
+                        let gAt = (x, y) => {
+                            if (x &lt; 0 || y &lt; 0 || x >= window.innerWidth || y >= window.innerHeight || (x >= fr.left &amp;&amp; x &lt; fr.right &amp;&amp; y >= fr.top &amp;&amp; y &lt; fr.bottom)) {
+                                return null
+                            }
+                            try {
+                                return graphicAt(x, y, fx, fr, gReg)
+                            }
+                            catch (err) {
+                                return null
+                            }
+                        }
+                        let gres = res.g = { top: null, bottom: null, left: null, right: null }
+                        let rec = (side, p, x, y, nearer) => {
+                            if (gres[side] === null || nearer(p, gres[side])) {
+                                gres[side] = p
+                                if (debug) {
+                                    gnear[side] = `${gLast}@${x},${y}`
+                                }
+                            }
+                        }
+                        //沿邊逐 px 取樣(舊規則 4px)：1px 細線(垂直線、柱、影線)落在像素格線上，取樣間距大於 1px 會整條漏掉
+                        let lt = (a, b) => a &lt; b
+                        let gt = (a, b) => a > b
+                        //框線帶為框矩形邊外 [1, glim]：下/右帶 [邊+1, 邊+glim]、上/左帶 [邊-glim, 邊-1]。掃描含緊鄰矩形邊之一列(行)作守距——與框線內緣相切之
+                        //內容不被蓋住，但延伸至框線四角之縱(橫)向內容(貼著浮層側邊、伸到浮層下方之柱，其在角落處與框線相交)由此一列(行)攔下；
+                        //下/右 y 自 floor(邊) 至 &lt; 邊+glim；上/左 y 自 ceil(邊)-1 至 ≥ floor(邊-glim)(邊為小數時，帶端點所在列也算)。沿邊取框矩形全長之像素列(行)
+                        for (let x = Math.floor(box.left); x &lt; Math.ceil(box.right); x++) {
+                            for (let y = Math.floor(box.bottom); y &lt; box.bottom + glim; y++) {
+                                let q = gAt(x, y)
+                                if (q) {
+                                    rec('bottom', Math.max(q.top, y - 1), x, y, lt)
+                                    break
+                                }
+                            }
+                            for (let y = Math.ceil(box.top) - 1; y >= Math.floor(box.top - glim); y--) {
+                                let q = gAt(x, y)
+                                if (q) {
+                                    rec('top', Math.min(q.bottom, y + 1), x, y, gt)
+                                    break
+                                }
+                            }
+                        }
+                        for (let y = Math.floor(box.top); y &lt; Math.ceil(box.bottom); y++) {
+                            for (let x = Math.floor(box.right); x &lt; box.right + glim; x++) {
+                                let q = gAt(x, y)
+                                if (q) {
+                                    rec('right', Math.max(q.left, x - 1), x, y, lt)
+                                    break
+                                }
+                            }
+                            for (let x = Math.ceil(box.left) - 1; x >= Math.floor(box.left - glim); x--) {
+                                let q = gAt(x, y)
+                                if (q) {
+                                    rec('left', Math.min(q.right, x + 1), x, y, gt)
+                                    break
+                                }
                             }
                         }
                     }
@@ -407,6 +1012,7 @@ function itemsUnionBox(itemSel, opt = {}) {
                     //四周無內容者照常外擴(一律畫在浮層內側會讓內距小之清單框線貼字：PERM 時間清單下緣 2px、關聯模式清單左緣 1px 殷鑑)；
                     //全畫面之浮層(彈窗、抽屜之外層)不適用
                     let fx = null
+                    let beforeGraphics = null //圖形規則介入前之夾制結果(圖形夾到沒有尺寸時退回此值，不連同 HTML 規則之夾制一併撤銷)
                     for (let a = e; a &amp;&amp; a !== document.body &amp;&amp; a !== document.documentElement; a = a.parentElement) {
                         if (window.getComputedStyle(a).position === 'fixed') {
                             fx = a
@@ -428,7 +1034,8 @@ function itemsUnionBox(itemSel, opt = {}) {
                         }
                         let near = nearestOutside(inner, { left, top, right, bottom }, fx, fr)
                         if (debug) {
-                            dbg.push({ inner: [inner.left, inner.top, inner.right, inner.bottom].map((n) => Math.round(n * 10) / 10), near })
+                            dbg.push({ inner: [inner.left, inner.top, inner.right, inner.bottom].map((n) => Math.round(n * 10) / 10), near: { top: near.top, bottom: near.bottom, left: near.left, right: near.right }, graphic: gnear })
+                            gnear = {}
                         }
                         if (near.top !== null &amp;&amp; near.top &lt;= inner.top) {
                             top = Math.max(top, (near.top + inner.top) / 2 + edge)
@@ -442,10 +1049,40 @@ function itemsUnionBox(itemSel, opt = {}) {
                         if (near.right !== null &amp;&amp; near.right >= inner.right) {
                             right = Math.min(right, (inner.right + near.right) / 2 - edge)
                         }
+                        //圖形(資料線、圖例、畫布像素)：不似 HTML 鄰項取間隙正中——圖形遍布整個繪圖區，浮層又常比其文字寬得多，取正中會使框線縮到只剩文字範圍、
+                        //不再框住浮層；改為框線外緣退到內容前 1px(剛好不蓋)，且框內緣不越過文字；內容貼近文字、放不下 5px 描邊時同舊規則取間隙正中
+                        let gn = near.g
+                        if (gn) {
+                            beforeGraphics = { left, top, right, bottom }
+                            let fo = edge + strokeHalf //框線外緣距框矩形邊(BOX_PAD)
+                            if (gn.top !== null &amp;&amp; gn.top &lt;= inner.top) {
+                                let t = gn.top + fo + 1
+                                top = Math.max(top, t &lt;= inner.top + 1 ? t : (gn.top + inner.top) / 2 + edge)
+                            }
+                            if (gn.bottom !== null &amp;&amp; gn.bottom >= inner.bottom) {
+                                let b = gn.bottom - fo
+                                bottom = Math.min(bottom, b >= inner.bottom - 1 ? b : (inner.bottom + gn.bottom) / 2 - edge)
+                            }
+                            if (gn.left !== null &amp;&amp; gn.left &lt;= inner.left) {
+                                let l = gn.left + fo + 1
+                                left = Math.max(left, l &lt;= inner.left + 1 ? l : (gn.left + inner.left) / 2 + edge)
+                            }
+                            if (gn.right !== null &amp;&amp; gn.right >= inner.right) {
+                                let r = gn.right - fo
+                                right = Math.min(right, r >= inner.right - 1 ? r : (inner.right + gn.right) / 2 - edge)
+                            }
+                        }
                     }
                     if (debug) {
                         let rr = (q) => (q ? [q.left, q.top, q.right, q.bottom].map((n) => Math.round(n * 10) / 10) : null)
                         dbg.push({ el: `${e.tagName}.${String(e.className || '').slice(0, 30)}`, own: rr(own), fixed: fx ? `${fx.tagName}.${String(fx.className || '').slice(0, 30)}` : null, fr: rr(fr), rcIn: rr(rc), out: rr({ left, top, right, bottom }) })
+                    }
+                    if (beforeGraphics &amp;&amp; (right - left &lt; 1 || bottom - top &lt; 1)) {
+                        //圖形規則使框夾到沒有尺寸：只撤銷圖形之夾制，HTML 規則之結果保留
+                        left = beforeGraphics.left
+                        top = beforeGraphics.top
+                        right = beforeGraphics.right
+                        bottom = beforeGraphics.bottom
                     }
                     if (right - left &lt; 1 || bottom - top &lt; 1) {
                         return rc //防呆：夾到沒有尺寸則不夾
@@ -521,7 +1158,7 @@ function itemsUnionBox(itemSel, opt = {}) {
             //edge：目標矩形邊至框線中心之距離(外擴 BOX_PAD、描邊 BOX_STROKE 置於外擴區內側)；
             //E2E_BOX_DEBUG=1 時印出各元素之可見範圍、浮層矩形、內容範圍、浮層外最近內容與夾邊前後(審圖查因用)
             let debug = !!process.env.E2E_BOX_DEBUG
-            let res = await loc.evaluateAll(measureEls, { within, fit, inkPad, edge: BOX_PAD - BOX_STROKE / 2, strokeHalf: BOX_STROKE / 2, debug })
+            let res = await loc.evaluateAll(measureEls, { within, fit, inkPad, edge: BOX_PAD - BOX_STROKE / 2, strokeHalf: BOX_STROKE / 2, debug, graphics, areaSels })
             if (res &amp;&amp; res._dbg) {
                 console.log(`[itemsUnionBox debug] ${isLoc ? 'Locator' : sel} ${JSON.stringify(res._dbg)} → ${JSON.stringify([res.x, res.y, res.x + res.width, res.y + res.height])}`)
                 delete res._dbg
@@ -547,7 +1184,7 @@ export default itemsUnionBox
 <br class="clear">
 
 <footer>
-    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 4.0.5</a> on Tue Oct 20 2026 09:42:43 GMT+0800 (台北標準時間) using the <a href="https://github.com/clenemt/docdash">docdash</a> theme.
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 4.0.5</a> on Tue Oct 20 2026 16:56:54 GMT+0800 (台北標準時間) using the <a href="https://github.com/clenemt/docdash">docdash</a> theme.
 </footer>
 
 <script>prettyPrint();</script>

@@ -56,7 +56,7 @@ let browser2 = await wpte.launchBrowser()
 | `launchBrowser(opt)` | 唯一 launch 出口：`launchChromium({ headless:true, ...opt, args:[...六旗標, ...opt.args] })` | sso 實跑 |
 | `captureStable(page, opt)` | 標準圖截圖唯一入口（C6），序列見 §2.3 | sso 實跑、瀏覽器 |
 | `captureStableWithBox(page, target, opt)` | 全頁穩定截圖＋紅框（C7）＋遮罩（C8）；**目標找不到／尺寸為 0／夾邊後過小即拋錯**（2026-09-28；原為靜默回無框圖），`allowNoBox:true` 才容許無框；target 另接受**量測型目標** `{scroll, measure(page), label, probe}`（捲入與等待之後才量）；**被蓋住檢查**：選擇器／Locator 目標（與量測型目標之 `probe`）中心點之最上層元素若為無關元素（彈窗遮罩等）即拋錯（SKILL §7.3-4），`coverCheck:'warn'\|'off'` 或環境變數 `E2E_COVER_CHECK` 調整；**捲入**：目標比其可視區（視窗與各層捲動容器之交集）大且已部分入鏡時，捲入只會改變版面（使用者不會捲動＝假畫面），`scrollTall:false` 不捲、框可見部分，預設沿用捲入並印 `[box-scroll]` 告警；逐案判斷使用者此刻會不會捲動：切分頁後之整個檢視面板不會 → `itemsUnionBox(loc, { scroll: null })` 或 `scrollTall:false`（w-web-api display E2E-007 殷鑑），送出請求後出現在下方之回應卡會 → 照常捲入（w-web-api apitest E2E-001-3） | sso 實跑、瀏覽器 |
-| `itemsUnionBox(itemSel, {within, scroll, fit, inkPad})` | 量測型目標：可見項目之聯集夾在範圍容器內（清單／樹／選單／時間軸／工具列項目；SKILL §7.2 清單列、§7.3-2 不框整區空白）；`itemSel` 可為選擇器、其陣列或 **Locator**（同一頁內量測函式；Locator 者輸出 `probe` 供被蓋住檢查）；`fit:true` 依**元素自身有無可見邊界**決定量法：有（底色異於背後、邊框、陰影、背景圖、替換元素）量元素本身，無（透明容器、整行文字、開關與其標籤、勾選列、無內距之欄位列）改量**可見內容**（有邊界之子元素框與文字行框之聯集，透明內距不計）並**一律外擴 `inkPad`（預設 `INK_PAD`=4）**——勾選框、開關軌道、圖示與文字同留白，免紅框壓字；可見內容恰為單一有邊界元素（透明外層包著之面板、按鈕）時視同框該元素、不外擴；`fit` 另使**框線不蓋框外內容**：框線中心置於與相鄰項目（自元素往上至多 4 層之緊鄰兄弟，四向各取最近一層）**可見範圍**之間隙正中——可見範圍為有邊界者之元素框、無邊界者之子元素與文字聯集（不取含透明內距之元素框，免把框線拉回目標自身文字）；空白間隔不算鄰項；`position:fixed` 浮層（下拉清單、浮出面板；全畫面者除外）之外的頁面內容以命中測試找（文字、晶片／按鈕／觸發區級之有邊界元件、圖示與表單元件；大容器底色、整張圖表、遮罩後之背景不算），框線置於「目標內容」與「浮層外最近內容」之間隙正中——目標涵蓋整個浮層時（浮層本身、其透明外層包裝或撐滿之面板）以面板內容計（撐滿面板寬或高之標頭列、清單底色屬結構，改看其內文字與元件）、框線可退入面板內距，四周無內容照常外擴；環境變數 `E2E_BOX_DEBUG` 有值時印出量測細節 | 瀏覽器（2026-09-28 新增；同日加 Locator、可見邊界判準（邊框須 ≥ 3 邊）、inkPad、相鄰與浮層夾邊、鄰項改以可見範圍計、浮層改以命中測試取間隙正中、可見內容一律外擴、透明外層之面板） |
+| `itemsUnionBox(itemSel, {within, scroll, fit, inkPad, graphics, graphicAreas})` | 量測型目標：可見項目之聯集夾在範圍容器內（清單／樹／選單／時間軸／工具列項目；SKILL §7.2 清單列、§7.3-2 不框整區空白）；`itemSel` 可為選擇器、其陣列或 **Locator**（同一頁內量測函式；Locator 者輸出 `probe` 供被蓋住檢查）；`fit:true` 依**元素自身有無可見邊界**決定量法：有（底色異於背後、邊框、陰影、背景圖、替換元素）量元素本身，無（透明容器、整行文字、開關與其標籤、勾選列、無內距之欄位列）改量**可見內容**（有邊界之子元素框與文字行框之聯集，透明內距不計）並**一律外擴 `inkPad`（預設 `INK_PAD`=4）**——勾選框、開關軌道、圖示與文字同留白，免紅框壓字；可見內容恰為單一有邊界元素（透明外層包著之面板、按鈕）時視同框該元素、不外擴；`fit` 另使**框線不蓋框外內容**：框線中心置於與相鄰項目（自元素往上至多 4 層之緊鄰兄弟，四向各取最近一層）**可見範圍**之間隙正中——可見範圍為有邊界者之元素框、無邊界者之子元素與文字聯集（不取含透明內距之元素框，免把框線拉回目標自身文字）；空白間隔不算鄰項；`position:fixed` 浮層（下拉清單、浮出面板；全畫面者除外）之外的頁面內容以命中測試找（文字、晶片／按鈕／觸發區級之有邊界元件、圖示與表單元件；大容器底色、整張圖表、遮罩後之背景不算），框線置於「目標內容」與「浮層外最近內容」之間隙正中——目標涵蓋整個浮層時（浮層本身、其透明外層包裝或撐滿之面板）以面板內容計（撐滿面板寬或高之標頭列、清單底色屬結構，改看其內文字與元件）、框線可退入面板內距，四周無內容照常外擴；**圖形內容**（Gitea issue #6）：浮層疊在大型 svg/canvas 圖表上時，框線不蓋其下之資料線——`graphics`（預設 `true`）自動判定 svg 圖形（幾何判定，不靠命中測試）與可讀 2d canvas 之像素為框外內容，`graphicAreas`（選擇器字串或陣列）宣告 img/video/WebGL/跨域污染 canvas/地圖等無從自動判定者整區視為內容；規則、受影響者、逃生口與已知限制見 §2.7；環境變數 `E2E_BOX_DEBUG` 有值時印出量測細節（含各邊命中之圖形） | 瀏覽器（2026-10-20 加 graphics、graphicAreas；2026-09-28 新增；同日加 Locator、可見邊界判準（邊框須 ≥ 3 邊）、inkPad、相鄰與浮層夾邊、鄰項改以可見範圍計、浮層改以命中測試取間隙正中、可見內容一律外擴、透明外層之面板） |
 | `inkRect(rect, { pad, neighbors })`、`INK_PAD` | 無 DOM 之緊貼墨跡矩形（canvas 圖例列、翻頁箭頭、圖例項等圖表程式庫回報之視窗矩形）外擴 `INK_PAD`（4），交 `captureStableWithBox` 作矩形目標；`neighbors` 為鄰項之可見矩形，框線不越過與鄰項間隙之正中；與 `itemsUnionBox` 之 `fit` 共用同一常數。**目標與鄰項皆須為實際墨跡**（先經 `canvasInkRects`），鄰項須含畫面上有墨跡之全部項目（含被捲動窗裁掉一部分者） | 單元（2026-09-28 新增） |
 | `waitAlertGone(page, { sel, timeout })` | 等提示浮窗（wsemi `domAlert`＝w-component-vue `WAlert`／`vo.$alert`，id 以 `alt-` 開頭）全部消失；反應目標不是浮窗本身（例：同一訊息之行內紅字）時，浮窗在不在畫面上取決於時序，先等反應目標就緒再等浮窗消失才截圖，取代「固定等 N 秒」順帶等過浮窗之寫法；逾時拋錯含仍在之浮窗數 | 瀏覽器（2026-09-28 自 w-web-sso login E2E-016 抽出） |
 | `canvasInkRects(page, rects, { canvas, alpha, bg, trimY })` | 讀 canvas 像素，把圖表程式庫回報之寬鬆矩形收斂到實際墨跡（左右；`trimY` 亦收上下），無墨跡回 `null`；canvas 預設以矩形中心點命中測試取得，亦可指定；未繪製處須透明（背景不透明者給 `bg` 改以色差判定）；支援高 DPI。用途：echarts／zrender 回報之文字與圖例項矩形比字形寬約 3px，直接交 `inkRect` 取鄰項中點會偏、框線貼到鄰項；被捲動窗裁掉一部分之項目只回可見部分，可作鄰項 | 瀏覽器（2026-09-28 自 w-web-perm 統計圖例抽出） |
@@ -196,8 +196,37 @@ prepare(ctx) → launch() → openPage(browser) → beforeRun(ctx) → run(page,
 | `E2E_STRICT_CAPTURE=1` | `captureStable`（`strictDefault` 之預設）、`getE2eMode` | `strict` 未給時連拍用盡仍未穩定即拋錯 |
 | `E2E_COVER_CHECK` | `captureStableWithBox` | 被蓋住檢查模式：未設為 `throw`，可設 `warn`（只印 `[box-covered]`，全量盤查用）或 `off`；`opt.coverCheck` 優先 |
 | `E2E_BASELINE_OUT_DIR` | `createBaselineGate`（`outDirEnv` 可改名） | 產製寫檔改導至該目錄（等價驗證用），比對端讀取之標準圖路徑不受影響 |
-| `E2E_BOX_DEBUG` | `itemsUnionBox` | 有值時印出各元素之可見範圍、浮層矩形、浮層外最近內容與夾邊前後（審圖查因用） |
+| `E2E_BOX_DEBUG` | `itemsUnionBox` | 有值時印出各元素之可見範圍、浮層矩形、浮層外最近內容（`near`）、命中之圖形（`graphic`：邊 → 描述@視窗座標）與夾邊前後（審圖查因用） |
 | `--names`、`--langs`、`--write-mode` | `createBaselineGate` | 產製篩選，見 §2.2 |
+
+### 2.7 `itemsUnionBox` 之圖形內容（`graphics`、`graphicAreas`；Gitea issue #6）
+
+**問題**：`fit:true` 之浮層規則（`position:fixed` 下拉清單、浮出面板）原以命中測試找浮層四周之內容，遇祖先寬 > 480 或高 > 120 即中止，大型 svg 內之圖形與 canvas 像素因此判為無內容，框線外擴蓋到其下之資料波形（以真 Highcharts／Plotly／ECharts 實測，浮層疊在圖表上時 360 個位置中 265 處框線帶蓋到資料線）。
+
+**作法**：
+- `graphics`（預設 `true`）：svg 圖形（`path/line/polyline/polygon/rect/circle/ellipse/text`）以 `getScreenCTM` 反矩陣與 `isPointInStroke/isPointInFill` 幾何判定（`pointer-events:none` 之 Plotly、全透明追蹤線之 Highcharts 皆正確；含 viewBox、CSS 縮放/旋轉）；可見性含累積 opacity、stroke/fill 透明度（含 `color(display-p3 …)`、`oklch()`、`lab()` 之 alpha）、漸層色標、祖先 overflow 裁切、clip-path、被有底色或不透明之層蓋住、svg 文字逐 `tspan` 判可見；撐滿圖表之 `rect` 與填色同圖表底色者（圖表背景，黑底圖表亦同）不算內容。2d canvas 以 `drawImage` 分塊讀像素（不對來源呼叫 `getContext`；位圖只畫在內容盒，已扣 border/padding 並依 `object-fit` 換算），與其所在 16×16 小格之背景色有對比者為墨跡（**均勻大色塊視為背景**）。
+- `graphicAreas`：選擇器字串或其陣列，命中元素之矩形整區視為內容（位於浮層內、被遮罩蓋住者不算）；用於 img、video、WebGL 與跨域污染之 canvas、地圖、熱圖，以及含旋轉/翻轉變換之 canvas。例：`itemsUnionBox('.WPopperFix:visible', { fit: true, graphicAreas: '#map canvas' })`。
+- **只增不減、最小介入**：舊規則回非 null 之點結果不變；圖形只在框線帶（量測矩形邊外 1 至 6px，另含緊鄰矩形邊之一列/行作守距）內有墨跡時才介入，沿矩形邊全長逐 px 取樣、四向同一算法；矩形內（含 `inkPad` 區）之內容框線蓋不到，不介入；框線外緣退到內容前 1px（剛好不蓋；不似 HTML 鄰項取間隙正中），框內緣不越過文字，放不下 5px 描邊時退回間隙正中。寬與高皆不大於 480×120 之小 svg/canvas（圖示、迷你圖）舊規則已以整個元素框為內容，不重複判定。
+- **`graphics:false` 逐位元重現 1.0.9**；`fit:false` 不受影響。
+
+**受影響者（發版說明）**：`position:fixed` 非全畫面浮層之 `fit:true` 量框，且框線帶內有 svg 圖形／可讀 2d canvas 之墨跡／宣告區者，框線改退入浮層內距；其餘（無圖形、圖形距框線帶外、小 svg/canvas、`fit:false`）不變，以隨機差分（現行 vs 新版量框逐位元相同）與既有等價測試證明。使用端升版後跑一次比對，失敗者即為受影響之圖，取得授權後以 `--write-mode changed` 重產並逐張審（全域技能 role-coder-for-test-e2e §7.9）；使用端以逐點補丁（如只收下緣之 `insetBox`）處理者可改用本規則並刪除補丁。不想改動者逐處給 `graphics:false`。
+
+**已知限制**（不在本版處理；以 `graphicAreas` 可改以宣告處理者另註）：
+
+| # | 限制 | 方向 | `graphicAreas` |
+|---|---|---|---|
+| L1 | 框線四角 6×6 小方格內之孤立圖形（完全落在角落、與四邊之掃描帶及緊鄰守距列皆不相交者） | 漏蓋（至多數 px²） | 否 |
+| L2 | shadow DOM 內之 svg/canvas | 漏蓋 | 否 |
+| L3 | svg 之 `<use>` 引用、`<image>`、`marker`（含 `marker-mid` 圓點） | 漏蓋 | `<image>` 可 |
+| L4 | `mask`、`filter`、CSS `filter` 使圖形不可見者仍視為可見 | 多退 | — |
+| L5 | 漸層填色之透明段整體視為可見 | 多退 | — |
+| L6 | 巢狀 svg 之視埠裁切 | 多退 | — |
+| L7 | 被 `pointer-events:none` 之不透明元素蓋住之圖形 | 多退 | — |
+| L8 | 含旋轉/翻轉 CSS 變換之 canvas、`object-position` 非置中之 object-fit canvas（不自動判定） | 漏蓋 | 可 |
+| L9 | WebGL canvas（僅 `preserveDrawingBuffer:true` 者讀得到像素，其餘讀得空白）／跨域污染 canvas、`<img>`、`<video>`（不自動判定）；位於圖形上方之不可讀 canvas 保守視為蓋住其下之圖形 | 漏蓋 | 可 |
+| L10 | 面積 ≥ 50% 之 `rect` 一律視為底色（含有色者）；canvas 之均勻大色塊（地圖多邊形內部、熱圖大色格）視為背景 | 漏蓋 | 可 |
+| L11 | `position:absolute` 浮層（浮層規則本就只對 `position:fixed`，舊限制） | 漏蓋 | — |
+| L12 | iframe 內之圖表 | 漏蓋 | — |
 
 ## 3. 採用步驟（以 w-web-sso 為例）
 
@@ -249,6 +278,7 @@ let captureStableWithBox = (page, target, opts = {}) => pkgCaptureStableWithBox(
 ## 5. 改版須知：哪些變更會動到使用端之標準圖
 
 - **框幾何**（`composeBox` 之 `BOX_PAD`／`BOX_STROKE`／圓角、`itemsUnionBox` 之 `fit` 規則與 `inkPad`、`inkRect`、`gridContentBox`、`canvasInkRects` 之墨跡判定）、**截圖序列**（`captureStable` 之 settle、`<img>` 動畫區之靜態影格、遮罩）與**啟動旗標**（`chromiumLaunchArgs`，改動即全量重產）決定各專案標準圖之像素；變更後使用端須重產受影響之圖並逐張審（全域技能 role-coder-for-test-e2e §7.9），發版說明請明列。
+- **`itemsUnionBox` 之圖形內容（2026-10-20，Gitea issue #6）**：`graphics` 預設開啟，屬會動使用端標準圖之框幾何類變更——**受影響者：`position:fixed` 浮層之框線帶（量測矩形邊外 1–6px）內有 svg 圖形、可讀 2d canvas 墨跡或 `graphicAreas` 宣告區者，框線改退入浮層內距**；其餘不變（隨機差分與既有等價測試證明）。逃生口 `graphics:false` 逐位元重現 1.0.9；詳見 §2.7。使用端升版後跑一次比對、重產受影響者並逐張審，發版說明須列明。
 - 新增函數、新增選項（預設值維持原行為）不影響既有標準圖；一向以「預設值取 w-web-sso 現行行為、其他專案以選項重現」擴充。
 - 已知缺陷之部分截圖與 `--names`（Gitea issue #4、#5）：新增 opt-in（`createKnownDefect` 之 `shots`、`runBaselineCase` 之 `defectStages`、`gate.noteKnownDefect`、`createBaselineGate` 之 `log`），**不影響既有標準圖**，使用端不需重產。唯一語意變更：`createKnownDefect(msg, { shots })` 於 1.0.8 靜默忽略 `shots`，此後生效；`gate.finalize()` 回傳值由 undefined 改為 `{ knownDefects }`，有缺陷紀錄時多印摘要；整案缺陷 + `--names` 只命中它時，`finalize` 不再拋錯（離開碼 1 → 0）。部分缺陷路徑會呼叫 `semantic`／`verify`（`ctx.knownDefect` 為該錯誤），自寫包裝遷移時掛鉤須能分流。
 - 依賴升版（playwright 帶入之 Chromium、sharp 之 SVG 光柵化）亦可能改變截圖或紅框像素（推測，需實測確認）；升版後使用端依 §4 等價驗證。
@@ -260,6 +290,7 @@ let captureStableWithBox = (page, target, opts = {}) => pkgCaptureStableWithBox(
 - `npm test`：mocha 執行 `test/*.test.mjs`——單元測試（注入假物件）、以 `page.setContent` 之無伺服器瀏覽器測試（首次由 `launchChromium` 下載對應版本之瀏覽器）、`launchChromium` 之全新環境下載測試；不需任何伺服器。
 - 測試以 cwd 為根，中介檔落 `./test/_tmp/<名>`（gitignore）並於各測試 `after` 刪除。
 - `test/e2e-captureEquivalence.test.mjs` 含 w-web-sso／w-web-perm 當時實作之凍結複本（逐位元等價之對照組）與框幾何之專測，屬行為契約，勿因「看起來重複」刪除；凍結複本區段以 `eslint-disable` 註明保持逐字。
+- `test/e2e-itemsUnionBoxGraphics.test.mjs`：`itemsUnionBox` 圖形內容（svg 圖形、2d canvas、`graphicAreas`）之真 Chromium 語意/幾何測試，標題前綴 `[ID]` 對應 `CLAUDE_rulebook.md` 表 C；斷言以「無圖形內容時之量框」與「框線外緣不越過內容」為準，無標準圖。
 - lint：`npx eslint --ext .mjs src tools test`。
 
 ## 7. 後續候選（未納入）
