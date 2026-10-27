@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    
+    <meta charset="utf-8">
+    <title>resolveE2ePort.mjs - Documentation</title>
+    
+    
+    <script src="scripts/prettify/prettify.js"></script>
+    <script src="scripts/prettify/lang-css.js"></script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc.css">
+    <script src="scripts/nav.js" defer></script>
+    
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+
+<input type="checkbox" id="nav-trigger" class="nav-trigger" />
+<label for="nav-trigger" class="navicon-button x">
+  <div class="navicon"></div>
+</label>
+
+<label for="nav-trigger" class="overlay"></label>
+
+<nav >
+    
+    
+    <h2><a href="index.html">Home</a></h2><h3>Global</h3><ul><li><a href="global.html#BOX_PAD">BOX_PAD</a></li><li><a href="global.html#INK_PAD">INK_PAD</a></li><li><a href="global.html#WPackageToolsE2e">WPackageToolsE2e</a></li><li><a href="global.html#acceptPendingShots">acceptPendingShots</a></li><li><a href="global.html#activeBaselineCollector">activeBaselineCollector</a></li><li><a href="global.html#assertBaselineMatch">assertBaselineMatch</a></li><li><a href="global.html#assertTextSpec">assertTextSpec</a></li><li><a href="global.html#canvasInkRects">canvasInkRects</a></li><li><a href="global.html#captureStable">captureStable</a></li><li><a href="global.html#captureStableWithBox">captureStableWithBox</a></li><li><a href="global.html#chromiumLaunchArgs">chromiumLaunchArgs</a></li><li><a href="global.html#collectDomText">collectDomText</a></li><li><a href="global.html#compareImageDirs">compareImageDirs</a></li><li><a href="global.html#createBaselineCollector">createBaselineCollector</a></li><li><a href="global.html#createBaselineGate">createBaselineGate</a></li><li><a href="global.html#createKnownDefect">createKnownDefect</a></li><li><a href="global.html#createServiceManager">createServiceManager</a></li><li><a href="global.html#createTempSettings">createTempSettings</a></li><li><a href="global.html#cropRegion">cropRegion</a></li><li><a href="global.html#diffBaselineSnapshots">diffBaselineSnapshots</a></li><li><a href="global.html#findOrphanBaselines">findOrphanBaselines</a></li><li><a href="global.html#getE2eMode">getE2eMode</a></li><li><a href="global.html#gridContentBox">gridContentBox</a></li><li><a href="global.html#insideEnabledCollect">insideEnabledCollect</a></li><li><a href="global.html#isChildAlive">isChildAlive</a></li><li><a href="global.html#itemsUnionBox">itemsUnionBox</a></li><li><a href="global.html#killOwnTree">killOwnTree</a></li><li><a href="global.html#killPortListeners">killPortListeners</a></li><li><a href="global.html#launchBrowser">launchBrowser</a></li><li><a href="global.html#launchChromium">launchChromium</a></li><li><a href="global.html#launchChromiumCore">launchChromiumCore</a></li><li><a href="global.html#listenerPids">listenerPids</a></li><li><a href="global.html#maskRegions">maskRegions</a></li><li><a href="global.html#normalizeShots">normalizeShots</a></li><li><a href="global.html#openCasePage">openCasePage</a></li><li><a href="global.html#overlayImageAt">overlayImageAt</a></li><li><a href="global.html#overlayRegions">overlayRegions</a></li><li><a href="global.html#pageHasText">pageHasText</a></li><li><a href="global.html#parseListenerPids">parseListenerPids</a></li><li><a href="global.html#pidExists">pidExists</a></li><li><a href="global.html#pollUntil">pollUntil</a></li><li><a href="global.html#probeHttp">probeHttp</a></li><li><a href="global.html#probeStuckTooltip">probeStuckTooltip</a></li><li><a href="global.html#registerCleanupHooks">registerCleanupHooks</a></li><li><a href="global.html#resetAgGridScroll">resetAgGridScroll</a></li><li><a href="global.html#resolveE2ePort">resolveE2ePort</a></li><li><a href="global.html#resolveKeepSame">resolveKeepSame</a></li><li><a href="global.html#reviewPendingShots">reviewPendingShots</a></li><li><a href="global.html#rowBoxSel">rowBoxSel</a></li><li><a href="global.html#runBaselineCase">runBaselineCase</a></li><li><a href="global.html#runIsolatedE2e">runIsolatedE2e</a></li><li><a href="global.html#runOutsideCollector">runOutsideCollector</a></li><li><a href="global.html#runTaggedCall">runTaggedCall</a></li><li><a href="global.html#sleepSync">sleepSync</a></li><li><a href="global.html#snapshotBaselines">snapshotBaselines</a></li><li><a href="global.html#stepShots">stepShots</a></li><li><a href="global.html#typeIntoInput">typeIntoInput</a></li><li><a href="global.html#typeIntoNthInput">typeIntoNthInput</a></li><li><a href="global.html#waitAlertGone">waitAlertGone</a></li><li><a href="global.html#waitChildExit">waitChildExit</a></li><li><a href="global.html#waitColResizeOverlay">waitColResizeOverlay</a></li><li><a href="global.html#waitDrawerReady">waitDrawerReady</a></li><li><a href="global.html#waitGridIdle">waitGridIdle</a></li><li><a href="global.html#waitUntilExist">waitUntilExist</a></li><li><a href="global.html#writeBaselineIfChanged">writeBaselineIfChanged</a></li></ul>
+    
+</nav>
+
+<div id="main">
+    
+    <h1 class="page-title">resolveE2ePort.mjs</h1>
+    
+
+    
+
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>/**
+ * 依環境變數E2E_PORT_OFFSET把基準埠位移為本實例之實際埠(多開臨時實例用)
+ *
+ * 實際埠＝基準埠＋位移；位移未設、空字串或為0時原樣回傳基準埠(不驗證、不轉型，與未支援位移前逐位元一致)。
+ * 位移須為非負整數字串，位移後之埠須為1～65535之整數，否則拋錯(不靜默沿用基準埠：沿用即會連到他實例之服務)。
+ * 專案端只宣告基準埠：服務以createServiceManager之services[].port宣告(其內部已套用位移，spawn收到之port即實際埠)，
+ * 前端網址、設定檔內之埠、killPortListeners之對象等其餘組埠處一律經本函數取實際埠。probeHttp收完整網址，不另位移
+ *
+ * @param {Number} basePort 輸入基準埠
+ * @param {Object} [opt={}] 輸入設定物件，預設{}
+ * @param {Object} [opt.env=process.env] 輸入環境變數物件，預設process.env
+ * @param {String} [opt.offsetEnv='E2E_PORT_OFFSET'] 輸入位移之環境變數名稱字串，預設'E2E_PORT_OFFSET'
+ * @returns {Number} 回傳實際埠
+ * @example
+ *
+ * import resolveE2ePort from 'w-package-tools-e2e/src/resolveE2ePort.mjs'
+ *
+ * //E2E_PORT_OFFSET=100 時
+ * let baseUrl = `http://127.0.0.1:${resolveE2ePort(8080)}` //http://127.0.0.1:8180
+ *
+ */
+function resolveE2ePort(basePort, opt = {}) {
+    let { env = process.env, offsetEnv = 'E2E_PORT_OFFSET' } = opt
+    let raw = env[offsetEnv]
+    if (raw === undefined || raw === null || String(raw).trim() === '') {
+        return basePort
+    }
+    let s = String(raw).trim()
+    if (!/^\d+$/.test(s)) {
+        throw new Error(`${offsetEnv} 須為非負整數，實得「${raw}」`)
+    }
+    let offset = Number(s)
+    if (offset === 0) {
+        return basePort
+    }
+    let base = Number(basePort)
+    if (!Number.isInteger(base) || base &lt; 1 || base > 65535) {
+        throw new Error(`resolveE2ePort: 基準埠須為 1～65535 之整數，實得「${basePort}」`)
+    }
+    let port = base + offset
+    if (port > 65535) {
+        throw new Error(`resolveE2ePort: 基準埠 ${base} 加 ${offsetEnv}=${offset} 為 ${port}，超過 65535`)
+    }
+    return port
+}
+
+
+export default resolveE2ePort
+</code></pre>
+        </article>
+    </section>
+
+
+
+
+    
+    
+</div>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 4.0.5</a> on Wed Oct 28 2026 07:52:24 GMT+0800 (台北標準時間) using the <a href="https://github.com/clenemt/docdash">docdash</a> theme.
+</footer>
+
+<script>prettyPrint();</script>
+<script src="scripts/polyfill.js"></script>
+<script src="scripts/linenumber.js"></script>
+
+
+
+</body>
+</html>

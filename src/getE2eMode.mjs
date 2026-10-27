@@ -3,6 +3,7 @@
  *
  * regen：命令列含`--baseline`或環境變數E2E_REGEN為'1'；diag：環境變數E2E_BARE或E2E_DIAG有值；strictCapture：環境變數E2E_STRICT_CAPTURE為'1'。
  * 診斷閘門：regen且diag時拋錯(診斷環境下絕不可寫入正式標準圖，否則把診斷態凍結為真理)，可以opt.guard=false關閉(僅供測試)
+ * 收集模式閘門：regen且環境變數E2E_COLLECT為'1'時拋錯(收集模式只用於比對端，與產製互斥)，opt.guard=false同樣關閉；回傳物件不含收集模式欄位(由runBaselineCase/createBaselineCollector讀取)
  *
  * @param {Object} [opt={}] 輸入設定物件，預設{}
  * @param {Array} [opt.argv=process.argv] 輸入命令列參數陣列，預設process.argv
@@ -23,6 +24,9 @@ function getE2eMode(opt = {}) {
     let strictCapture = env.E2E_STRICT_CAPTURE === '1'
     if (guard && regen && diag) {
         throw new Error('拒絕在診斷 env (E2E_BARE / E2E_DIAG) 下寫入正式 baseline')
+    }
+    if (guard && regen && env.E2E_COLLECT === '1') {
+        throw new Error('收集模式(E2E_COLLECT=1)只用於比對端，與產製模式(--baseline／E2E_REGEN)互斥')
     }
     return { regen, diag, strictCapture }
 }

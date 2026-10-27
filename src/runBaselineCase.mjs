@@ -3,6 +3,8 @@ import path from 'path'
 import normalizeShots from './normalizeShots.mjs'
 import openCasePage from './openCasePage.mjs'
 import assertBaselineMatch from './assertBaselineMatch.mjs'
+import createBaselineCollector, { activeBaselineCollector, insideEnabledCollect, runOutsideCollector, runTaggedCall } from './createBaselineCollector.mjs'
+import writeBaselineIfChanged, { resolveKeepSame } from './writeBaselineIfChanged.mjs'
 
 
 /**
@@ -23,6 +25,17 @@ import assertBaselineMatch from './assertBaselineMatch.mjs'
  * 帶shots之已知缺陷僅能由run拋出，由run之前之階段或semantic/verify拋出者視同一般錯。
  * 缺陷修復後run不再拋缺陷而走完全部階段，即回到正常路徑(stages檢查仍為全部圖鍵)。
  * 有給gate時，缺陷分支自動呼叫gate.noteKnownDefect記下因缺陷未產之圖鍵，使finalize不把它們當成--names未命中
+ *
+ * 以下三項皆預設關閉，未設選項與環境變數時行為不變：
+ * 收集模式(collect，預設依環境變數E2E_COLLECT==='1'；只用於比對端，與產製端互斥，產製端啟用即於開瀏覽器前拋錯)：整個案例(prepare至比對)包在
+ * createBaselineCollector之範圍內，run內逐階段之assertBaselineMatch與案例末之逐張比對，不符皆記錄並續行(比對函數拋出之其他錯誤記為'error'並續比)，
+ * 案例末(關瀏覽器與afterCase之後)有不符即拋一個固定格式之彙整錯誤(見createBaselineCollector)；語意斷言、不變式與其他錯誤照常立即拋出並以之為準
+ * (已收集之不符另印[baseline-collect]一行、掛於該錯誤之baselineCollect)；已收集不符時不呼叫onKnownDefect，改於收尾之後拋彙整錯誤(不以pending掩蓋回歸；收尾另拋錯者以該錯誤為準)。
+ * 外層已有收集範圍(巢狀呼叫)時：產製端拋錯(互斥)；未啟用收集之比對端遮蔽外層(本案例照常首張不符即拋)。
+ * 有變更才改寫(keepSame，預設依環境變數E2E_BASELINE_KEEP_SAME==='1'；keepMaxDiff預設依E2E_BASELINE_KEEP_MAXDIFF，再預設為maxDiffPixels；只用於產製端)：
+ * 寫檔經writeBaselineIfChanged，以compareBuf(比對端覆蓋)與maxDiffPixels/threshold(比對端容差)判定，相同者[keep]不改寫；transient所列之暫時狀態圖既有者不改寫；
+ * 配自訂match時須明給maxDiffPixels或keepMaxDiff(套件看不到自訂match之容差)；gate之--write-mode changed之容差判定由此取代(未啟用時同步逐張寫出，時序同前版)。
+ * 比對端覆蓋(compareBuf)：給定時比對端先以之處理當次截圖再交match(標準圖不存在時不呼叫)，有變更才改寫之判定亦用同一函數，使兩端覆蓋必然一致
  *
  * @param {Object} opt 輸入設定物件
  * @param {String} opt.mode 輸入模式字串，'regen'或'compare'
@@ -45,9 +58,18 @@ import assertBaselineMatch from './assertBaselineMatch.mjs'
  * @param {Boolean} [opt.allowEmpty=false] 輸入是否允許案例不產生任何截圖布林值，預設false(無截圖即拋錯，防比對端空轉假綠)
  * @param {Boolean} [opt.compareAll=false] 輸入比對端是否比完全部階段再彙總拋錯布林值，預設false(首張不符即拋)
  * @param {Function} [opt.onKnownDefect=null] 輸入比對端遇已知缺陷之處理函數，async(err)，預設null代表原樣拋出；部分已知缺陷時於前段全部比對通過後才呼叫
- * @param {Function} [opt.match=assertBaselineMatch] 輸入比對函數(buf,baselinePath,label)，預設assertBaselineMatch
+ * @param {Function} [opt.match=assertBaselineMatch] 輸入比對函數(buf,baselinePath,label)，預設assertBaselineMatch(有給maxDiffPixels或threshold時以之為容差)
  * @param {Function} [opt.writeFile] 輸入寫檔函數(path,buf)，預設建立上層目錄後fs.writeFileSync
  * @param {Function} [opt.log=console.log] 輸入輸出函數，預設console.log
+ * @param {Boolean} [opt.collect] 輸入比對端是否用收集模式布林值，預設依環境變數E2E_COLLECT==='1'
+ * @param {String} [opt.pendingDir='./testPending'] 輸入證據目錄字串(未自訂match時傳給預設比對；收集模式之案例清單與證據同處，皆無證據時落此)，預設'./testPending'
+ * @param {Boolean} [opt.keepSame] 輸入產製端是否有變更才改寫布林值，預設依環境變數E2E_BASELINE_KEEP_SAME==='1'
+ * @param {Number} [opt.keepMaxDiff] 輸入有變更才改寫之保留差異上限，預設依環境變數E2E_BASELINE_KEEP_MAXDIFF，再預設為maxDiffPixels；0代表只保留RGBA完全相同者
+ * @param {Array|Function} [opt.transient=null] 輸入暫時狀態圖之圖鍵陣列或判斷函數(lang,圖鍵)=>Boolean，有變更才改寫時既有者不改寫，預設null
+ * @param {Function} [opt.compareBuf=null] 輸入比對端覆蓋函數async(buf,baselinePath,ctx)=>Buffer，預設null代表不覆蓋
+ * @param {Number} [opt.maxDiffPixels=100] 輸入比對端容差(有變更才改寫判定用；未自訂match時亦為比對容差)，預設100
+ * @param {Number} [opt.threshold=0.1] 輸入比對端pixelmatch色差門檻(同上)，預設0.1
+ * @param {Object} [opt.env=process.env] 輸入環境變數物件，預設process.env
  * @returns {Promise} 回傳Promise，resolve回傳物件{status,shots,written,kept,skipped}，status為'regen'、'compare'、'compareOnly'或'knownDefect'；部分已知缺陷時另帶defectStages(缺陷步圖鍵陣列)，shots為前段圖鍵
  * @example
  *
@@ -76,7 +98,19 @@ import assertBaselineMatch from './assertBaselineMatch.mjs'
  * await runBaselineCase({ mode: 'regen', lang, name, launch: launchBrowser, run, pathOf, gate, stages, defectStages: ['E2E-018-4-d'] })
  *
  */
-async function runBaselineCase(opt = {}) {
+function runBaselineCase(opt = {}) {
+    //組態錯誤同前版以 rejected Promise 交回(不同步拋出); 預設路徑直接回傳案例本體之 Promise(不多包一層, 完成時序同 1.0.10)
+    try {
+        return runCase(opt)
+    }
+    catch (err) {
+        return Promise.reject(err)
+    }
+}
+
+
+//案例本體之組態檢查(同步)與執行
+function runCase(opt) {
     let {
         mode,
         lang,
@@ -98,19 +132,52 @@ async function runBaselineCase(opt = {}) {
         allowEmpty = false,
         compareAll = false,
         onKnownDefect = null,
-        match = assertBaselineMatch,
         writeFile = (p, buf) => {
             fs.mkdirSync(path.dirname(p), { recursive: true })
             fs.writeFileSync(p, buf)
         },
         log = console.log,
+        pendingDir = './testPending',
+        transient = null,
+        compareBuf = null,
+        maxDiffPixels = 100,
+        threshold = 0.1,
+        env = process.env,
     } = opt
+    //未自訂 match 而給了容差或 pendingDir 者, 預設比對以之(與有變更才改寫之判定、收集模式之案例清單一致)
+    let matchOpt = {}
+    for (let k of ['maxDiffPixels', 'threshold', 'pendingDir']) {
+        if (opt[k] !== undefined) {
+            matchOpt[k] = opt[k]
+        }
+    }
+    let match = opt.match || (Object.keys(matchOpt).length > 0 ? (b, p, l) => assertBaselineMatch(b, p, l, matchOpt) : assertBaselineMatch)
     if (mode !== 'regen' && mode !== 'compare') {
         throw new Error(`runBaselineCase: mode 須為 'regen' 或 'compare'，實得「${mode}」`)
     }
     if (!lang || !name || typeof launch !== 'function' || typeof run !== 'function' || typeof pathOf !== 'function') {
         throw new Error('runBaselineCase: lang、name、launch、run、pathOf 為必填')
     }
+    //收集模式(比對端)與有變更才改寫(產製端)之組態檢查(開瀏覽器前)
+    let collect = opt.collect === undefined || opt.collect === null ? env.E2E_COLLECT === '1' : !!opt.collect
+    let outer = activeBaselineCollector()
+    if (mode === 'regen' && (collect || insideEnabledCollect())) {
+        throw new Error('runBaselineCase: 收集模式(E2E_COLLECT=1、collect 或外層之收集範圍)只用於比對端，與產製模式(--baseline／E2E_REGEN)互斥')
+    }
+    let keep = mode === 'regen' ? resolveKeepSame({ keepSame: opt.keepSame, keepMaxDiff: opt.keepMaxDiff, maxDiffPixels, env }) : { keepSame: false, keepMaxDiff: null }
+    //自訂 match 之容差與覆蓋套件看不到: 啟用有變更才改寫時須明給保留上限(maxDiffPixels 或 keepMaxDiff／E2E_BASELINE_KEEP_MAXDIFF; null 與空字串同未給, 與 resolveKeepSame 一致), 免保留後比對仍失敗
+    let given = (v) => v !== undefined && v !== null && String(v).trim() !== ''
+    if (keep.keepSame && opt.match && !given(opt.maxDiffPixels) && !given(opt.keepMaxDiff) && !given(env.E2E_BASELINE_KEEP_MAXDIFF)) {
+        throw new Error('runBaselineCase: 有變更才改寫配自訂 match 時，須明給與該 match 相同之容差(maxDiffPixels)，或 keepMaxDiff／E2E_BASELINE_KEEP_MAXDIFF')
+    }
+    if (transient !== null && !Array.isArray(transient) && typeof transient !== 'function') {
+        throw new Error('runBaselineCase: transient 須為圖鍵陣列或函數(lang,圖鍵)=>Boolean')
+    }
+    if (compareBuf !== null && typeof compareBuf !== 'function') {
+        throw new Error('runBaselineCase: compareBuf 須為函數')
+    }
+    let isTransient = (key) => (Array.isArray(transient) ? transient.includes(key) : (typeof transient === 'function' ? !!transient(lang, key) : false))
+    let col = collect ? createBaselineCollector({ caseKey: `${lang}-${name}`, enabled: true, pendingDir, log }) : null
     //defectStages 組態檢查(開瀏覽器前; 組態錯誤不應被當成案例失敗); 空陣列等同未給(無缺陷步可豁免, 不強制併用 stages)
     if (Array.isArray(defectStages) && defectStages.length === 0) {
         defectStages = null
@@ -137,41 +204,100 @@ async function runBaselineCase(opt = {}) {
     let out = { status: mode, shots: [], written: [], kept: [], skipped: [] }
 
     //產製端逐張寫檔(正常路徑與部分已知缺陷路徑共用同一份, 避免兩份碼分歧)
+    //有變更才改寫未啟用時同步逐張寫出(回傳 undefined, 時序同 1.0.10); 啟用時經 writeBaselineIfChanged 判定(回傳 Promise)
+    //啟用時 --write-mode changed 之容差判定由有變更才改寫取代(同一覆蓋、KEEP_MAXDIFF; 免 gate 之 100px 先行保留而使 KEEP_MAXDIFF=0 失效)
     let writeShots = (shots) => {
-        for (let s of shots) {
-            if (gate && !gate.shouldWrite(lang, name, s.key)) {
-                out.skipped.push(s.key)
-                log(`  [skip] ${lang}-${s.key}`)
-                continue
+        let finish = (s, reason, r) => {
+            if (!r.written) {
+                out.kept.push(s.key)
+                log(`  [keep] ${lang}-${s.key} (${r.reason})`)
+                return
             }
-            let base = pathOf(lang, s.key)
-            let reason = ''
-            if (gate) {
-                gate.noteProduced(lang, name, s.key)
-                let d = gate.decideWrite(s.buf, base)
-                if (!d.write) {
-                    out.kept.push(s.key)
-                    log(`  [keep] ${lang}-${s.key} (${d.reason})`)
+            out.written.push(s.key)
+            //寫出者亦印出(含 decideWrite 與有變更才改寫之原因, 如 diff=661px), 與 [keep] 對稱; 否則只能以檔案時間回推哪些圖被重產
+            let why = [reason, r.reason].filter(Boolean).join('; ')
+            log(`  [write] ${lang}-${s.key}${why ? ` (${why})` : ''}`)
+        }
+        let i = 0
+        let step = () => {
+            for (; i < shots.length; i++) {
+                let s = shots[i]
+                if (gate && !gate.shouldWrite(lang, name, s.key)) {
+                    out.skipped.push(s.key)
+                    log(`  [skip] ${lang}-${s.key}`)
                     continue
                 }
-                reason = d.reason
+                let base = pathOf(lang, s.key)
+                let reason = ''
+                if (gate) {
+                    gate.noteProduced(lang, name, s.key)
+                    if (keep.keepSame && gate.writeMode === 'changed') {
+                        reason = 'changed→keepSame'
+                    }
+                    else {
+                        let d = gate.decideWrite(s.buf, base)
+                        if (!d.write) {
+                            out.kept.push(s.key)
+                            log(`  [keep] ${lang}-${s.key} (${d.reason})`)
+                            continue
+                        }
+                        reason = d.reason
+                    }
+                }
+                let target = gate ? gate.outPath(base) : base
+                if (!keep.keepSame) {
+                    writeFile(target, s.buf)
+                    finish(s, reason, { written: true, reason: '' })
+                    continue
+                }
+                let pm = writeBaselineIfChanged(s.buf, base, {
+                    outPath: target,
+                    keepSame: true,
+                    keepMaxDiff: keep.keepMaxDiff,
+                    transient: isTransient(s.key),
+                    toCompare: compareBuf ? (b, p) => compareBuf(b, p, ctx) : null,
+                    maxDiffPixels,
+                    threshold,
+                    writeFile,
+                })
+                return pm.then((r) => {
+                    finish(s, reason, r)
+                    i++
+                    return step()
+                })
             }
-            let target = gate ? gate.outPath(base) : base
-            writeFile(target, s.buf)
-            out.written.push(s.key)
-            //寫出者亦印出(含 decideWrite 之原因, 如 diff=661px), 與 [keep] 對稱; 否則只能以檔案時間回推哪些圖被重產
-            log(`  [write] ${lang}-${s.key}${reason ? ` (${reason})` : ''}`)
         }
+        return step()
     }
 
     //比對端逐張比對(正常路徑與部分已知缺陷路徑共用同一份)
+    //收集模式下: 比對函數(含 pathOf／labelOf／compareBuf)拋出之錯誤記為 'error' 並續比(標籤取不到時以 <lang>-<圖鍵>);
+    //自訂 match 正常回傳而未經 assertBaselineMatch 記錄者補記 'pass', 使彙整之分母為實際比對張數
     let compareShots = async (shots) => {
         let errs = []
         for (let s of shots) {
+            let label = null
             try {
-                await match(s.buf, pathOf(lang, s.key), labelOf(lang, s.key))
+                let p = pathOf(lang, s.key)
+                let b = compareBuf && fs.existsSync(p) ? await compareBuf(s.buf, p, ctx) : s.buf
+                label = labelOf(lang, s.key)
+                if (col) {
+                    //以單張標記判定此張是否已自行記錄(等待期間他處之紀錄不混淆)
+                    let tag = {}
+                    await runTaggedCall(tag, () => match(b, p, label))
+                    if (!col.records.some((r) => r.callTag === tag)) {
+                        col.add({ label, status: 'pass', numDiff: null, stem: null })
+                    }
+                }
+                else {
+                    await match(b, p, label)
+                }
             }
             catch (err) {
+                if (col) {
+                    col.add({ label: label || `${lang}-${s.key}`, status: 'error', numDiff: null, message: err && err.message ? err.message : String(err), stem: null })
+                    continue
+                }
                 if (!compareAll) {
                     throw err
                 }
@@ -199,6 +325,10 @@ async function runBaselineCase(opt = {}) {
             }
             out.status = 'knownDefect'
             return out
+        }
+        //收集模式: run 內已收集不符即不呼叫 onKnownDefect(未收集時那一張早已拋錯而非 pending); 彙整延到收尾之後, 收尾另拋錯者以該錯誤為準
+        if (col) {
+            col.deferIfMismatch()
         }
         if (typeof onKnownDefect === 'function') {
             await onKnownDefect(err)
@@ -258,7 +388,10 @@ async function runBaselineCase(opt = {}) {
                 out.skipped = out.shots.slice()
             }
             else {
-                writeShots(ctx.shots)
+                let w = writeShots(ctx.shots)
+                if (w) {
+                    await w
+                }
             }
             log(`  [known-defect] ${lang}-${name}: ${err.message} — 前段 ${ctx.shots.length} 張照常處理, 未產 [${defects.join(', ')}]`)
             if (gateNotes) {
@@ -268,6 +401,9 @@ async function runBaselineCase(opt = {}) {
             return out
         }
         await compareShots(ctx.shots)
+        if (col) {
+            col.deferIfMismatch()
+        }
         if (typeof onKnownDefect === 'function') {
             await onKnownDefect(err)
         }
@@ -276,82 +412,97 @@ async function runBaselineCase(opt = {}) {
 
     //階段: setup(run之前) → run → after(run之後: stages檢查、掛鉤)
     let phase = 'setup'
-    try {
-        if (prepare) {
-            await prepare(ctx)
-        }
-        ctx.browser = await launch()
-        ctx.browserRef.current = ctx.browser
-        ctx.page = await openPage(ctx.browser, ctx)
-        if (beforeRun) {
-            await beforeRun(ctx)
-        }
-        phase = 'run'
-        let result = await run(ctx.page, lang, ctx)
-        phase = 'after'
-        ctx.result = result
-        adoptPage(result)
-        ctx.shots = normalizeShots(result, name)
-        out.shots = ctx.shots.map((s) => s.key)
-        if (ctx.shots.length === 0 && !allowEmpty) {
-            throw new Error(`runBaselineCase: ${lang}-${name} 未產生任何截圖 (若屬設計如此請設 allowEmpty)`)
-        }
-        if (Array.isArray(stages)) {
-            let got = new Set(out.shots)
-            let want = new Set(stages)
-            let extra = out.shots.filter((k) => !want.has(k))
-            let lack = stages.filter((k) => !got.has(k))
-            if (extra.length > 0 || lack.length > 0) {
-                throw new Error(`runBaselineCase: ${lang}-${name} 產出之圖鍵與宣告不符: 多 [${extra.join(', ')}] 少 [${lack.join(', ')}]`)
+    let exec = async () => {
+        try {
+            if (prepare) {
+                await prepare(ctx)
             }
-        }
-        //語意斷言與不變式: 全部通過才寫檔 / 比對 (C13: 寫檔前語意斷言先過)
-        if (semantic) {
-            await semantic(ctx)
-        }
-        if (verify) {
-            await verify(ctx)
-        }
-
-        if (mode === 'regen' && compareOnly) {
-            out.status = 'compareOnly'
-            out.skipped = out.shots.slice()
-            log(`  [compare-only] ${lang}-${name}: 共用他案標準圖, 不寫檔`)
-            return out
-        }
-        if (mode === 'regen') {
-            writeShots(ctx.shots)
-            return out
-        }
-
-        //compare
-        await compareShots(ctx.shots)
-        return out
-    }
-    catch (err) {
-        if (err && err.knownDefect) {
-            if (err.shots !== undefined && err.shots !== null) {
-                if (phase !== 'run') {
-                    throw misplacedShots(err, phase === 'setup' ? 'run 之前' : 'run 之後(semantic/verify)')
+            ctx.browser = await launch()
+            ctx.browserRef.current = ctx.browser
+            ctx.page = await openPage(ctx.browser, ctx)
+            if (beforeRun) {
+                await beforeRun(ctx)
+            }
+            phase = 'run'
+            let result = await run(ctx.page, lang, ctx)
+            phase = 'after'
+            ctx.result = result
+            adoptPage(result)
+            ctx.shots = normalizeShots(result, name)
+            out.shots = ctx.shots.map((s) => s.key)
+            if (ctx.shots.length === 0 && !allowEmpty) {
+                throw new Error(`runBaselineCase: ${lang}-${name} 未產生任何截圖 (若屬設計如此請設 allowEmpty)`)
+            }
+            if (Array.isArray(stages)) {
+                let got = new Set(out.shots)
+                let want = new Set(stages)
+                let extra = out.shots.filter((k) => !want.has(k))
+                let lack = stages.filter((k) => !got.has(k))
+                if (extra.length > 0 || lack.length > 0) {
+                    throw new Error(`runBaselineCase: ${lang}-${name} 產出之圖鍵與宣告不符: 多 [${extra.join(', ')}] 少 [${lack.join(', ')}]`)
                 }
-                return await settlePartialDefect(err)
             }
-            return await settleWholeDefect(err)
+            //語意斷言與不變式: 全部通過才寫檔 / 比對 (C13: 寫檔前語意斷言先過)
+            if (semantic) {
+                await semantic(ctx)
+            }
+            if (verify) {
+                await verify(ctx)
+            }
+
+            if (mode === 'regen' && compareOnly) {
+                out.status = 'compareOnly'
+                out.skipped = out.shots.slice()
+                log(`  [compare-only] ${lang}-${name}: 共用他案標準圖, 不寫檔`)
+                return out
+            }
+            if (mode === 'regen') {
+                let w = writeShots(ctx.shots)
+                if (w) {
+                    await w
+                }
+                return out
+            }
+
+            //compare
+            await compareShots(ctx.shots)
+            return out
         }
-        throw err
+        catch (err) {
+            if (err && err.knownDefect) {
+                if (err.shots !== undefined && err.shots !== null) {
+                    if (phase !== 'run') {
+                        throw misplacedShots(err, phase === 'setup' ? 'run 之前' : 'run 之後(semantic/verify)')
+                    }
+                    return await settlePartialDefect(err)
+                }
+                return await settleWholeDefect(err)
+            }
+            throw err
+        }
+        finally {
+            let b = ctx.browserRef.current || ctx.browser
+            if (b) {
+                await b.close().catch(() => {})
+            }
+            if (ctx.browser && ctx.browser !== b) {
+                await ctx.browser.close().catch(() => {})
+            }
+            if (afterCase) {
+                await afterCase(ctx)
+            }
+        }
     }
-    finally {
-        let b = ctx.browserRef.current || ctx.browser
-        if (b) {
-            await b.close().catch(() => {})
-        }
-        if (ctx.browser && ctx.browser !== b) {
-            await ctx.browser.close().catch(() => {})
-        }
-        if (afterCase) {
-            await afterCase(ctx)
-        }
+
+    //收集模式: 整個案例在收集器範圍內執行, 正常結束後彙整(有不符即拋), 其他錯誤原樣拋出並附已收集者
+    if (col) {
+        return col.run(exec)
     }
+    //未啟用收集而外層有收集範圍(巢狀呼叫): 遮蔽外層, 本案例照常首張不符即拋
+    if (outer) {
+        return runOutsideCollector(exec)
+    }
+    return exec()
 }
 
 

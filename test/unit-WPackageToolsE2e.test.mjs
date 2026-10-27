@@ -40,7 +40,10 @@ import runBaselineCase from '../src/runBaselineCase.mjs'
 import normalizeShots from '../src/normalizeShots.mjs'
 import openCasePage from '../src/openCasePage.mjs'
 import createKnownDefect from '../src/createKnownDefect.mjs'
+import createBaselineCollector from '../src/createBaselineCollector.mjs'
+import writeBaselineIfChanged from '../src/writeBaselineIfChanged.mjs'
 import createServiceManager from '../src/createServiceManager.mjs'
+import resolveE2ePort from '../src/resolveE2ePort.mjs'
 import registerCleanupHooks from '../src/registerCleanupHooks.mjs'
 import probeHttp from '../src/probeHttp.mjs'
 import createTempSettings from '../src/createTempSettings.mjs'
@@ -56,6 +59,8 @@ import parseListenerPids from '../src/parseListenerPids.mjs'
 import snapshotBaselines from '../src/snapshotBaselines.mjs'
 import diffBaselineSnapshots from '../src/diffBaselineSnapshots.mjs'
 import compareImageDirs from '../src/compareImageDirs.mjs'
+import reviewPendingShots from '../src/reviewPendingShots.mjs'
+import acceptPendingShots from '../src/acceptPendingShots.mjs'
 
 
 //共用入口之單元測試: 鍵名與順序、型別、即各模組之匯出、src 內其他模組皆已登錄、可經入口呼叫
@@ -111,7 +116,10 @@ describe('WPackageToolsE2e', function() {
             'normalizeShots',
             'openCasePage',
             'createKnownDefect',
+            'createBaselineCollector',
+            'writeBaselineIfChanged',
             'createServiceManager',
+            'resolveE2ePort',
             'registerCleanupHooks',
             'probeHttp',
             'createTempSettings',
@@ -127,6 +135,8 @@ describe('WPackageToolsE2e', function() {
             'snapshotBaselines',
             'diffBaselineSnapshots',
             'compareImageDirs',
+            'reviewPendingShots',
+            'acceptPendingShots',
         ]
         assert.strict.deepEqual(r, rr)
     })
@@ -190,7 +200,10 @@ describe('WPackageToolsE2e', function() {
             normalizeShots,
             openCasePage,
             createKnownDefect,
+            createBaselineCollector,
+            writeBaselineIfChanged,
             createServiceManager,
+            resolveE2ePort,
             registerCleanupHooks,
             probeHttp,
             createTempSettings,
@@ -206,6 +219,8 @@ describe('WPackageToolsE2e', function() {
             snapshotBaselines,
             diffBaselineSnapshots,
             compareImageDirs,
+            reviewPendingShots,
+            acceptPendingShots,
         }
         let r = Object.keys(mods).filter((k) => wpte[k] !== mods[k])
         let rr = []
