@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    
+    <meta charset="utf-8">
+    <title>reviewPendingShots.mjs - Documentation</title>
+    
+    
+    <script src="scripts/prettify/prettify.js"></script>
+    <script src="scripts/prettify/lang-css.js"></script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc.css">
+    <script src="scripts/nav.js" defer></script>
+    
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+
+<input type="checkbox" id="nav-trigger" class="nav-trigger" />
+<label for="nav-trigger" class="navicon-button x">
+  <div class="navicon"></div>
+</label>
+
+<label for="nav-trigger" class="overlay"></label>
+
+<nav >
+    
+    
+    <h2><a href="index.html">Home</a></h2><h3>Global</h3><ul><li><a href="global.html#BOX_PAD">BOX_PAD</a></li><li><a href="global.html#INK_PAD">INK_PAD</a></li><li><a href="global.html#WPackageToolsE2e">WPackageToolsE2e</a></li><li><a href="global.html#acceptPendingShots">acceptPendingShots</a></li><li><a href="global.html#activeBaselineCollector">activeBaselineCollector</a></li><li><a href="global.html#assertBaselineMatch">assertBaselineMatch</a></li><li><a href="global.html#assertTextSpec">assertTextSpec</a></li><li><a href="global.html#canvasInkRects">canvasInkRects</a></li><li><a href="global.html#captureStable">captureStable</a></li><li><a href="global.html#captureStableWithBox">captureStableWithBox</a></li><li><a href="global.html#chromiumLaunchArgs">chromiumLaunchArgs</a></li><li><a href="global.html#collectDomText">collectDomText</a></li><li><a href="global.html#compareImageDirs">compareImageDirs</a></li><li><a href="global.html#createBaselineCollector">createBaselineCollector</a></li><li><a href="global.html#createBaselineGate">createBaselineGate</a></li><li><a href="global.html#createKnownDefect">createKnownDefect</a></li><li><a href="global.html#createServiceManager">createServiceManager</a></li><li><a href="global.html#createTempSettings">createTempSettings</a></li><li><a href="global.html#cropRegion">cropRegion</a></li><li><a href="global.html#diffBaselineSnapshots">diffBaselineSnapshots</a></li><li><a href="global.html#findOrphanBaselines">findOrphanBaselines</a></li><li><a href="global.html#getE2eMode">getE2eMode</a></li><li><a href="global.html#gridContentBox">gridContentBox</a></li><li><a href="global.html#insideEnabledCollect">insideEnabledCollect</a></li><li><a href="global.html#isChildAlive">isChildAlive</a></li><li><a href="global.html#itemsUnionBox">itemsUnionBox</a></li><li><a href="global.html#killOwnTree">killOwnTree</a></li><li><a href="global.html#killPortListeners">killPortListeners</a></li><li><a href="global.html#launchBrowser">launchBrowser</a></li><li><a href="global.html#launchChromium">launchChromium</a></li><li><a href="global.html#launchChromiumCore">launchChromiumCore</a></li><li><a href="global.html#listenerPids">listenerPids</a></li><li><a href="global.html#maskRegions">maskRegions</a></li><li><a href="global.html#normalizeShots">normalizeShots</a></li><li><a href="global.html#openCasePage">openCasePage</a></li><li><a href="global.html#overlayImageAt">overlayImageAt</a></li><li><a href="global.html#overlayRegions">overlayRegions</a></li><li><a href="global.html#pageHasText">pageHasText</a></li><li><a href="global.html#parseListenerPids">parseListenerPids</a></li><li><a href="global.html#pidExists">pidExists</a></li><li><a href="global.html#pollUntil">pollUntil</a></li><li><a href="global.html#probeHttp">probeHttp</a></li><li><a href="global.html#probeStuckTooltip">probeStuckTooltip</a></li><li><a href="global.html#registerCleanupHooks">registerCleanupHooks</a></li><li><a href="global.html#resetAgGridScroll">resetAgGridScroll</a></li><li><a href="global.html#resolveE2ePort">resolveE2ePort</a></li><li><a href="global.html#resolveKeepSame">resolveKeepSame</a></li><li><a href="global.html#reviewPendingShots">reviewPendingShots</a></li><li><a href="global.html#rowBoxSel">rowBoxSel</a></li><li><a href="global.html#runBaselineCase">runBaselineCase</a></li><li><a href="global.html#runIsolatedE2e">runIsolatedE2e</a></li><li><a href="global.html#runOutsideCollector">runOutsideCollector</a></li><li><a href="global.html#runTaggedCall">runTaggedCall</a></li><li><a href="global.html#sleepSync">sleepSync</a></li><li><a href="global.html#snapshotBaselines">snapshotBaselines</a></li><li><a href="global.html#stepShots">stepShots</a></li><li><a href="global.html#typeIntoInput">typeIntoInput</a></li><li><a href="global.html#typeIntoNthInput">typeIntoNthInput</a></li><li><a href="global.html#waitAlertGone">waitAlertGone</a></li><li><a href="global.html#waitChildExit">waitChildExit</a></li><li><a href="global.html#waitColResizeOverlay">waitColResizeOverlay</a></li><li><a href="global.html#waitDrawerReady">waitDrawerReady</a></li><li><a href="global.html#waitGridIdle">waitGridIdle</a></li><li><a href="global.html#waitUntilExist">waitUntilExist</a></li><li><a href="global.html#writeBaselineIfChanged">writeBaselineIfChanged</a></li></ul>
+    
+</nav>
+
+<div id="main">
+    
+    <h1 class="page-title">reviewPendingShots.mjs</h1>
+    
+
+    
+
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>import fs from 'fs'
+import path from 'path'
+import sharp from 'sharp'
+import pixelmatch from 'pixelmatch'
+import { PNG } from 'pngjs'
+
+
+//證據檔名: &lt;標籤>__&lt;YYYY-MM-DD_hh-mm-ss-mmm>[-N]__&lt;種類>.png / &lt;案例鍵>__&lt;時間戳>[-N]__collect.json
+let reEvidence = /^(.+)__(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}-\d{3})(?:-(\d+))?__(capture|baseline|diff)\.png$/
+let reManifest = /^(.+)__(\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}-\d{3})(?:-(\d+))?__collect\.json$/
+
+
+//時間戳與撞名序號之排序鍵(同毫秒以-N遞增)
+function orderKey(ts, n) {
+    return `${ts}#${String(n || 0).padStart(6, '0')}`
+}
+
+
+//since(Date、毫秒數或可被Date解析之字串) → 證據檔名之時間戳格式(UTC, 同assertBaselineMatch)
+function sinceStamp(since) {
+    if (since === null || since === undefined || since === '') {
+        return null
+    }
+    let t = since instanceof Date ? since.getTime() : (typeof since === 'number' ? since : Date.parse(since))
+    if (!Number.isFinite(t)) {
+        throw new Error(`reviewPendingShots: since 無法解析為時間「${since}」`)
+    }
+    return new Date(t).toISOString().replace(/[:.]/g, '-').replace('T', '_').slice(0, 23)
+}
+
+
+/**
+ * 讀取比對失敗證據目錄(./testPending)：各標籤取最新一組證據，分類並(收集模式之案例清單在時)帶出案例鍵、案例結果與正式標準圖路徑
+ *
+ * 分類(capture對證據中之baseline副本重算，不讀正式標準圖)：SAME(RGBA逐像素相同)、NOISE(pixelmatch真不同像素數≤maxDiffPixels)、
+ * CHANGED(>maxDiffPixels，附差異外框box)、SIZE(尺寸不同)、MISSING(無baseline副本，即收集模式之缺標準圖，capture為候選標準圖)。
+ * 案例清單(&lt;案例鍵>__&lt;時間戳>__collect.json，createBaselineCollector所寫)含該組證據者帶出caseKey、outcome('mismatch'或'failed')、baselinePath與cwd(比對時之工作目錄)；
+ * outcome為'failed'(案例另因語意斷言等錯誤失敗，或有比對錯誤)者acceptable為false——該截圖可能是壞畫面，不得採用；同一證據被不同案例或結局之清單引用者conflict為true，亦不可採用。
+ * 給cropDir時，CHANGED者另寫並排裁圖`&lt;cropDir>/&lt;標籤>__side.png`(左標準圖、右當次截圖，取差異外框外擴margin；排他建立，已存在即加-N，永不覆蓋)。
+ * 證據目錄永不自動清除，前幾趟之證據會留著：給since(本趟開始時間)只看其後之證據，免把本趟已通過之標籤之舊證據當成待審(更免被採用)。
+ * 本函數只讀證據(cropDir除外)，不改寫任何標準圖；採用見acceptPendingShots
+ *
+ * @param {Object} [opt={}] 輸入設定物件，預設{}
+ * @param {String} [opt.pendingDir='./testPending'] 輸入證據目錄字串，預設'./testPending'
+ * @param {Array} [opt.labels=null] 輸入只看之標籤陣列，預設null代表全部
+ * @param {Number} [opt.maxDiffPixels=100] 輸入NOISE之上限(同比對端容差)，預設100
+ * @param {Number} [opt.threshold=0.1] 輸入pixelmatch之色差門檻，預設0.1
+ * @param {String} [opt.cropDir=null] 輸入並排裁圖輸出目錄字串，預設null代表不產
+ * @param {Number} [opt.margin=40] 輸入並排裁圖之外擴像素，預設40
+ * @param {Date|Number|String} [opt.since=null] 輸入只看此時刻(含)之後之證據，Date、毫秒數或可被Date解析之字串，預設null代表全部
+ * @returns {Promise} 回傳Promise，resolve回傳陣列(依標籤排序)，元素為{label,cls,numDiff,box,stem,ts,capturePath,baselineCopyPath,diffPath,caseKey,outcome,baselinePath,cwd,conflict,acceptable,sidePath}
+ * @example
+ *
+ * import reviewPendingShots from 'w-package-tools-e2e/src/reviewPendingShots.mjs'
+ *
+ * let rs = await reviewPendingShots({ pendingDir: './testPending', cropDir: './testPending/_review' })
+ * for (let r of rs) {
+ *     console.log(r.cls, r.label, r.numDiff, r.outcome)
+ * }
+ *
+ */
+async function reviewPendingShots(opt = {}) {
+    let { pendingDir = './testPending', labels = null, maxDiffPixels = 100, threshold = 0.1, cropDir = null, margin = 40, since = null } = opt
+    let sinceTs = sinceStamp(since)
+    if (!fs.existsSync(pendingDir)) {
+        return []
+    }
+    let files = fs.readdirSync(pendingDir)
+
+    //各標籤最新一組證據
+    let latest = new Map()
+    for (let f of files) {
+        let m = f.match(reEvidence)
+        if (!m || m[4] !== 'capture') {
+            continue
+        }
+        let [, label, ts, n] = m
+        if (Array.isArray(labels) &amp;&amp; !labels.includes(label)) {
+            continue
+        }
+        if (sinceTs &amp;&amp; ts &lt; sinceTs) {
+            continue
+        }
+        let k = orderKey(ts, n)
+        let cur = latest.get(label)
+        if (!cur || k > cur.k) {
+            latest.set(label, { k, ts, stem: path.join(pendingDir, f.replace(/__capture\.png$/, '')) })
+        }
+    }
+
+    //案例清單之紀錄: 證據檔名主幹(basename) → 候選 [{ caseKey, outcome, baselinePath, cwd, dir }]
+    //對應證據時優先取「紀錄之證據目錄(以其 cwd 解析)即本證據目錄」者(跨目錄同名不混淆); 都不符(證據目錄被搬動)才用全部候選;
+    //所取候選之(案例、結局、標準圖路徑、cwd)不一致即標 conflict(跨行程撞名等), 不可採用
+    let win = process.platform === 'win32'
+    let normDir = (d) => (win ? path.resolve(d).toLowerCase() : path.resolve(d))
+    let byStem = new Map()
+    for (let f of files) {
+        if (!reManifest.test(f)) {
+            continue
+        }
+        let data = null
+        try {
+            data = JSON.parse(fs.readFileSync(path.join(pendingDir, f), 'utf8'))
+        }
+        catch (err) {
+            continue
+        }
+        for (let r of (data &amp;&amp; Array.isArray(data.records) ? data.records : [])) {
+            if (r &amp;&amp; r.stem) {
+                let k = path.basename(r.stem)
+                let cwd = r.cwd || data.cwd || null
+                let dir = normDir(path.dirname(path.resolve(cwd || process.cwd(), r.stem)))
+                let list = byStem.get(k) || []
+                list.push({ caseKey: data.caseKey, outcome: data.outcome, baselinePath: r.baselinePath || null, cwd, dir })
+                byStem.set(k, list)
+            }
+        }
+    }
+    let manifestOf = (stem) => {
+        let list = byStem.get(path.basename(stem))
+        if (!list) {
+            return null
+        }
+        let here = normDir(path.dirname(stem))
+        let pick = list.filter((c) => c.dir === here)
+        if (pick.length === 0) {
+            pick = list
+        }
+        let uniq = new Map(pick.map((c) => [JSON.stringify([c.caseKey, c.outcome, c.baselinePath, c.cwd]), c]))
+        let c = pick[0]
+        return { caseKey: c.caseKey, outcome: c.outcome, baselinePath: c.baselinePath, cwd: c.cwd, conflict: uniq.size > 1 }
+    }
+
+    let res = []
+    for (let [label, { ts, stem }] of latest) {
+        let capturePath = `${stem}__capture.png`
+        let baselineCopyPath = fs.existsSync(`${stem}__baseline.png`) ? `${stem}__baseline.png` : null
+        let diffPath = fs.existsSync(`${stem}__diff.png`) ? `${stem}__diff.png` : null
+        let mf = manifestOf(stem)
+        let r = {
+            label,
+            cls: '',
+            numDiff: null,
+            box: null,
+            stem,
+            ts,
+            capturePath,
+            baselineCopyPath,
+            diffPath,
+            caseKey: mf ? mf.caseKey : null,
+            outcome: mf ? mf.outcome : null,
+            baselinePath: mf ? mf.baselinePath : null,
+            cwd: mf ? mf.cwd : null,
+            conflict: mf ? mf.conflict : false,
+            acceptable: false,
+            sidePath: null,
+        }
+        r.acceptable = !!(mf &amp;&amp; mf.baselinePath &amp;&amp; mf.outcome !== 'failed' &amp;&amp; !mf.conflict)
+        if (!baselineCopyPath) {
+            r.cls = 'MISSING'
+            res.push(r)
+            continue
+        }
+        let capBuf = fs.readFileSync(capturePath)
+        let baseBuf = fs.readFileSync(baselineCopyPath)
+        let a = PNG.sync.read(capBuf)
+        let b = PNG.sync.read(baseBuf)
+        if (a.width !== b.width || a.height !== b.height) {
+            r.cls = 'SIZE'
+            res.push(r)
+            continue
+        }
+        if (a.data.equals(b.data)) {
+            r.cls = 'SAME'
+            r.numDiff = 0
+            res.push(r)
+            continue
+        }
+        let { width, height } = a
+        let out = new PNG({ width, height })
+        let n = pixelmatch(a.data, b.data, out.data, width, height, { threshold, includeAA: false, diffMask: true })
+        r.numDiff = n
+        if (n &lt;= maxDiffPixels) {
+            r.cls = 'NOISE'
+            res.push(r)
+            continue
+        }
+        r.cls = 'CHANGED'
+        //差異外框: diffMask 下只有真不同像素被畫上(不透明)
+        let x0 = width
+        let y0 = height
+        let x1 = -1
+        let y1 = -1
+        for (let y = 0; y &lt; height; y++) {
+            for (let x = 0; x &lt; width; x++) {
+                if (out.data[(y * width + x) * 4 + 3] > 0) {
+                    if (x &lt; x0) x0 = x
+                    if (y &lt; y0) y0 = y
+                    if (x > x1) x1 = x
+                    if (y > y1) y1 = y
+                }
+            }
+        }
+        if (x1 >= 0) {
+            r.box = { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 }
+        }
+        if (cropDir &amp;&amp; r.box) {
+            let left = Math.max(0, r.box.x - margin)
+            let top = Math.max(0, r.box.y - margin)
+            let w = Math.min(width, r.box.x + r.box.w + margin) - left
+            let h = Math.min(height, r.box.y + r.box.h + margin) - top
+            let crop = async (buf) => await sharp(buf).extract({ left, top, width: w, height: h }).png().toBuffer()
+            let gap = 8
+            let side = await sharp({ create: { width: w * 2 + gap, height: h, channels: 4, background: { r: 255, g: 34, b: 102, alpha: 1 } } })
+                .composite([{ input: await crop(baseBuf), left: 0, top: 0 }, { input: await crop(capBuf), left: w + gap, top: 0 }])
+                .png()
+                .toBuffer()
+            fs.mkdirSync(cropDir, { recursive: true })
+            //排他建立, 已存在即加 -N: 永不覆蓋任何既有檔(cropDir 誤指標準圖目錄時亦不改寫標準圖)
+            for (let n = 0; ; n++) {
+                let fp = path.join(cropDir, `${label}__side${n > 0 ? `-${n}` : ''}.png`)
+                try {
+                    fs.writeFileSync(fp, side, { flag: 'wx' })
+                    r.sidePath = fp
+                    break
+                }
+                catch (err) {
+                    if (err.code !== 'EEXIST') {
+                        throw err
+                    }
+                }
+            }
+        }
+        res.push(r)
+    }
+    res.sort((p, q) => (p.label &lt; q.label ? -1 : p.label > q.label ? 1 : 0))
+    return res
+}
+
+
+export default reviewPendingShots
+</code></pre>
+        </article>
+    </section>
+
+
+
+
+    
+    
+</div>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 4.0.5</a> on Wed Oct 28 2026 07:52:24 GMT+0800 (台北標準時間) using the <a href="https://github.com/clenemt/docdash">docdash</a> theme.
+</footer>
+
+<script>prettyPrint();</script>
+<script src="scripts/polyfill.js"></script>
+<script src="scripts/linenumber.js"></script>
+
+
+
+</body>
+</html>
