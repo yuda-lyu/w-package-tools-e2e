@@ -4,8 +4,9 @@
 
 ## 版本與最近驗證
 
-- `package.json` version:1.0.10(以下 issue #19 之改動尚未發布;發布由使用者／主控之自動化流程處理).
-- 最近一次全套驗證:2026-10-28 pte2e-run01,`npm test` 412 passing(其中 issue #19 新增 69 條)、lint 0 error、變異 70/70、新舊差分 34 組全同;外審 terra 兩輪(22＋14 條)已處置.報告 `C:\opensrcOper\dnow\20261028061508\agent-out\pte2e-run01-修正報告.md`.
+- `package.json` version:1.0.11(本輪未改;e2e01 之改動尚未發布;發布由使用者／主控之自動化流程處理).
+- 最近一次全套驗證:2026-10-30 e2e01,`npm test` 427 passing、0 failing(412 → 427, 本輪 `unit-procPrimitives` 淨增 15 條; 3m07s, `--lock`)、lint 0 error、變異 24/24 擊殺(`unit-procPrimitives` 之 `listenerPids`／`killPortListeners`);未派外審.報告 `C:\opensrcOper\dnow\20261030064553\agent-out\e2e01-修正報告.md`.
+- 前一輪全套驗證:2026-10-28 pte2e-run01,`npm test` 412 passing(其中 issue #19 新增 69 條)、lint 0 error、變異 70/70、新舊差分 34 組全同;外審 terra 兩輪(22＋14 條)已處置.報告 `C:\opensrcOper\dnow\20261028061508\agent-out\pte2e-run01-修正報告.md`.
 
 ## 功能現況
 
@@ -20,6 +21,7 @@
 | 有變更才改寫(issue #19-2;`E2E_BASELINE_KEEP_SAME`／`KEEP_MAXDIFF`、writeBaselineIfChanged、compareBuf、transient) | 完成,未發布 | 同上 | `unit-keepSame` `[K..]` | 使用端須把自訂 `match` 內之覆蓋移到 `compareBuf` 才能「同一覆蓋」 |
 | 埠位移(issue #19-3;`E2E_PORT_OFFSET`、resolveE2ePort、createServiceManager) | 完成,未發布 | 同上 | `unit-portOffset` `[P..]` | 使用端 setup 須改由 spawn 收到之 `port` 啟動服務、baseUrl 經 `resolveE2ePort` |
 | 生命週期與行程(createServiceManager、registerCleanupHooks、所有權與 port 原語、runIsolatedE2e) | 完成(own 政策未提供) | README §2.4 | `unit-serviceManager`、`unit-procPrimitives`、`unit-harnessHelpers` | own 政策(README §7) |
+| 埠之監聽者查詢與處置(`listenerPids`、`killPortListeners`;e2e01,2026-10-30) | 完成,未發布(破壞性: `opt.exec` 改 spawnSync 形、移除 `parseListenerPids`、新增依賴 `wsemi`) | `rulebook_port.md`、README §5 Breaking changes | `unit-procPrimitives` `[LP*]`／`[KP*]`／`[RP*]`(含本機真實監聽與真實子程序) | 下游(w-web-task 等)須改替身形狀並刪 `parseListenerPids` 案、身分確認傳 `useBoth:true`(`rulebook_port.md` §4);lsof 路徑真機未跑;`killOwnTree` 之 `opt.exec` 仍 execSync 形 |
 | 盤點 CLI(auditBoxes、auditWaits) | 完成 | `sgud/proc/process.md` | `unit-auditWaits`(auditBoxes 無單元測試) | — |
 | 驗證工具(snapshotBaselines、diffBaselineSnapshots、compareImageDirs) | 完成 | README §4 | `unit-baselineTools` | — |
 

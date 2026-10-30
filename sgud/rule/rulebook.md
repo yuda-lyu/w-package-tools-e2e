@@ -4,7 +4,7 @@
 
 編列依據:Gitea issue #4(runBaselineCase 遇已知缺陷時保留並比對其前各步之截圖)、#5(createBaselineGate.finalize 把已知缺陷案例之未產圖當成 --names 未命中)之審計(`agent-out/run01-審計回應.md`)與修正(2026-10-20);issue #6(itemsUnionBox 不認 svg/canvas 圖形為框外內容)之審計與修正(2026-10-20,見 §7);issue #19(收集模式、有變更才改寫、埠位移;2026-10-28)見分檔 §8.API 細節見 `README.md` §2.1、§2.2 與三檔 JSDoc;取捨緣由見 `sgud/exp/experience.md`「注意事項: 產製與比對」.
 
-**分檔索引**(本檔逾 30KB,新章節起改依類型分檔):§1～§7 在本檔;§8 全量執行之共用層支援(收集模式、有變更才改寫、埠位移、審查與採用)→ `sgud/rule/rulebook_baselineRun.md`.
+**分檔索引**(本檔逾 30KB,新章節起改依類型分檔):§1～§7 在本檔;§8 全量執行之共用層支援(收集模式、有變更才改寫、埠位移、審查與採用)→ `sgud/rule/rulebook_baselineRun.md`;埠之監聽者查詢與處置(`listenerPids`、`killPortListeners`;2026-10-30 e2e01)→ `sgud/rule/rulebook_port.md`.
 
 ## 1. 已知缺陷分流(`src/runBaselineCase.mjs`、`src/createKnownDefect.mjs`)
 
@@ -134,6 +134,7 @@
 
 ## 5. 破壞性變更紀錄
 
+- **2026-10-30(e2e01,埠之監聽者查詢改委由 wsemi 1.9.32)**:不動標準圖像素.①`listenerPids`／`killPortListeners` 之 `opt.exec` 由 execSync 形改為 spawnSync 形 `(prog, args, { src, timeout, maxBuffer })=>{status,stdout,error}`(`killPortListeners` 之 `exec` 查詢與下殺共用);②移除 `parseListenerPids`(模組、入口鍵、測試); ③`[]` 語意收緊為「已確認無人」,`null` 涵蓋更多失敗; ④新增選項 `listenerPids` 之 `timeout`／`useBoth`／`onTrace`、`killPortListeners` 之 `timeout`(查詢固定 `useBoth:true`); ⑤新增依賴 `wsemi`.規則與測試對照見 `sgud/rule/rulebook_port.md`;README §5 Breaking changes.
 - **2026-10-20(issue #6)`itemsUnionBox` 圖形內容**:無 API 不相容變更;`graphics` 預設開啟屬會動使用端標準圖像素之框幾何類變更(§7.5),`graphics:false` 為逃生口.本節以下三點為 issue #4/#5 之紀錄.
 - 無破壞性變更.**唯一語意變更**:`createKnownDefect(msg, { shots })` 於 1.0.8 靜默忽略 `shots`,此後生效(帶 shots 而無 `defectStages` 時,`stages` 已宣告者以 D=∅ 核對,不完整即大聲失敗).
 - 行為補充(非破壞):`gate.finalize()` 回傳值由 undefined 改為 `{ knownDefects }`;有缺陷紀錄時多印摘要;`createBaselineGate` 新選項 `log`;整案缺陷 + `--names` 之離開碼由 1 改 0.
@@ -146,6 +147,7 @@
 - `test/e2e-itemsUnionBoxGraphics.test.mjs`:表 C(§7.2;前綴 `[ID]`,真 Chromium,語意/幾何斷言,無標準圖).單檔自編 `npx mocha test/e2e-itemsUnionBoxGraphics.test.mjs --no-parallel --timeout 180000`;既有 `test/e2e-captureEquivalence.test.mjs` 之 `itemsUnionBox` 7 條為舊規則之契約,須維持全綠.
 - 全套:`node C:/opensrcOper/tools/quiet-run.mjs --name final -- npm test`(`mocha --no-parallel "test/*.test.mjs" --timeout 180000`);單檔自編 `npx mocha test/unit-runBaselineCase.test.mjs test/unit-baselineGate.test.mjs --no-parallel --timeout 60000`.
 - lint:`npx eslint --ext .mjs src tools test` 須 0 error.
+- `test/unit-procPrimitives.test.mjs` 之 `listenerPids`／`killPortListeners`(前綴 `[LP*]`、`[KP*]`、`[RP*]`)對應 `sgud/rule/rulebook_port.md`;單檔自編 `node C:/opensrcOper/tools/quiet-run.mjs --lock --name x -- npx mocha --no-parallel test/unit-procPrimitives.test.mjs --timeout 180000`(`[R*]` 用固定埠 19050、19051,須空閒).
 - 使用端視角:`npm pack` 後安裝至 `./tmp` 假專案深層引用實跑(見 `sgud/proc/process.md`「改動 src/ 之驗證範圍」).
 ## 7. itemsUnionBox 圖形內容(Gitea issue #6;2026-10-20 審計 run01、修正 run02)
 

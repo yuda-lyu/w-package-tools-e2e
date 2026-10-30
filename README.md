@@ -39,7 +39,7 @@ let browser2 = await wpte.launchBrowser()
 
 - 每檔一個 default export，繁中 JSDoc 附 `@example`；以深層引用使用（`w-package-tools-e2e/src/<名稱>.mjs`；本套件無 `main`／`exports`）。另有具名匯出：`composeBox.mjs` 之 `BOX_PAD`／`BOX_STROKE`、`inkRect.mjs` 之 `INK_PAD`。
 - 共用入口 `src/WPackageToolsE2e.mjs`：匯入 `src/` 內其他全部模組，default export 為含全部模組與上述三個常數之物件（依 §1 之分組排列）；引用它會一併載入全部模組與其依賴（playwright、sharp 等），只用少數函數者宜深層引用。`tools/` 之 CLI 為可執行腳本，不經入口匯入。
-- 依賴只用本套件已列者：playwright（經 `launchChromium`）、pixelmatch、pngjs、sharp、json5；不引入 wsemi／lodash。
+- 依賴只用本套件已列者：playwright（經 `launchChromium`）、pixelmatch、pngjs、sharp、json5，以及 wsemi（2026-10-30 起，僅 `listenerPids`／`killPortListeners` 深層引用其 `wsemi/src/execProcessPortPidsSync.mjs` 查埠之監聽者，不經 wsemi 主入口）；不引入 lodash。
 - 外部副作用（exec、spawn、fetch、process、globalThis、寫檔函數或落點）皆可由 opt 注入，供單元測試。
 - 各函數之預設值即 w-web-sso 現行組態所用者；其他專案之差異以選項重現。
 
@@ -101,8 +101,8 @@ let browser2 = await wpte.launchBrowser()
 | `createTempSettings(opt)` | 臨時設定檔（JSON5 基底淺合併、tmpDir 必填、forbiddenKeys） | sso 實跑、單元 |
 | `runIsolatedE2e(opt)` | 逐檔獨立 mocha 行程（殺 port 以回呼注入）；`targets` 逐檔指定檔案與 `--grep`（依差異範圍只重跑受影響案例，每檔仍換新後端，並自動加 `--fail-zero`，grep 對不到任何案例即失敗）；有 mocha 執行檔（`mochaBin`，預設 `node_modules/mocha/bin/mocha.js`，以 `projRoot` 解析）時以 node 直接執行、不經 shell，否則沿用 `npx`（Windows 下經 cmd.exe 重新解析參數：`\|` `&` 切出另一指令、`<` `>` 轉向、`^` `"` 被吃掉、空白拆開、`%名稱%` 展開；故此時參數含空白或 `"` `&` `\|` `<` `>` `^` `%` 即於執行前拋錯；括號與 `[ ]` 不受影響）；明確給定之 `mochaBin` 不存在即拋錯 | sso 實跑、單元（2026-09-30 加 `targets`、node 直接執行、npx 退路之參數守門） |
 | 所有權原語 `killOwnTree` / `isChildAlive` / `waitChildExit` / `pidExists` / `sleepSync` | 只殺自建且仍存活之子行程樹（同步）與回驗 | killOwnTree sso 實跑；其餘單元（移植自 w-web-task 並帶其測試） |
-| port 政策原語 `killPortListeners` | 殺監聽某 port 之行程——**只可用於專案專屬且已於映射表明文登錄之 port** | sso 實跑、單元 |
-| `listenerPids` / `parseListenerPids` | netstat 完整解析（含 IPv6、在地化狀態字）/ POSIX 只取 LISTEN；工具不可用回 null | sso 實跑、單元 |
+| port 政策原語 `killPortListeners(port, opt)` | 殺監聽某 port 之行程（含行程樹）——**只可用於專案專屬且已於映射表明文登錄之 port**；查詢固定傳 `useBoth: true`（殺行程須完整集合）；`opt.exec` 為 spawnSync 形，查詢與下殺共用（§5 Breaking changes）；查詢失敗回 `{ pids: null, killed: [] }` 不下殺 | sso 實跑（舊版）、單元、本機真實子程序（2026-10-30） |
+| `listenerPids(port, opt)` | 查監聽某 port 之 PID（字串陣列、去重排序）：委由 wsemi `execProcessPortPidsSync`，判定不依狀態欄；Windows 先 `netstat -ano`、查無或失敗再 `Get-NetTCPConnection -LocalPort` 確認（本機 Windows 11 26300 之 netstat 會漏列新起之監聽、並把對外連線之狀態錯置為 LISTENING），其他平台 `lsof`；`[]` 只代表已確認無人，查詢失敗回 `null`（不可當成無人）；透傳 `timeout`／`useBoth`／`onTrace`／`exec`／`platform`；本 OS 上新起之監聽與無人之 port 每次約 1 秒（走 PowerShell），在 exit／signal 處理器內呼叫請傳較短 `timeout`（如 5000）；**身分確認（「監聽者恰為我的子程序」）請傳 `useBoth: true`** | sso 實跑（舊版）、單元、本機真實監聽（2026-10-30） |
 
 ### 1.4 驗證工具
 
@@ -373,6 +373,19 @@ let captureStableWithBox = (page, target, opts = {}) => pkgCaptureStableWithBox(
 
 ## 5. 改版須知：哪些變更會動到使用端之標準圖
 
+### Breaking changes（2026-10-30，查埠之監聽者改委由 wsemi 1.9.32）
+
+不影響標準圖像素；破壞性在 `listenerPids`／`killPortListeners`／`parseListenerPids` 之介面（本套件不做舊版相容）：
+
+- **`opt.exec` 形狀改變**：原為 execSync 形 `(指令字串, 選項) => stdout`（以字串比對 `'netstat -ano'`、`'taskkill /F /T /PID …'` 分派）；現為 **spawnSync 形** `(prog, args, { src, timeout, maxBuffer }) => { status, stdout, error }`，以 `src` 分派固定輸出（`listenerPids`：`'netstat'`／`'powershell'`／`'lsof'`；`killPortListeners` 之 `exec` **查詢與下殺共用**，另有 `'taskkill'`（Windows）、`'kill'`（其他平台，經 `sh -c 'kill -9 "$1"'`））。注入之函數拋錯、回傳非物件、`status` 非 0 或帶 `error` 皆視為該子指令失敗。替身寫法範例見 `test/tools/portPidsFake.mjs`、`test/unit-procPrimitives.test.mjs`；使用端既有的 execSync 形替身（如 w-web-task `test/unit-harnessProc.test.mjs`）須改寫。`killOwnTree` 之 `opt.exec` **未改**（仍為 execSync 形：`(指令字串, 選項) => stdout`）。
+- **移除 `parseListenerPids`**（模組 `src/parseListenerPids.mjs`、`WPackageToolsE2e` 入口之鍵一併移除）：該解析器含「狀態為 LISTENING」之或條件，在本機類（Windows 11 26300＋KB5127936）系統上，對外連線被錯置為 LISTENING 時會誤判為監聽、`killPortListeners` 因而誤殺不相干之行程；且 netstat 在該類系統上會整列漏列，單靠解析 netstat 文字本就無法回答「誰在監聽」。使用端不應再自行解析 netstat，一律改用 `listenerPids`；引用 `parseListenerPids` 之測試須刪除或改測 `listenerPids`（以 `opt.exec` 注入固定輸出）。
+- **回傳語意收緊（契約形狀不變）**：`listenerPids` 仍回 PID **字串**陣列／`[]`／`null`，但 `[]` 現只代表「已確認無人」（Windows 為 netstat 與 `Get-NetTCPConnection` 皆查無），`null` 涵蓋更多失敗（指令不存在、逾時、非預期離開碼、輸出無法解析、port 不合法）；`killPortListeners` 查詢失敗仍回 `{ pids: null, killed: [] }` 且不下殺。
+- **新增選項**：`listenerPids` 透傳 `timeout`（每個子指令之逾時毫秒，預設 10000）、`useBoth`（Windows 下 netstat 有查到仍再查 `Get-NetTCPConnection` 取聯集，身分確認用，預設 false）、`onTrace`（觀察回調；失敗訊息為 `settle` 事件之 `msg`）；`killPortListeners` 新增 `timeout`（查詢與下殺共用），其查詢固定傳 `useBoth: true`，不可關。
+- **耗時**：在 netstat 漏列之系統上，新起之監聽與無人之 port 一律走 `Get-NetTCPConnection`，每次約 0.8～1 秒（原 netstat 約 25 ms），Windows 最久約 2 倍 `timeout`；輪詢迴圈之單輪因而變長，exit／signal 處理器內請傳 `timeout: 5000` 左右。
+- **新增依賴**：`wsemi`（`dependencies`）。
+
+### 標準圖相關
+
 - **框幾何**（`composeBox` 之 `BOX_PAD`／`BOX_STROKE`／圓角、`itemsUnionBox` 之 `fit` 規則與 `inkPad`、`inkRect`、`gridContentBox`、`canvasInkRects` 之墨跡判定）、**截圖序列**（`captureStable` 之 settle、`<img>` 動畫區之靜態影格、遮罩）與**啟動旗標**（`chromiumLaunchArgs`，改動即全量重產）決定各專案標準圖之像素；變更後使用端須重產受影響之圖並逐張審（全域技能 role-coder-for-test-e2e §7.9），發版說明請明列。
 - **`itemsUnionBox` 之圖形內容（2026-10-20，Gitea issue #6）**：`graphics` 預設開啟，屬會動使用端標準圖之框幾何類變更——**受影響者：`position:fixed` 浮層之框線帶（量測矩形邊外 1–6px）內有 svg 圖形、可讀 2d canvas 墨跡或 `graphicAreas` 宣告區者，框線改退入浮層內距**；其餘不變（隨機差分與既有等價測試證明）。逃生口 `graphics:false` 逐位元重現 1.0.9；詳見 §2.7。使用端升版後跑一次比對、重產受影響者並逐張審，發版說明須列明。
 - 新增函數、新增選項（預設值維持原行為）不影響既有標準圖；一向以「預設值取 w-web-sso 現行行為、其他專案以選項重現」擴充。
@@ -389,6 +402,7 @@ let captureStableWithBox = (page, target, opts = {}) => pkgCaptureStableWithBox(
 - `test/e2e-captureEquivalence.test.mjs` 含 w-web-sso／w-web-perm 當時實作之凍結複本（逐位元等價之對照組）與框幾何之專測，屬行為契約，勿因「看起來重複」刪除；凍結複本區段以 `eslint-disable` 註明保持逐字。
 - `test/e2e-itemsUnionBoxGraphics.test.mjs`：`itemsUnionBox` 圖形內容（svg 圖形、2d canvas、`graphicAreas`）之真 Chromium 語意/幾何測試，標題前綴 `[ID]` 對應 `CLAUDE_rulebook.md` 表 C；斷言以「無圖形內容時之量框」與「框線外緣不越過內容」為準，無標準圖。
 - `test/unit-baselineCollect.test.mjs`（`[C*]`）、`test/unit-keepSame.test.mjs`（`[K*]`）、`test/unit-portOffset.test.mjs`（`[P*]`，含以真實子行程服務於 18930＋100 之實跑）、`test/unit-reviewPending.test.mjs`（`[R*]`，含 CLI 實跑）：Gitea issue #19 三項之開關行為、預設不變、彙整錯誤格式、mtime 不變、位移後之 baseUrl；標題前綴對應 `sgud/rule/rulebook_baselineRun.md` §8.4。
+- `test/unit-procPrimitives.test.mjs`：行程原語。`listenerPids`／`killPortListeners` 之案以 spawnSync 形替身（`test/tools/portPidsFake.mjs`）驗判定（對外連線錯置為 LISTENING 不得誤判、netstat 漏列由 `Get-NetTCPConnection` 補、查詢失敗回 null 非 `[]`、`useBoth`／`timeout`／`onTrace` 透傳），標題前綴 `[LP*]`（`listenerPids`）／`[KP*]`（`killPortListeners`）；`[RP*]` 為本機真實案：起真實監聽（固定埠 19050）查得到自己、真實子程序監聽（固定埠 19051）被 `killPortListeners` 殺掉並回驗；兩埠須空閒，否則該條失敗並註明。
 - lint：`npx eslint --ext .mjs src tools test`。
 
 ## 7. 後續候選（未納入）

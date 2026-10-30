@@ -55,7 +55,6 @@ import pidExists from '../src/pidExists.mjs'
 import sleepSync from '../src/sleepSync.mjs'
 import killPortListeners from '../src/killPortListeners.mjs'
 import listenerPids from '../src/listenerPids.mjs'
-import parseListenerPids from '../src/parseListenerPids.mjs'
 import snapshotBaselines from '../src/snapshotBaselines.mjs'
 import diffBaselineSnapshots from '../src/diffBaselineSnapshots.mjs'
 import compareImageDirs from '../src/compareImageDirs.mjs'
@@ -131,7 +130,6 @@ describe('WPackageToolsE2e', function() {
             'sleepSync',
             'killPortListeners',
             'listenerPids',
-            'parseListenerPids',
             'snapshotBaselines',
             'diffBaselineSnapshots',
             'compareImageDirs',
@@ -215,7 +213,6 @@ describe('WPackageToolsE2e', function() {
             sleepSync,
             killPortListeners,
             listenerPids,
-            parseListenerPids,
             snapshotBaselines,
             diffBaselineSnapshots,
             compareImageDirs,
@@ -234,7 +231,7 @@ describe('WPackageToolsE2e', function() {
             wpte.rowBoxSel(3),
             wpte.normalizeShots(buf, 'E2E-001-a').map((s) => s.key),
             wpte.inkRect({ x: 10, y: 20, width: 30, height: 40 }),
-            wpte.parseListenerPids('  TCP    0.0.0.0:11007   0.0.0.0:0   LISTENING   1234', 11007),
+            wpte.listenerPids(0), //port不合法(須1~65535)即回null, 不起任何子指令
             wpte.getE2eMode({ argv: ['node', 'x.mjs', '--baseline'], env: {} }),
             wpte.createKnownDefect('徵狀', { ref: 'spec' }).knownDefect,
         ]
@@ -242,7 +239,7 @@ describe('WPackageToolsE2e', function() {
             ['.ag-pinned-left-cols-container .ag-row[row-index="3"]', '.ag-center-cols-container .ag-row[row-index="3"]'],
             ['E2E-001-a'],
             { x: 6, y: 16, width: 38, height: 48 },
-            ['1234'],
+            null,
             { regen: true, diag: false, strictCapture: false },
             true,
         ]

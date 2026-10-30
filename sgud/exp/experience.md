@@ -9,7 +9,7 @@
 - 會改變使用端標準圖像素之變更: 框幾何(`BOX_PAD`／`BOX_STROKE`／圓角、`itemsUnionBox` 之 fit 與 inkPad、`inkRect`、`gridContentBox`、`canvasInkRects`)、截圖序列(`captureStable` 之 settle、靜態影格、遮罩)、啟動旗標(`chromiumLaunchArgs`, 改動即全量重產)、依賴升版(playwright 帶入之 Chromium).改之前先評估, 發版說明明列, 使用端須重產受影響之圖並逐張審.
 - 深層引用 `w-package-tools-e2e/src/<名>.mjs`, 無 `main`／`exports`: 任何檔都可被引用; 套件內不能以套件名引用自己, 測試一律以 `../src/` 相對引用.
 - 共用入口 `src/WPackageToolsE2e.mjs`(2026-09-29, 仿 w-dispatch-ai 之 `WDispatchAi.mjs`): 匯入 `src/` 內其他全部模組並加 `BOX_PAD`／`BOX_STROKE`／`INK_PAD`, 依 README §1 分組排列; 引用它會一併載入全部模組與依賴(playwright、sharp).`tools/*.mjs` 為可執行腳本(引用即解析 argv, 無參數時 `process.exit(2)`), 絕不可匯入入口.`test/unit-WPackageToolsE2e.test.mjs` 以目錄列舉守門: `src/` 新增模組未登錄於入口即失敗(已以暫放未登錄之探針模組驗證會擋).
-- 依賴只用 playwright(經 `launchChromium`)、pixelmatch、pngjs、sharp、json5; 不引入 wsemi／lodash.外部副作用(exec、spawn、fetch、process、globalThis、寫檔函數或落點)皆可由 opt 注入, 行程類原語因此能以假物件單元測試.
+- 依賴只用 playwright(經 `launchChromium`)、pixelmatch、pngjs、sharp、json5, 以及 wsemi(2026-10-30 起, 僅 `listenerPids` 深層引用 `wsemi/src/execProcessPortPidsSync.mjs`, 不經 wsemi 主入口之 dist 全包); 不引入 lodash.外部副作用(exec、spawn、fetch、process、globalThis、寫檔函數或落點)皆可由 opt 注入, 行程類原語因此能以假物件單元測試.
 
 ## 功能與目的(2026-09-30 現況)
 
@@ -30,7 +30,7 @@
 | 等待 | `waitUntilExist`、`pollUntil`、`waitAlertGone` | 偵測驅動等待(頁面內／測試行程端／提示浮窗消失), 取代固定秒數 |
 | 輸入與斷言 | `typeIntoInput`、`typeIntoNthInput`、`collectDomText`、`pageHasText`、`assertTextSpec` | 受控輸入框之真人輸入(Pattern D); spec 衍生文字之語意斷言 |
 | 生命週期 | `createServiceManager`、`registerCleanupHooks`、`probeHttp`、`createTempSettings`、`runIsolatedE2e` | 服務沿用或啟動、同步收尾、臨時設定、逐檔獨立 mocha 行程(`targets` 可點名檔案與 `--grep`) |
-| 行程原語 | 所有權: `killOwnTree`、`isChildAlive`、`waitChildExit`、`pidExists`、`sleepSync`; port 政策: `killPortListeners`、`listenerPids`、`parseListenerPids` | 只殺自建行程樹並回驗; 專屬 port 之監聽者處置 |
+| 行程原語 | 所有權: `killOwnTree`、`isChildAlive`、`waitChildExit`、`pidExists`、`sleepSync`; port 政策: `killPortListeners`、`listenerPids`(`parseListenerPids` 已於 2026-10-30 移除) | 只殺自建行程樹並回驗; 專屬 port 之監聽者處置 |
 | 驗證工具 | `snapshotBaselines`、`diffBaselineSnapshots`、`compareImageDirs` | 證明「零標準圖變動」之快照與等價比對 |
 | CLI | `tools/auditBoxes.mjs`、`tools/auditWaits.mjs` | 標準圖紅框六類盤點; 固定等待七類盤點(旗標只是候選, 須逐項判讀; 用法見 `sgud/proc/process.md`) |
 
@@ -131,7 +131,11 @@
 - 就緒判定只看 HTTP 回應; 服務遇 EADDRINUSE 不一定退出(w-web-task 實測), 沿用政策察覺不到綁定失敗(own 政策才偵測).
 - `restart` 殺自建後等 port 釋放(上限 `portReleaseTimeoutMs`)再 spawn; 殺後仍被佔或無自建而被佔時, `killForeignOnRestart:true` 才殺監聽者——**只可用於專案專屬且於映射表明文登錄之 port**.
 - 所有權原語與 port 政策原語分區: 所有權規則「絕不以 port 監聽者比對殺行程」, 只殺自建且仍存活者(已結束者之 PID 可能已被回收給無關行程); port 政策原語才殺監聽者.
-- `netstat -ano` 不可加 `-p TCP`(只列 IPv4, 漏掉以 `::` 雙堆疊監聽者); 部分語系之 Windows 在地化狀態字, 故以外部位址 `0.0.0.0:0`／`[::]:0`／`*:*` 判監聽; POSIX `lsof` 以 exit 1 表示無人; 查詢工具不可用回 null, 呼叫端不得當成無人.
+- `netstat -ano` 不可加 `-p TCP`(只列 IPv4, 漏掉以 `::` 雙堆疊監聽者); 部分語系之 Windows 在地化狀態字, 故判監聽不依狀態欄(以外部位址為萬用位址判); POSIX `lsof` 以 exit 1 表示無人; 查詢工具不可用回 null, 呼叫端不得當成無人.**(2026-10-30 起此判定與解析全部委由 wsemi `execProcessPortPidsSync`, 見下條.)**
+- **Windows 11 26300(＋KB5127936)之 netstat 不可信(2026-10-30 e2e01)**: 系統回報 TCP 狀態值錯誤——`netstat -ano` 會整列漏列新起之監聽(本機自起之 0.0.0.0 監聽 0/10 次列出; 修前碼 `listenerPids` 連續 5 次查詢前 3 次回 `[]`, 之後才查到)、對外連線之狀態反列 LISTENING(修前碼 `parseListenerPids` 因「狀態為 LISTENING」之或條件把它判為監聽, `killPortListeners` 照殺不相干之 PID)、系統監聽(135)之狀態字錯為 FIN_WAIT_1.故「誰在監聽某埠」不可單靠 netstat 文字: 一律用 `listenerPids`(wsemi: Windows 先 netstat, 查無或失敗再 `Get-NetTCPConnection -LocalPort`, 其查無才判無人), `[]` 只代表已確認無人, `null` 為失敗; 殺行程與身分確認要完整集合, 傳 `useBoth: true`(`killPortListeners` 內建).代價: 新起之監聽與無人之埠每次約 1 秒(走 PowerShell), exit／signal 處理器內傳較短 `timeout`.
+- **`listenerPids`／`killPortListeners` 之 `opt.exec` 為 spawnSync 形(2026-10-30)**: `(prog, args, { src, timeout, maxBuffer }) => { status, stdout, error }`, 以 `src` 分派固定輸出; `killPortListeners` 之 `exec` 查詢與下殺共用(`src`: netstat／powershell／lsof／taskkill／kill, 非 Windows 之下殺為 `sh -c 'kill -9 "$1"'`, 因 `kill` 指令檔不一定存在而內建指令一定在).PowerShell 固定輸出之格式屬 wsemi 內部(標記行與 `R <埠> <遠端位址> <遠端埠> <PID>` 列), 集中於 `test/tools/portPidsFake.mjs` 一處, wsemi 改版時只改該處.`killOwnTree` 之 `opt.exec` 仍為 execSync 形(未改).
+- **變異測試不可讓夾具之假 PID 走到真實下殺**: 夾具用 15816、16000、321 等假 PID, 若變異讓 `killPortListeners` 不用注入之 `exec`(用預設 `spawnSync`), 會以真實 `taskkill` 殺本機上恰好同號之行程; 此類變異不做(變異腳本檔內註明).預設執行函數之選項改以「真實子程序案 + 透傳攔截 `cp.spawnSync`(`syncBuiltinESMExports()` 使具名匯入看到替換)」驗, 不靠假 PID.
+- 真實案之固定埠: `unit-procPrimitives` 用 19050(真實監聽)與 19051(真實子程序監聽), `unit-portOffset` 用 19030/18930; 新增真實案避開這些埠.
 - `beforeSpawn` 做「服務啟動前必須完成」之前置(api 首次 build、perm 重建資料庫與 reseed); 沿用時不呼叫.
 - 臨時設定落 `test/_tmp/`(`createTempSettings` 之 tmpDir 必填), 絕不可落 `./tmp`(AI 暫存區隨時被清, 後端讀不到設定即假失敗); `forbiddenKeys` 防覆寫測試實例固定之 port 與 log 目錄.
 - **Windows 經 shell 之 spawn 會重新解析參數**(2026-09-30 實測, cmd.exe＋.cmd 批次檔兩層, 同 npx): `|` `&` 切出另一指令(`'E2E-0(0[2-9]|1[0-5])-'` → exit 255「'1[0-5])-' 不是內部或外部命令」)、`<` `>` 轉向(`>` 把輸出寫成 cwd 下之檔案且 exit 0)、`^` 與 `"` 被吃掉、空白拆成多個參數、已定義之 `%名稱%` 展開(皆 exit 0, 靜默改變篩選); 括號、`[ ]`、`!` `,` `;` `=` `*` `?` `\`、中文原樣傳遞; Node 24 另警告 DEP0190.`runIsolatedE2e` 因此於有本地 mocha 時以 `process.execPath` 直接執行 `mocha.js`(`shell:false`), npx 退路於 Windows 遇上述字元即於執行前拋錯.先前文件稱 `(` `)` 也會被當成語法, 實測不成立, 已更正.
