@@ -70,7 +70,7 @@ let browser2 = await wpte.launchBrowser()
 | `waitUntilExist(page, label, fn, opt)` | 偵測驅動等待（C11），預設 10000ms；`fn` 為 async 函數時改逐次 `page.evaluate` 輪詢（`waitForFunction` 會把 Promise 當 truthy 立即放行） | sso 實跑、瀏覽器 |
 | `pollUntil(label, fn, { timeout, interval })` | 測試行程端之偵測驅動等待：反覆執行 `fn`（可 async、可用閉包；拋錯視為未成立）直到回 truthy，回傳該值；逾時拋錯含判斷次數與最後一次錯誤。用於瀏覽器外之非同步結果——後端週期計時器寫入資料庫（封鎖、補登記）、背景程序產檔——取代「固定等 N 秒再讀」（計時器於負載高時延遲）；頁面內條件仍用 `waitUntilExist`。預設 30000／200ms | 單元（2026-09-28 自 w-web-sso autoblock 抽出） |
 | `collectDomText` / `pageHasText` / `assertTextSpec` | 以 spec 衍生之期望文字做語意斷言（走訪 DOM 文字節點，不判可見性） | sso 實跑（tokens）、瀏覽器 |
-| 【w-component-vue】`waitColResizeOverlay` / `waitDrawerReady` | WDrawer 拖曳分隔條 opacity=1 / 抽屜 `[state]` 終態（C12） | sso 實跑、瀏覽器 |
+| 【w-component-vue】`waitColResizeOverlay` / `waitDrawerReady(page, {timeout, selector})` | WDrawer 拖曳分隔條 opacity=1 / **只認 WDrawer 根節點**之 `state` 終態（C12；預設選擇器 `[state][changedrawerwidth]`，w-component-vue 2.5.35 起 WDialog、浮層 `.WPopperFix`、WListExpandItem、WGroupTags、WGroupDragdrop 之根節點亦帶 `state`，不再影響判定；`opt.selector` 可取代預設，傳 `'[state]'` 即還原 2.5.35 前之行為；`opt` 之非預期輸入〔`selector` 非字串／空白字串／無法解析、`timeout` 非大於 0 且不超過 2147483647 之有效數字、`opt` 非一般物件〕一律視為未給、改用預設而不拋錯，`opt.debug:true` 才警告（出口 `opt.funLog` 或 `console.warn`，固定詞彙、不含傳入之值、同鍵同因每行程一次）；元件改版後以 `node test/tools/probeWDrawerDom.mjs <w-component-vue 根目錄>` 複驗，Gitea #35） | sso 實跑、瀏覽器 |
 | 【w-component-vue】`probeStuckTooltip(page, {rootSel, createError})` | 截圖前掛鉤（`captureStable` 之 `beforeShots`）：游標已移開後仍顯示之 hover 型提示框（WTooltip `mode='tooltip'`，文字不限）即拋錯，殘留畫面不凍結為標準圖；點開型浮層（`mode='popup'`：WPopup、下拉清單）不在此列。成因為點擊時游標下之節點被移除替換，而 Playwright ≤1.62 預設停用 `BoundaryEventDispatchTracksNodeRemoval`，mouseleave 未送達觸發區（w-component-vue 2.5.24 已修正 WButtonCircle 之成因，本函數為回歸守門）。以 WTooltip 內部結構辨識（`$refs.divTrigger`／`divContent`、`props.mode`、`data.valueTrans`），元件改寫時會靜默失效，升級 w-component-vue 須以真元件頁複驗 | 瀏覽器（2026-09-30 新增，收斂四專案各自手寫之同一實作） |
 | 【ag-grid】`resetAgGridScroll` / `rowBoxSel` | 截圖前水平捲動歸零 / 整列框選兩選擇器（`order` 決定捲動對象） | perm / task 實跑、瀏覽器、單元（sso 未用） |
 | 【ag-grid】`gridContentBox(gridSel, {noRowsSel, noRowsPad})` | 量測型目標：標頭 ∪ 可見資料列（空表為標頭 ∪「無資料」訊息），夾在表格框內；取代直接框 `.ag-root-wrapper`（列少時框進大片空白，SKILL §7.2 表格列）；欄位未撐滿表格寬、右側空白 ≥ 200px 且 ≥ 框寬 30% 時右緣收在最後一欄（撐滿者右側僅捲軸槽，不收）；空表之「無資料」訊息為無可見邊界之文字，外擴 `noRowsPad`（預設 `INK_PAD`=4）後再取聯集，與 `itemsUnionBox` 之 `fit`、`inkRect` 同一條文字留白規則（`noRowsPad:0` 為舊行為） | 瀏覽器（2026-09-28 新增；同日加欄寬收邊；2026-09-30 加空表訊息外擴） |
@@ -372,6 +372,14 @@ let captureStableWithBox = (page, target, opts = {}) => pkgCaptureStableWithBox(
 6. 結束後 `diffBaselineSnapshots` 須 unchanged（added / removed / changed / touched 皆空）且 `git status --porcelain -- test/pics` 為空。
 
 ## 5. 改版須知：哪些變更會動到使用端之標準圖
+
+### 行為變更（2026-11-01，Gitea #35：`waitDrawerReady` 只認 WDrawer 根節點）
+
+不影響標準圖像素與既有 API 形狀（簽名、預設逾時 10000ms、逾時不拋錯皆不變）；變更在**認哪些元素**：
+
+- 原以裸 `[state]` 取全部帶 `state` 之元素再篩 `hidden|opening|opened|hiding`；w-component-vue 2.5.35 起 WDialog、WTooltip／WPopup／WTextSelect 之浮層（`.WPopperFix`）亦帶 `state`（WListExpandItem、WGroupTags、WGroupDragdrop 之值域不重疊，不受影響），開啟中之彈窗或提示框會被誤當抽屜而等待。現改以 `[state][changedrawerwidth]` 只認 WDrawer 根節點（依據：2.5.35 實際渲染之 DOM，其他元件之根節點皆無該屬性；詳見 `src/waitDrawerReady.mjs` JSDoc）。
+- **使用端影響**：①用 w-component-vue 之 WDrawer 者無須改動；②`captureStable` 之 `settle: [waitDrawerReady]` 不再順帶等待 WDialog、浮層過場落定——截圖仍受連拍穩定兜底；要等者另寫等待或以 `opt.selector` 傳入；③不用 w-component-vue 之 WDrawer、自家元件以裸 `state` 屬性表示過場者，須傳 `{ selector: '[state]' }`（或其元素之選擇器）才會被等待，否則視為「無抽屜」立即放行；④新增選項 `opt.selector`、`opt.debug`、`opt.funLog`；`opt` 之非預期輸入依 dspec〈輸入參數之檢測機制〉K3 視為未給、改用預設而**不拋錯**（`selector` 非字串、空白字串或無法解析之選擇器 → 預設選擇器；`timeout` 非大於 0 且不超過 2147483647 之有效數字〔數字或數字字串，轉換後使用〕→ 10000；`opt` 為 `null` 或非一般物件 → 整份視為 `{}`），`opt.debug:true` 時才以 `opt.funLog`（未給則 `console.warn`）說明哪個鍵因何改用預設；逾時不拋錯之語意不變。**與 pte35 版之差異（實測，修前版本跑新測試）**：`timeout` 給數字字串（如 `'700'`）舊版等了 Playwright 預設之 30000ms（實測 30009ms）、給 `0` 永不逾時（實測卡死）、給 `-1` 於 1.2 秒內即放行，現一律改用預設 10000 或轉換後使用；`opt=null` 舊版拋 TypeError，現視為 `{}`；`selector` 非預期者舊版（pte35 完成時）拋錯，現改用預設。
+- `changedrawerwidth` 屬元件內部屬性（WDrawer.vue 之 `:changeDrawerWidth` 綁定，2022-04 起），元件改版或改寫時預設選擇器會選不到抽屜（視為無 WDrawer 而放行，靜默）；升級 w-component-vue 後以 `node test/tools/probeWDrawerDom.mjs <w-component-vue 根目錄>` 複驗（預設選擇器須只命中 1 個 `w-drawer`，否則離開碼 1）。
 
 ### Breaking changes（2026-10-30，查埠之監聽者改委由 wsemi 1.9.32）
 

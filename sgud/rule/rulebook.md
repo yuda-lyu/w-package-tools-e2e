@@ -4,7 +4,7 @@
 
 編列依據:Gitea issue #4(runBaselineCase 遇已知缺陷時保留並比對其前各步之截圖)、#5(createBaselineGate.finalize 把已知缺陷案例之未產圖當成 --names 未命中)之審計(`agent-out/run01-審計回應.md`)與修正(2026-10-20);issue #6(itemsUnionBox 不認 svg/canvas 圖形為框外內容)之審計與修正(2026-10-20,見 §7);issue #19(收集模式、有變更才改寫、埠位移;2026-10-28)見分檔 §8.API 細節見 `README.md` §2.1、§2.2 與三檔 JSDoc;取捨緣由見 `sgud/exp/experience.md`「注意事項: 產製與比對」.
 
-**分檔索引**(本檔逾 30KB,新章節起改依類型分檔):§1～§7 在本檔;§8 全量執行之共用層支援(收集模式、有變更才改寫、埠位移、審查與採用)→ `sgud/rule/rulebook_baselineRun.md`;埠之監聽者查詢與處置(`listenerPids`、`killPortListeners`;2026-10-30 e2e01)→ `sgud/rule/rulebook_port.md`.
+**分檔索引**(本檔逾 30KB,新章節起改依類型分檔):§1～§7 在本檔;§8 全量執行之共用層支援(收集模式、有變更才改寫、埠位移、審查與採用)→ `sgud/rule/rulebook_baselineRun.md`;埠之監聽者查詢與處置(`listenerPids`、`killPortListeners`;2026-10-30 e2e01)→ `sgud/rule/rulebook_port.md`;settle 掛鉤之元件辨識(`waitDrawerReady` 只認 WDrawer 根節點;2026-11-01 Gitea #35)→ `sgud/rule/rulebook_settle.md`.
 
 ## 1. 已知缺陷分流(`src/runBaselineCase.mjs`、`src/createKnownDefect.mjs`)
 

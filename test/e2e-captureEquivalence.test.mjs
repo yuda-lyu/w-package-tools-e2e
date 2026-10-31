@@ -331,7 +331,7 @@ let pkgPermBox = (page, t, o = {}) => captureStableWithBox(page, t, { ...o, clam
 //抽屜轉 opened 與分隔條顯示皆晚於初始等待(1500ms)且改變畫面, 使「漏掉 settle 掛鉤」必然截到不同畫面(見反向對照)
 let smilImg = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><circle cx="20" cy="20" r="5" fill="#09f"><animate attributeName="r" from="5" to="18" dur="0.6s" repeatCount="indefinite"/></circle></svg>')
 let PAGE = `<!doctype html><html><body style="margin:0; font-family: Arial">
-  <div state="opening" id="drawer" style="position:absolute; left:0; top:0; width:180px; height:500px; background:#eef">
+  <div state="opening" changevalue="" changedrawerwidth="" changeafloat="" id="drawer" style="position:absolute; left:0; top:0; width:180px; height:500px; background:#eef">
     <div style="padding:10px">Nav item A</div><div style="padding:10px">導航項目 B</div>
   </div>
   <div id="bar" style="position:absolute; left:180px; top:0; width:6px; height:500px; background:#339; cursor: col-resize; opacity:0"></div>

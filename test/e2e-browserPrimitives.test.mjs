@@ -94,12 +94,15 @@ describe('瀏覽器原語(無伺服器)', function() {
         await assert.rejects(waitUntilExist(page, '永不成立', async () => false, { timeout: 400 }), /waitUntilExist 超過 400ms 仍找不到「永不成立」/)
     })
 
-    it('waitDrawerReady: [state]停在opening時等待, 轉為opened後放行; 無[state]元素立即放行', async function() {
+    //WDrawer根節點之辨識屬性(w-component-vue 2.5.35真實渲染之changedrawerwidth), 見waitDrawerReady之JSDoc; 完整情境(他種元件亦帶state)見e2e-waitDrawerReady
+    let WDRAWER = 'changevalue="" changedrawerwidth="" changeafloat=""'
+
+    it('waitDrawerReady: WDrawer之[state]停在opening時等待, 轉為opened後放行; 無WDrawer元素立即放行', async function() {
         await page.setContent('<div>none</div>')
         let t0 = Date.now()
         await waitDrawerReady(page)
         assert.strict.ok(Date.now() - t0 < 1000)
-        await page.setContent('<div id="d" state="opening"></div><div state="hidden"></div><script>setTimeout(() => document.getElementById("d").setAttribute("state", "opened"), 600)</script>')
+        await page.setContent(`<div id="d" state="opening" ${WDRAWER}></div><div state="hidden" ${WDRAWER}></div><script>setTimeout(() => document.getElementById("d").setAttribute("state", "opened"), 600)</script>`)
         t0 = Date.now()
         await waitDrawerReady(page)
         let dt = Date.now() - t0
@@ -108,8 +111,10 @@ describe('瀏覽器原語(無伺服器)', function() {
     })
 
     it('waitDrawerReady: 逾時不拋錯(交由連拍穩定兜底)', async function() {
-        await page.setContent('<div state="hiding"></div>')
+        await page.setContent(`<div state="hiding" ${WDRAWER}></div>`)
+        let t0 = Date.now()
         await waitDrawerReady(page, { timeout: 300 })
+        assert.strict.ok(Date.now() - t0 >= 250, `應等到逾時才回, 實際${Date.now() - t0}ms`) //WDrawer停在hiding, 非立即放行
     })
 
     it('waitColResizeOverlay: 拖曳分隔條opacity由0轉1後放行; 無此元素立即放行; 逾時不拋錯', async function() {

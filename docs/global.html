@@ -21487,13 +21487,26 @@ await waitColResizeOverlay(page)</code></pre>
     <dt class="tag-description">Description:</dt>
     <dd class="tag-description"><ul class="dummy"><li><p>【w-component-vue】等WDrawer抽屜到達穩定態(opened或hidden)才放行</p>
 <p>讀WDrawer根節點之[state]屬性(平移transitionend決定性標記hidden/opening/opened/hiding)，所有抽屜皆為opened或hidden即放行；
-事件驅動，不受主執行緒負載影響(取代易被減速尾段騙而截到半途之座標取樣)。頁面無WDrawer時立即放行；逾時(預設10000ms)不拋錯，交由呼叫端之連拍穩定兜底</p></li></ul></dd>
+事件驅動，不受主執行緒負載影響(取代易被減速尾段騙而截到半途之座標取樣)。頁面無WDrawer時立即放行；逾時(預設10000ms)不拋錯，交由呼叫端之連拍穩定兜底</p>
+<p>只認WDrawer根節點，不認其他帶state之元件：w-component-vue 2.5.35起WDialog(根節點)、WTooltip／WPopup／WTextSelect等之浮層(.WPopperFix)、
+WGroupDragdrop、WGroupTags、WListExpandItem(根節點)亦帶state屬性，其中WDialog與浮層之值域(hidden／opening／opened)與WDrawer重疊，
+若以裸[state]選取會等到它們，或把無抽屜之頁面誤判為有抽屜。
+辨識依據(w-component-vue 2.5.35實際渲染之DOM，探測於2026-11-01)：WDrawer根節點無固定class，
+帶有其獨有之changedrawerwidth屬性(WDrawer.vue:5之:changeDrawerWidth綁定，2022-04起；上列其他元件之根節點皆無，WDialog為changeparam、WListExpandItem為changeactive)，
+故預設選擇器為[state][changedrawerwidth]；該屬性屬元件內部實作，元件改版致其消失時預設選擇器會選不到抽屜(此時視為無WDrawer而立即放行)，可改傳opt.selector</p>
+<p>opt為選填，給了就檢測，非預期之輸入一律視為未給、改用預設，不拋錯(dspec〈輸入參數之檢測機制〉K3)：
+opt本身為undefined、null或非一般物件(陣列、類別實例、Date、數字、字串等)時整份視為{}；各鍵為undefined或null視為未給；
+opt.timeout須為正數或正數字串(有效數字，去頭尾空白)且不超過2147483647，轉換後才使用，否則用10000(0在Playwright代表不逾時，會永遠等下去，故不收)；
+opt.selector須為非空白字串且可被瀏覽器解析為CSS選擇器，否則用預設選擇器；
+未宣告之鍵忽略(本函數不轉傳opt)。
+opt.debug為true時(非布林視為false)另輸出警告，說明哪個鍵因非預期已改用預設；警告出口為opt.funLog(函數，以(msg, { fn, reason, key })呼叫)，未給則console.warn；
+警告為固定詞彙，只含函數名、鍵名、種類描述與所採之預設，不含傳入之值與頁面內容；同一鍵、同一原因每個行程只警告一次；出口拋錯一律忽略</p></li></ul></dd>
     
 
     
     <dt class="tag-source">Source:</dt>
     <dd class="tag-source"><ul class="dummy"><li>
-        <a href="waitDrawerReady.mjs.html">waitDrawerReady.mjs</a>, <a href="waitDrawerReady.mjs.html#line18">line 18</a>
+        <a href="waitDrawerReady.mjs.html">waitDrawerReady.mjs</a>, <a href="waitDrawerReady.mjs.html#line47">line 47</a>
     </li></ul></dd>
     
 
@@ -21538,11 +21551,15 @@ await waitColResizeOverlay(page)</code></pre>
 
 
 
-    <h5 class="h5-examples">Example</h5>
+    <h5 class="h5-examples">Examples</h5>
     
     <pre class="prettyprint"><code>import waitDrawerReady from 'w-package-tools-e2e/src/waitDrawerReady.mjs'
 
 await waitDrawerReady(page)</code></pre>
+
+    <pre class="prettyprint"><code>import waitDrawerReady from 'w-package-tools-e2e/src/waitDrawerReady.mjs'
+
+await waitDrawerReady(page, { selector: '#myDrawer[state]', timeout: 5000 })</code></pre>
 
 
 
@@ -21682,6 +21699,9 @@ await waitDrawerReady(page)</code></pre>
             
                 
 <span class="param-type">Number</span>
+|
+
+<span class="param-type">String</span>
 
 
 
@@ -21708,7 +21728,129 @@ await waitDrawerReady(page)</code></pre>
                 </td>
             
 
-            <td class="description last"><p>輸入逾時毫秒數，預設10000</p></td>
+            <td class="description last"><p>輸入逾時毫秒數，須為大於0且不超過2147483647之有效數字(數字或數字字串)，非預期者改用預設，預設10000</p></td>
+        </tr>
+
+    
+
+        <tr>
+            
+                <td class="name"><code>selector</code></td>
+            
+
+            <td class="type">
+            
+                
+<span class="param-type">String</span>
+
+
+
+            
+            </td>
+
+            
+                <td class="attributes">
+                
+                    &lt;optional><br>
+                
+
+                
+
+                
+                </td>
+            
+
+            
+                <td class="default">
+                
+                    <code>'[state][changedrawerwidth]'</code>
+                
+                </td>
+            
+
+            <td class="description last"><p>輸入抽屜根節點之CSS選擇器字串，預設'[state][changedrawerwidth]'。
+用於預設選擇器失效或需改認他種元件時(例如傳'[state]'即為w-component-vue 2.5.35前之行為)，會取代預設而非疊加；
+命中元素之state仍須為hidden／opening／opened／hiding才計入；非字串、空白字串、無法解析之選擇器改用預設</p></td>
+        </tr>
+
+    
+
+        <tr>
+            
+                <td class="name"><code>debug</code></td>
+            
+
+            <td class="type">
+            
+                
+<span class="param-type">Boolean</span>
+
+
+
+            
+            </td>
+
+            
+                <td class="attributes">
+                
+                    &lt;optional><br>
+                
+
+                
+
+                
+                </td>
+            
+
+            
+                <td class="default">
+                
+                    <code>false</code>
+                
+                </td>
+            
+
+            <td class="description last"><p>輸入是否於opt出現非預期輸入時輸出警告布林值，非布林視為false，預設false</p></td>
+        </tr>
+
+    
+
+        <tr>
+            
+                <td class="name"><code>funLog</code></td>
+            
+
+            <td class="type">
+            
+                
+<span class="param-type">function</span>
+
+
+
+            
+            </td>
+
+            
+                <td class="attributes">
+                
+                    &lt;optional><br>
+                
+
+                
+
+                
+                </td>
+            
+
+            
+                <td class="default">
+                
+                    <code>null</code>
+                
+                </td>
+            
+
+            <td class="description last"><p>輸入警告出口函數，以(msg, { fn, reason, key })呼叫，未給則用console.warn，預設null</p></td>
         </tr>
 
     
@@ -23455,7 +23597,7 @@ console.log(r) //{ written: false, reason: 'same', numDiff: 0 }</code></pre>
 <br class="clear">
 
 <footer>
-    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 4.0.5</a> on Sat Oct 31 2026 16:44:16 GMT+0800 (台北標準時間) using the <a href="https://github.com/clenemt/docdash">docdash</a> theme.
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 4.0.5</a> on Sun Nov 01 2026 02:51:25 GMT+0800 (台北標準時間) using the <a href="https://github.com/clenemt/docdash">docdash</a> theme.
 </footer>
 
 <script>prettyPrint();</script>
