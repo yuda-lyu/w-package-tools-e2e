@@ -10,7 +10,7 @@ import runShardedE2e from '../src/runShardedE2e.mjs'
 
 //本檔相對 cwd 之路徑(用法訊息用; 模組自身位置, 全域 §7.1 場景 B)
 let self = path.relative(process.cwd(), fileURLToPath(import.meta.url)).replace(/\\/g, '/')
-let usage = `usage: node ${self} [--root <dir>] [--config <path>] [--plan] [--ports <埠,...>] [--instances <N>] [--official-only <檔,...>] [--together <檔,檔;檔,檔>] [--durations <JSON>] [--exclude <路徑,...>] [--port-step <N>] [--mem-per-instance <GB>] [--work-dir <dir>] [--out-dir <dir>] [--mocha-args "<以空白分隔之參數>"] [--group-timeout-min <分>] [--progress-min <分>] [--tree-sample-ms <毫秒>] [--update-durations] [--debug]`
+let usage = `usage: node ${self} [--root <dir>] [--config <path>] [--plan] [--ports <埠,...>] [--instances <N>] [--official-only <檔,...>] [--together <檔,檔;檔,檔>] [--durations <JSON>] [--exclude <路徑,...>] [--port-step <N>] [--port-tries <N>] [--port-wait-min <分>] [--mem-per-instance <GB>] [--work-dir <dir>] [--out-dir <dir>] [--mocha-args "<以空白分隔之參數>"] [--group-timeout-min <分>] [--progress-min <分>] [--tree-sample-ms <毫秒>] [--update-durations] [--debug]`
 
 let fail = (msg) => {
     console.error(`${msg}\n${usage}`)
@@ -77,6 +77,12 @@ for (let i = 0; i < argv.length; i++) {
     }
     else if (a === '--port-step') {
         o.portStep = num(a, need(++i), reInt)
+    }
+    else if (a === '--port-tries') {
+        o.portTries = num(a, need(++i), reInt)
+    }
+    else if (a === '--port-wait-min') {
+        o.portWaitMs = Math.round(num(a, need(++i), rePos) * 60000)
     }
     else if (a === '--mem-per-instance') {
         o.memPerInstanceGb = num(a, need(++i), rePos)

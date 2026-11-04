@@ -1,11 +1,11 @@
 import fs from 'fs'
 import path from 'path'
 import assert from 'assert'
+import { fileURLToPath } from 'url'
 import {
     findProcessDescendants,
     sampleShardKnown,
     listProcessTable,
-    readProcessEvidence,
     reapShardProcesses
 } from '../src/runShardedE2e.mjs'
 
@@ -15,8 +15,6 @@ import {
 
 
 let T0 = Date.parse('2026-11-04T14:00:00.000Z')
-let MARK = 'E2E_SHARD_RUN=run-1'
-let DIRS = ['C:\\proj\\tmp\\e2e-shards\\']
 //本行程與祖先鏈: 7000 ← 6000 ← 5000
 let SELF = [
     { pid: 5000, ppid: 1, startMs: T0 - 300000, image: 'explorer.exe' },
@@ -36,10 +34,10 @@ let VICTIMS = [
 ]
 
 
-//注入之 spawnSync 形執行函數: 查表、讀證據、下殺皆只記錄, 不碰真實行程; 未預期之 src 拋錯(不靜默略過)
+//注入之 spawnSync 形執行函數: 查表、下殺皆只記錄, 不碰真實行程; 未預期之 src 拋錯(不靜默略過; 不得再有讀其他行程環境區塊之呼叫)
 function fakeExec(o = {}) {
-    let { table = [], evidence = {}, tableFail = false, evidenceFail = false, killFail = false, killResult = 'killed' } = o
-    let calls = { table: 0, evidence: [], kill: [] }
+    let { table = [], tableFail = false, killFail = false, killResult = 'killed' } = o
+    let calls = { table: 0, kill: [] }
     let exec = (prog, args, opt) => {
         if (opt.src === 'table') {
             calls.table++
@@ -47,19 +45,6 @@ function fakeExec(o = {}) {
                 return { status: null, stdout: '', error: new Error('fake table fail') }
             }
             return { status: 0, stdout: table.map((r) => `${r.pid} ${r.ppid} ${new Date(r.startMs).toISOString()} ${r.image || 'x.exe'}`).join('\r\n') }
-        }
-        if (opt.src === 'evidence') {
-            calls.evidence.push(opt.targets)
-            if (evidenceFail) {
-                return { status: 1, stdout: '' }
-            }
-            return {
-                status: 0,
-                stdout: opt.targets.map((pid) => {
-                    let e = evidence[pid]
-                    return e === 'err' ? `${pid} err` : `${pid} env=${e && e.env ? 1 : 0} cwd=${e && e.cwd ? 1 : 0}`
-                }).join('\r\n')
-            }
         }
         if (opt.src === 'kill') {
             calls.kill.push({ prog, args, targets: opt.targets })
@@ -168,7 +153,7 @@ describe('reapShardProcesses', function() {
 
     let reap = (exec, o) => {
         let logs = []
-        let r = reapShardProcesses({ exec, marker: MARK, dirs: DIRS, since: T0, phase: 'teardown', log: (s) => logs.push(s), ...SELF_OPT, ...o })
+        let r = reapShardProcesses({ exec, since: T0, phase: 'teardown', log: (s) => logs.push(s), ...SELF_OPT, ...o })
         return { ...r, logs }
     }
 
@@ -178,8 +163,7 @@ describe('reapShardProcesses', function() {
         let r = reap(exec, { known: [{ pid: DEAD_P, startMs: T0 + 1000 }] })
         assert.strict.deepEqual(killedPids(calls), [])
         assert.strict.deepEqual(r.kills, [])
-        //nohup 為父已結束之候選, 查證據而無證據; 其下有存活之父, 不是候選
-        assert.strict.deepEqual(calls.evidence, [[52000]])
+        //nohup 為父已結束之候選, 無從辨識而只記錄; 其下有存活之父, 不是候選
         assert.strict.deepEqual(r.skipped.map((v) => [v.pid, v.reason]), [[52000, 'no-evidence']])
     })
 
@@ -189,9 +173,9 @@ describe('reapShardProcesses', function() {
         assert.strict.deepEqual(killedPids(calls), [])
         assert.strict.deepEqual(r.kills, [])
         let { exec: e2, calls: c2 } = fakeExec({ table: [...SELF, ...VICTIMS] })
-        reap(e2, { known: [{ pid: DEAD_P, startMs: T0 }], since: undefined })
+        let r2 = reap(e2, { known: [{ pid: DEAD_P, startMs: T0 }], since: undefined })
         assert.strict.deepEqual(killedPids(c2), [])
-        assert.strict.deepEqual(c2.evidence, [], '沒有 since 不查孤兒')
+        assert.strict.deepEqual(r2.skipped, [], '沒有 since 不列孤兒')
     })
 
     //需求: 存活行程 PID 被回收且起始時間差在 60 秒內, 不得下殺
@@ -240,9 +224,9 @@ describe('reapShardProcesses', function() {
         assert.strict.ok(r.logs.some((l) => /PID 7000 .*不下殺/.test(l)), r.logs.join('\n'))
     })
 
-    it('[S-V6b] 本行程帶標記或占埠: 仍不下殺; 祖先鏈於假關係處停止(起始較晚之「父」不是祖先)', function() {
+    it('[S-V6b] 本行程占埠: 仍不下殺; 祖先鏈於假關係處停止(起始較晚之「父」不是祖先)', function() {
         let table = [...SELF, { pid: 9000, ppid: 7000, startMs: T0 + 1, image: 'child.exe' }]
-        let { exec, calls } = fakeExec({ table, evidence: { 7000: { env: true, cwd: true }, 6000: { env: true, cwd: true } } })
+        let { exec, calls } = fakeExec({ table })
         let r = reap(exec, { known: [], extra: [{ pid: 7000, port: 19200 }, { pid: 6000, port: 19300 }] })
         assert.strict.deepEqual(killedPids(calls), [])
         assert.strict.deepEqual(r.skipped.map((v) => [v.pid, v.reason, v.port]), [[7000, 'protected', 19200], [6000, 'protected', 19300]])
@@ -254,32 +238,26 @@ describe('reapShardProcesses', function() {
     })
 
     //需求: 取不到行程表時不下殺
-    it('[S-V8] 取不到行程表: 不下殺、不讀證據, 記警告', function() {
+    it('[S-V8] 取不到行程表: 不下殺, 記警告', function() {
         let { exec, calls } = fakeExec({ tableFail: true })
         let r = reap(exec, { known: [{ pid: 9000, startMs: T0 }], extra: [{ pid: 9000, port: 19200 }] })
         assert.strict.equal(r.tableOk, false)
         assert.strict.deepEqual(calls.kill, [])
-        assert.strict.deepEqual(calls.evidence, [])
         assert.strict.ok(r.logs.some((l) => /警告: 取行程表失敗.*不下殺/.test(l)), r.logs.join('\n'))
     })
 
-    //孤兒之取捨: 未曾被取樣者須有正面證據
-    it('[S-V9] 未曾被取樣之孤兒: 環境變數帶本次標記者下殺(依據 env-marker), 其存活之子沿鏈下殺', function() {
+    //孤兒之取捨: 未曾被取樣者無從辨識(不讀其他行程之環境區塊與工作目錄), 一律不殺
+    it('[S-V9] 未曾被取樣之孤兒: 不下殺(其存活之子亦不下殺), 記入 skipped 與警告', function() {
         let table = [...SELF, { pid: 9100, ppid: DEAD_P, startMs: T0 + 5, image: 'node.exe' }, { pid: 9104, ppid: 9100, startMs: T0 + 6, image: 'chrome.exe' }]
-        let { exec, calls } = fakeExec({ table, evidence: { 9100: { env: true, cwd: false } } })
+        let { exec, calls } = fakeExec({ table })
         let r = reap(exec, { known: [] })
-        assert.strict.deepEqual(killedPids(calls), [9104, 9100])
-        assert.strict.deepEqual(r.kills.map((v) => [v.pid, v.basis]), [[9104, 'chain:9100'], [9100, 'env-marker']])
+        assert.strict.deepEqual(killedPids(calls), [])
+        assert.strict.deepEqual(r.kills, [])
+        assert.strict.deepEqual(r.skipped.map((v) => [v.pid, v.reason]), [[9100, 'no-evidence']])
+        assert.strict.ok(r.logs.some((l) => /無身分證據、未下殺之行程 1 個.*未曾被取樣之孤兒無從辨識/.test(l)), r.logs.join('\n'))
     })
 
-    it('[S-V9b] 未曾被取樣之孤兒: 工作目錄位於實例內者下殺(依據 instance-cwd); 兩者皆有時記 env-marker', function() {
-        let table = [...SELF, { pid: 9200, ppid: DEAD_P, startMs: T0 + 5, image: 'node.exe' }, { pid: 9204, ppid: DEAD_P, startMs: T0 + 6, image: 'node.exe' }]
-        let { exec } = fakeExec({ table, evidence: { 9200: { env: false, cwd: true }, 9204: { env: true, cwd: true } } })
-        let r = reap(exec, { known: [] })
-        assert.strict.deepEqual(r.kills.map((v) => [v.pid, v.basis]).sort(), [[9200, 'instance-cwd'], [9204, 'env-marker']])
-    })
-
-    it('[S-V9c] 孤兒之候選限制: 起始早於 since、父仍存活者不查證據; 父之 PID 被回收(父起始較晚)者仍是候選', function() {
+    it('[S-V9c] 孤兒之候選限制: 起始早於 since、父仍存活者不列; 父之 PID 被回收(父起始較晚)者仍是候選', function() {
         let table = [
             ...SELF,
             { pid: 9300, ppid: DEAD_P, startMs: T0 - 1, image: 'early.exe' },
@@ -288,14 +266,14 @@ describe('reapShardProcesses', function() {
             { pid: 9320, ppid: 5000, startMs: T0 + 9, image: 'newOwner.exe' },
         ]
         let { exec, calls } = fakeExec({ table })
-        reap(exec, { known: [] })
-        assert.strict.deepEqual(calls.evidence, [[9308]])
+        let r = reap(exec, { known: [] })
+        assert.strict.deepEqual(r.skipped.map((v) => v.pid), [9308])
         assert.strict.deepEqual(killedPids(calls), [])
     })
 
-    it('[S-V10] 無證據之孤兒與監聽者: 不下殺、記警告與 killSkipped; 讀不到(err)視同無證據', function() {
+    it('[S-V10] 身分未確認之孤兒與監聽者: 不下殺、記警告與 killSkipped', function() {
         let table = [...SELF, { pid: 9400, ppid: DEAD_P, startMs: T0 + 5, image: 'a.exe' }, { pid: 9404, ppid: 5000, startMs: T0 + 6, image: 'listener.exe' }, { pid: 9408, ppid: DEAD_P, startMs: T0 + 7, image: 'b.exe' }]
-        let { exec, calls } = fakeExec({ table, evidence: { 9408: 'err' } })
+        let { exec, calls } = fakeExec({ table })
         let r = reap(exec, { known: [], extra: [{ pid: 9404, port: 19200 }] })
         assert.strict.deepEqual(killedPids(calls), [])
         assert.strict.deepEqual(r.skipped.map((v) => [v.pid, v.reason]).sort(), [[9400, 'no-evidence'], [9404, 'no-evidence'], [9408, 'no-evidence']])
@@ -304,21 +282,26 @@ describe('reapShardProcesses', function() {
         assert.strict.ok(r.logs.some((l) => /無身分證據、未下殺之行程 2 個/.test(l)), r.logs.join('\n'))
     })
 
-    it('[S-V10b] 整批讀不到證據: 不下殺、記警告, reason 為 evidence-unreadable; 已確認身分者照殺', function() {
-        let table = [...SELF, { pid: 9400, ppid: DEAD_P, startMs: T0 + 5, image: 'a.exe' }, { pid: 9500, ppid: DEAD_P, startMs: T0 + 8, image: 'known.exe' }]
-        let { exec, calls } = fakeExec({ table, evidenceFail: true })
-        let r = reap(exec, { known: [{ pid: 9500, startMs: T0 + 8 }] })
-        assert.strict.deepEqual(killedPids(calls), [9500])
-        assert.strict.deepEqual(r.skipped.map((v) => [v.pid, v.reason]), [[9400, 'evidence-unreadable']])
-        assert.strict.ok(r.logs.some((l) => /讀取身分證據失敗.*不下殺/.test(l)), r.logs.join('\n'))
+    it('[S-V10c] 監聽者: 身分未確認者不論父是否存活皆不下殺; 已確認者只下殺一次、不重複列', function() {
+        let table = [...SELF, { pid: 9604, ppid: 5000, startMs: T0 + 6, image: 'listener.exe' }, { pid: 9700, ppid: DEAD_P, startMs: T0 + 6, image: 'known.exe' }]
+        let { exec, calls } = fakeExec({ table })
+        let r = reap(exec, { known: [{ pid: 9700, startMs: T0 + 6 }], extra: [{ pid: 9604, port: 19200 }, { pid: 9700, port: 19300 }, { pid: 111111, port: 19400 }] })
+        assert.strict.deepEqual(killedPids(calls), [9700])
+        assert.strict.deepEqual(r.kills.map((v) => [v.pid, v.basis]), [[9700, 'identity']])
+        assert.strict.deepEqual(r.skipped.map((v) => [v.pid, v.reason, v.port]), [[9604, 'no-evidence', 19200]])
     })
 
-    it('[S-V10c] 監聽者帶本次標記: 不論父是否存活皆下殺; 已在清單內不重複查', function() {
-        let table = [...SELF, { pid: 9604, ppid: 5000, startMs: T0 + 6, image: 'listener.exe' }, { pid: 9700, ppid: DEAD_P, startMs: T0 + 6, image: 'known.exe' }]
-        let { exec, calls } = fakeExec({ table, evidence: { 9604: { env: true, cwd: false } } })
-        let r = reap(exec, { known: [{ pid: 9700, startMs: T0 + 6 }], extra: [{ pid: 9604, port: 19200 }, { pid: 9700, port: 19300 }, { pid: 111111, port: 19400 }] })
-        assert.strict.deepEqual(calls.evidence, [[9604]])
-        assert.strict.deepEqual(r.kills.map((v) => [v.pid, v.basis]).sort(), [[9604, 'env-marker'], [9700, 'identity']])
+    //pe309: 只殺指定之監聽者(restart、殘留清除); 其餘身分已確認者不動
+    it('[S-V19] only: 身分已確認者中只殺所列; 所列而身分未確認者不殺; 空陣列不殺任何行程', function() {
+        let table = [...SELF, { pid: 9800, ppid: DEAD_P, startMs: T0 + 6, image: 'back.exe' }, { pid: 9804, ppid: 9800, startMs: T0 + 7, image: 'backChild.exe' }, { pid: 9808, ppid: DEAD_P, startMs: T0 + 8, image: 'front.exe' }, { pid: 9812, ppid: 5000, startMs: T0 + 9, image: 'other.exe' }]
+        let known = [{ pid: 9800, startMs: T0 + 6 }, { pid: 9808, startMs: T0 + 8 }]
+        let a = fakeExec({ table })
+        let ra = reap(a.exec, { known, only: [9804, 9812], since: undefined })
+        assert.strict.deepEqual(killedPids(a.calls), [9804], '沿鏈走到之 9804 可殺; 9812 身分未確認; 9800、9808 未列')
+        assert.strict.deepEqual(ra.kills.map((v) => [v.pid, v.basis]), [[9804, 'chain:9800']])
+        let b = fakeExec({ table })
+        reap(b.exec, { known, only: [], since: undefined })
+        assert.strict.deepEqual(killedPids(b.calls), [])
     })
 
     //需求: 每次下殺都留紀錄(PID、映像名、起始時間、判定依據)
@@ -381,37 +364,28 @@ describe('reapShardProcesses', function() {
         assert.strict.deepEqual(k.map((c) => [c[0], c[2]]), [['sh', ['-c', 'kill -9 "$1"', 'sh', '9004']], ['sh', ['-c', 'kill -9 "$1"', 'sh', '9000']]])
     })
 
-    it('[S-V14c] 非 Windows: 由 init 收養(ppid=1)者視為孤兒候選, 帶標記才下殺; 無標記者不下殺', function() {
-        let fdProc = path.resolve('test/_tmp/shardProcIdentityPosix')
-        fs.mkdirSync(path.join(fdProc, '9100'), { recursive: true })
-        fs.mkdirSync(path.join(fdProc, '9104'), { recursive: true })
-        fs.writeFileSync(path.join(fdProc, '9100', 'environ'), `A=1\0${MARK}\0`)
-        fs.writeFileSync(path.join(fdProc, '9104', 'environ'), 'A=1\0')
-        try {
-            let t = Date.parse('Wed Nov  4 22:00:10 2026')
-            let calls = []
-            let exec = (prog, args, o) => {
-                calls.push([o.src, args])
-                if (o.src === 'table') {
-                    return {
-                        status: 0,
-                        stdout: [
-                            '  1     0 Wed Nov  4 21:00:00 2026 init',
-                            '  7000  1 Wed Nov  4 21:30:00 2026 node',
-                            '  9100  1 Wed Nov  4 22:00:10 2026 orphanMarked',
-                            '  9104  1 Wed Nov  4 22:00:11 2026 orphanOther',
-                        ].join('\n'),
-                    }
+    it('[S-V14c] 非 Windows: 由 init 收養(ppid=1)者視為孤兒候選, 只記錄不下殺; 不讀 /proc', function() {
+        let t = Date.parse('Wed Nov  4 22:00:10 2026')
+        let calls = []
+        let exec = (prog, args, o) => {
+            calls.push([o.src, args])
+            if (o.src === 'table') {
+                return {
+                    status: 0,
+                    stdout: [
+                        '  1     0 Wed Nov  4 21:00:00 2026 init',
+                        '  7000  1 Wed Nov  4 21:30:00 2026 node',
+                        '  9100  1 Wed Nov  4 22:00:10 2026 orphanA',
+                        '  9104  1 Wed Nov  4 22:00:11 2026 orphanB',
+                    ].join('\n'),
                 }
-                return { status: 0, stdout: '' }
             }
-            let r = reapShardProcesses({ exec, known: [], marker: MARK, dirs: [], since: t, platform: 'linux', procRoot: fdProc, selfPid: 7000, parentPid: 1, phase: 'teardown' })
-            assert.strict.deepEqual(r.kills.map((v) => [v.pid, v.basis]), [[9100, 'env-marker']])
-            assert.strict.deepEqual(r.skipped.map((v) => [v.pid, v.reason]), [[9104, 'no-evidence']])
+            return { status: 0, stdout: '' }
         }
-        finally {
-            fs.rmSync(fdProc, { recursive: true, force: true })
-        }
+        let r = reapShardProcesses({ exec, known: [], since: t, platform: 'linux', selfPid: 7000, parentPid: 1, phase: 'teardown' })
+        assert.strict.deepEqual(r.kills, [])
+        assert.strict.deepEqual(r.skipped.map((v) => [v.pid, v.reason]), [[9100, 'no-evidence'], [9104, 'no-evidence']])
+        assert.strict.deepEqual(calls.map((c) => c[0]), ['table'])
     })
 
     it('[S-V15] 不呼叫任何注入以外之執行(注入即全部走注入, 不碰真實行程)', function() {
@@ -458,59 +432,31 @@ describe('listProcessTable', function() {
 })
 
 
-describe('readProcessEvidence', function() {
+//pe309: 不讀其他行程之環境區塊與工作目錄(可能碰到金鑰, 又依賴未公開之 PEB 偏移)
+describe('不讀其他行程之環境區塊', function() {
 
-    let fdProc = path.resolve('test/_tmp/shardProcIdentity/proc')
-    let fdInst = path.resolve('test/_tmp/shardProcIdentity/inst')
-    let fdOther = path.resolve('test/_tmp/shardProcIdentity/other')
-
-    it('[S-V17] Windows: 依標記與目錄查, 回傳只含是否相符; err 列不入結果; 整批失敗回 null; 腳本不輸出內容', function() {
-        let got = null
-        let exec = (prog, args, o) => {
-            got = { prog, args, o }
-            return { status: 0, stdout: '10 env=1 cwd=0\r\n11 env=0 cwd=1\r\n12 err\r\n' }
-        }
-        let m = readProcessEvidence([10, 11, 12], { marker: MARK, dirs: DIRS, platform: 'win32', exec })
-        assert.strict.deepEqual([...m.entries()], [[10, { env: true, cwd: false }], [11, { env: false, cwd: true }]])
-        assert.strict.equal(got.o.src, 'evidence')
-        assert.strict.deepEqual(got.o.targets, [10, 11, 12])
-        let script = decodePs(got.args)
-        assert.strict.ok(script.includes(Buffer.from(MARK).toString('base64')), '標記以 base64 傳入')
-        assert.strict.ok(script.includes(Buffer.from(DIRS[0]).toString('base64')), '目錄以 base64 傳入')
-        //PEB 只讀比對, 輸出只有 env=/cwd=
-        assert.strict.ok(/return "env=" \+ \(env \? "1" : "0"\) \+ " cwd=" \+ \(cwd \? "1" : "0"\)/.test(script), script)
-        assert.strict.equal(readProcessEvidence([10], { marker: MARK, dirs: DIRS, platform: 'win32', exec: () => ({ status: 1, stdout: '' }) }), null)
-        assert.strict.equal(readProcessEvidence([10], {
-            marker: MARK,
-            dirs: DIRS,
-            platform: 'win32',
-            exec: () => {
-                throw new Error('x')
+    it('[S-V17] src 與 tools 內沒有讀環境區塊、工作目錄之程式; 下殺依據只留 identity、chain、own-child-handle', function() {
+        let fdPkg = fileURLToPath(new URL('..', import.meta.url))
+        let files = [
+            ...fs.readdirSync(path.join(fdPkg, 'src')).map((f) => path.join(fdPkg, 'src', f)),
+            ...fs.readdirSync(path.join(fdPkg, 'tools')).map((f) => path.join(fdPkg, 'tools', f)),
+        ].filter((f) => /\.(mjs|cjs)$/.test(f))
+        for (let f of files) {
+            let s = fs.readFileSync(f, 'utf8')
+            for (let bad of ['ReadProcessMemory', 'NtQueryInformationProcess', 'Add-Type', '/environ', 'readProcessEvidence', 'env-marker', 'instance-cwd', 'E2E_SHARD_RUN']) {
+                assert.strict.equal(s.includes(bad), false, `${f} 不得含 ${bad}`)
             }
-        }), null)
+        }
     })
 
-    it('[S-V17b] 非 Windows: 讀 /proc 之 environ 與 cwd 連結(以夾具目錄代); 無該目錄之平台回 null', function() {
-        fs.rmSync(path.join(fdProc, '20', 'cwd'), { force: true, recursive: false })
-        for (let d of [fdInst, fdOther, path.join(fdProc, '20'), path.join(fdProc, '21'), path.join(fdProc, '22')]) {
-            fs.mkdirSync(d, { recursive: true })
-        }
-        fs.writeFileSync(path.join(fdProc, '20', 'environ'), `A=1\0${MARK}\0B=2\0`)
-        fs.writeFileSync(path.join(fdProc, '21', 'environ'), `A=1\0${MARK}x\0B=2\0`) //前綴相同不算
-        fs.symlinkSync(fdInst, path.join(fdProc, '21', 'cwd'), 'junction')
-        fs.symlinkSync(fdOther, path.join(fdProc, '20', 'cwd'), 'junction')
-        try {
-            let m = readProcessEvidence([20, 21, 22], { marker: MARK, dirs: [`${fdInst}${path.sep}`], platform: 'linux', procRoot: fdProc })
-            assert.strict.deepEqual(m.get(20), { env: true, cwd: false })
-            assert.strict.deepEqual(m.get(21), { env: false, cwd: true })
-            assert.strict.deepEqual(m.get(22), { env: false, cwd: false }, '讀不到視同無證據')
-            assert.strict.equal(readProcessEvidence([20], { marker: MARK, dirs: [], platform: 'linux', procRoot: path.join(fdProc, 'none') }), null)
-        }
-        finally {
-            fs.unlinkSync(path.join(fdProc, '21', 'cwd'))
-            fs.unlinkSync(path.join(fdProc, '20', 'cwd'))
-            fs.rmSync(path.resolve('test/_tmp/shardProcIdentity'), { recursive: true, force: true })
-        }
+    it('[S-V17b] 舊匯出已移除; 孤兒路徑之執行只有查表', function() {
+        return import('../src/runShardedE2e.mjs').then((m) => {
+            assert.strict.equal(m.readProcessEvidence, undefined)
+            let { exec, calls } = fakeExec({ table: [...SELF, ...VICTIMS] })
+            reapShardProcesses({ exec, since: T0, known: [], phase: 't', ...SELF_OPT })
+            assert.strict.equal(calls.table, 1)
+            assert.strict.deepEqual(calls.kill, [])
+        })
     })
 
 })

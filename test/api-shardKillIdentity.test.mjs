@@ -31,10 +31,10 @@ function realRows() {
 }
 
 
-//疊加執行函數: extra(rows) 回傳要加入之夾具列; 證據一律「無」(除非 evidence 指定); 下殺只記錄; 其餘真實執行
+//疊加執行函數: extra(rows) 回傳要加入之夾具列; 下殺只記錄; 其餘真實執行
 function overlayExec(o = {}) {
-    let { extra = () => [], tableFail = () => false, evidence = {} } = o
-    let rec = { kills: [], tableCalls: 0, lastRows: [], evidenceTargets: [] }
+    let { extra = () => [], tableFail = () => false } = o
+    let rec = { kills: [], tableCalls: 0, lastRows: [] }
     let exec = (prog, args, opt) => {
         if (opt.src === 'table') {
             rec.tableCalls++
@@ -45,10 +45,6 @@ function overlayExec(o = {}) {
             rows = [...rows, ...extra(rows)]
             rec.lastRows = rows
             return { status: 0, stdout: rows.map((r) => `${r.pid} ${r.ppid} ${new Date(r.startMs).toISOString()} ${r.image}`).join('\r\n') }
-        }
-        if (opt.src === 'evidence') {
-            rec.evidenceTargets.push(...opt.targets)
-            return { status: 0, stdout: opt.targets.map((pid) => `${pid} env=${evidence[pid] ? 1 : 0} cwd=0`).join('\r\n') }
         }
         if (opt.src === 'kill') {
             rec.kills.push(...opt.targets)
@@ -92,7 +88,7 @@ function runProj(fx, over = {}) {
 
 
 let waitGateBody = `
-        fs.writeFileSync(process.env.KI_ENV, String(process.env.E2E_SHARD_RUN || ''))
+        fs.writeFileSync(process.env.KI_ENV, String(process.env.E2E_PORT_HOLD || ''))
         let t0 = Date.now()
         while (Date.now() - t0 < 60000 && !fs.existsSync(process.env.KI_GATE)) {
             await new Promise((resolve) => setTimeout(resolve, 50))
@@ -172,11 +168,14 @@ describe('runShardedE2e 之下殺判定(注入行程表與下殺)', function() {
 
     before(function() {
         safeRemove(fdRoot)
+        //埠預約之登錄目錄改到夾具內, 不碰使用者之登錄目錄
+        process.env.E2E_PORT_REG_DIR = path.join(fdRoot, 'reg')
     })
 
     after(function() {
         delete process.env.KI_GATE
         delete process.env.KI_ENV
+        delete process.env.E2E_PORT_REG_DIR
         safeRemove(fdRoot)
         assert.strict.ok(fs.existsSync(path.join(realMocha, 'package.json')), '本套件真實 mocha 仍在')
     })
@@ -256,8 +255,8 @@ describe('runShardedE2e 之下殺判定(注入行程表與下殺)', function() {
         assert.strict.equal(r.exitCode, 0, logs.join('\n'))
     })
 
-    //需求: 自行以 Date.now() 記錄之根改為取得其真實起始時間; 環境變數標記傳給子行程
-    it('[S-W3] 根之紀錄為行程表之真實起始時間; 鎖檔 procCreateMs 為本行程真實起始時間; mocha 帶本次標記', async function() {
+    //需求: 自行以 Date.now() 記錄之根改為取得其真實起始時間; 埠保留之識別碼傳給子行程(使用端沿用, 不再換埠)
+    it('[S-W3] 根之紀錄為行程表之真實起始時間; 鎖檔 procCreateMs 為本行程真實起始時間; mocha 帶埠保留識別碼; 鎖檔無 runId', async function() {
         let fx = mkProj(waitGateBody)
         let { exec, rec } = overlayExec()
         let { pm } = runProj(fx, { exec, treeSampleMs: 300 })
@@ -271,9 +270,9 @@ describe('runShardedE2e 之下殺判定(注入行程表與下殺)', function() {
         assert.strict.ok(row, '表內有根')
         assert.strict.deepEqual(lk.known.find((k) => k.pid === row.pid).startMs, row.startMs)
         assert.strict.equal(lk.procCreateMs, rec.lastRows.find((p) => p.pid === process.pid).startMs)
-        assert.strict.ok(typeof lk.runId === 'string' && lk.runId.length >= 16)
-        assert.strict.equal(fs.readFileSync(fx.fpEnv, 'utf8'), lk.runId, 'mocha 之環境變數帶本次標記')
-        assert.strict.equal(process.env.E2E_SHARD_RUN, undefined, '不污染本行程')
+        assert.strict.equal(lk.runId, undefined)
+        assert.strict.ok(fs.readFileSync(fx.fpEnv, 'utf8').length >= 16, 'mocha 之環境變數帶埠保留識別碼')
+        assert.strict.equal(process.env.E2E_PORT_HOLD, undefined, '不污染本行程')
         fs.writeFileSync(fx.fpGate, 'open')
         let r = await pm
         assert.strict.equal(r.exitCode, 0)
@@ -335,20 +334,19 @@ describe('runShardedE2e 之下殺判定(注入行程表與下殺)', function() {
         assert.strict.ok(logs.some((l) => /接手已死之鎖/.test(l)), logs.join('\n'))
     })
 
-    it('[S-W6] 鎖檔殘留: 身分相符者下殺; 帶上次標記之未取樣孤兒下殺; 依據與階段入紀錄', async function() {
+    it('[S-W6] 鎖檔殘留: 身分相符者下殺; 未曾被取樣之孤兒不下殺; 依據與階段入紀錄', async function() {
         let fx = mkProj()
         let P = 900000400
         let M = 900000401
         let tOld = Date.now() - 3600000
-        writeStaleLock(fx, { pid: deadPid(), procCreateMs: tOld - 1000, startMs: tOld, root: fx.root, runId: 'old-run', known: [{ pid: P, startMs: tOld + 10 }] })
+        writeStaleLock(fx, { pid: deadPid(), procCreateMs: tOld - 1000, startMs: tOld, root: fx.root, known: [{ pid: P, startMs: tOld + 10 }] })
         let { exec, rec } = overlayExec({
             extra: () => [{ pid: P, ppid: 900000399, startMs: tOld + 10, image: 'stale.exe' }, { pid: M, ppid: 900000399, startMs: tOld + 20, image: 'unsampled.exe' }],
-            evidence: { [M]: true },
         })
         let { pm, logs } = runProj(fx, { exec })
         let r = await pm
-        assert.strict.deepEqual(rec.kills.map((v) => v.pid).sort(), [P, M].sort())
-        assert.strict.deepEqual(r.kills.map((v) => [v.pid, v.basis, v.phase]).sort(), [[P, 'identity', 'stale-lock'], [M, 'env-marker', 'stale-lock']].sort())
+        assert.strict.deepEqual(rec.kills.map((v) => v.pid), [P])
+        assert.strict.deepEqual(r.kills.map((v) => [v.pid, v.basis, v.phase]), [[P, 'identity', 'stale-lock']])
         assert.strict.equal(r.exitCode, 0, logs.join('\n'))
     })
 
@@ -420,7 +418,7 @@ describe('runShardedE2e 之下殺判定(注入行程表與下殺)', function() {
         await new Promise((resolve) => s.listen(PORT_BUSY, '127.0.0.1', resolve))
         let outDir = path.join(fx.fdCase, 'out')
         try {
-            let err = await runShardedE2e({ root: fx.root, ports: [PORT_BUSY], availMemGb: 64, instances: 1, exec, outDir, log: () => {} }).then(() => null, (e) => e)
+            let err = await runShardedE2e({ root: fx.root, ports: [PORT_BUSY], portTries: 1, availMemGb: 64, instances: 1, exec, outDir, log: () => {} }).then(() => null, (e) => e)
             assert.ok(err, '應拋錯')
             assert.strict.ok(/預檢失敗/.test(err.message), err.message)
             assert.strict.deepEqual(err.kills.map((v) => [v.pid, v.basis]), [[P, 'identity']])
@@ -430,7 +428,7 @@ describe('runShardedE2e 之下殺判定(注入行程表與下殺)', function() {
             let fx2 = mkProj()
             let outDir2 = path.join(fx2.fdCase, 'out')
             let { exec: e2 } = overlayExec()
-            await assert.rejects(runShardedE2e({ root: fx2.root, ports: [PORT_BUSY], availMemGb: 64, instances: 1, exec: e2, outDir: outDir2, log: () => {} }), /預檢失敗/)
+            await assert.rejects(runShardedE2e({ root: fx2.root, ports: [PORT_BUSY], portTries: 1, availMemGb: 64, instances: 1, exec: e2, outDir: outDir2, log: () => {} }), /預檢失敗/)
             assert.strict.equal(fs.existsSync(outDir2), false)
         }
         finally {

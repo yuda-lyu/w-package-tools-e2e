@@ -56,3 +56,64 @@
 ## 5. 變更紀錄
 
 - 2026-10-30(e2e01): 初編; 對應 README §5 Breaking changes.
+- 2026-11-05(pe309): 新增 §6 自動換埠(`reserveE2ePorts`); 對應 README §2.12、§5.
+
+## 6. 自動換埠(`reserveE2ePorts`; 2026-11-05 pe309)
+
+編列依據: 跨套件規格 `C:\opensrcOper\dspec\e2e埠與多套件同跑.md`(E1～E8)、主控 pe309 派工. 測試: `test/unit-reserveE2ePorts.test.mjs`(注入; `[PR*]`)、`test/api-reserveE2ePorts.test.mjs`(真實監聽行程; `[RA*]`)、`test/e2e-portInImage.test.mjs`(真 Chromium; `[PI*]`)、`test/api-shardE2e.test.mjs`(與多開; `[S-A*]`).
+
+### 6.1 模組與單一擁有者
+
+| 事項 | 唯一擁有者 |
+|---|---|
+| 埠解析(基準埠＋位移) | `resolveE2ePort`(不重造); 自動換埠只寫 `E2E_PORT_OFFSET`、`E2E_PORT_HOLD` |
+| 預約與實際綁定驗證(單開、多開共用) | `createE2ePortClaimer`(`src/reserveE2ePorts.mjs`) |
+| 選定位移、重選、baseOnly 等待 | `reserveE2ePorts` |
+| 實際綁定檢查(4 個位址) | `checkPortFree`(`src/checkPortFree.mjs`; 同步呼叫走子行程 `tools/portProbe.mjs`) |
+| 下殺判定 | `reapShardProcesses`(`src/reapShardProcesses.mjs`; 只 `identity`、`chain`) |
+
+### 6.2 規則與測試對照
+
+| 編號 | 規則(規格句) | 實作 | 測試 |
+|---|---|---|---|
+| R-01 | E1: 沒有占用時為基準埠, `E2E_PORT_OFFSET` 維持未設, 只偵測一次 | `reserveE2ePorts` | `[PR01]`、`[PR01b]`、`[RA3]` |
+| R-02 | E2、E3: 任一埠被占用即整組移位, 對應關係不變, 寫入位移供 `resolveE2ePort`、子行程取得 | 同上 | `[PR02]`、`[PR03]`、`[RA1]` ×3 位址 |
+| R-03 | E4: 占用者一律不殺; 例外只有同一專案之殘留預約所記、身分完全相符者 | `tryOffset`、`reapShardProcesses` | `[PR06]`、`[PR14]`、`[PR15]`、`[PR15c]`、`[RA1]`、`[RA4]`、`[RA4b]`、`[RA6]` |
+| R-04 | E5: 重選上限內失敗即停, 訊息寫明誰占用(PID 與映像名, 不取命令列); 不留預約、不改環境變數 | `select` | `[PR04]`、`[PR04b]`、`[RA6]` |
+| R-05 | E5: 保留後被未導入者占走: 管理器拋錯, 不沿用、不下殺; 行程內自行監聽者以 `reselect` 重選 | `createServiceManager.ensure`、`reselect` | `[PR80]`、`[PR81]`、`[PR40]`、`[PR41]`、`[RA8]` |
+| R-06 | E6: 實際埠印入輸出(`[e2e-port]`), 略過之埠列出占用者 | `printOutcome` | `[PR01]`、`[PR02]`、`[RA1]` |
+| R-07 | E7: `baseOnly` 只用基準埠, 被占用時等待不換埠; 逾時拋 `E2E_PORT_BASE_BUSY`; `assertE2eBasePort` 擋位移實例; 比對端覆蓋有實測 | `reserveE2ePorts`、`assertE2eBasePort` | `[PR50]`～`[PR54]`、`[RA7]`、`[RA7b]`、`[PI1]`～`[PI4]` |
+| R-08 | 競爭: 每埠一檔, 排他建立, 由小到大取; 被預約之埠不做實際綁定; 取不齊全部撤回 | `claimPort`、`tryOffset` | `[PR10]`～`[PR13]`、`[RA2]`、`[RA2b]`、evidence `stress-*.json` |
+| R-09 | 預約殘留: PID 不存在、或 PID 存在而起始時間差逾 60 秒(PID 回收)為已死, 回收在守衛內; 行程表取不到視為仍在; 不可讀 60 秒內視為仍在 | `holderAlive`、`judgeHolder`、`reclaim` | `[PR14]`、`[PR14b]`、`[PR16]`、`[PR17]`、`[RA4]`、`[S-A7]` |
+| R-10 | 與多開: 已設 `E2E_PORT_OFFSET` 不換埠(`pinned`); `E2E_PORT_HOLD` 沿用(`inherited`); 多開配發走同一預約, 互相避開 | `reserveE2ePorts`、`runShardedE2e` | `[PR30]`～`[PR33]`、`[RA9]`、`[S-A4]`、`[S-A5]`、`[S-A6]` |
+| R-11 | 誤用即拋錯: 保留前已呼叫 `resolveE2ePort`／`createServiceManager`(否則換埠時常數過期); 不合法之基準埠或位移 | `reserveE2ePorts` | `[RA5]`、`[PR32]`、`[PR60]` |
+| R-12 | 已導入時管理器: restart 只殺身分已確認之監聽者, 其餘拋錯; 服務就緒前結束立即拋錯; 就緒後記入預約. 未導入者完全不變 | `createServiceManager` | `[PR82]`～`[PR84]`、`unit-serviceManager`(不動) |
+| R-13 | `noteOwn` 背景取樣不阻塞測試、不重疊, 只記存活者與其子孫之真實起始時間; `killOwnListeners` 只殺該埠之監聽者 | `makeHandle` | `[PR70]`～`[PR74]`、`[PR73b]` |
+| R-14 | 選項非預期值用預設(K3); 登錄目錄不可建立時警告並只靠實際綁定; 偵測子行程失敗時警告並照預約繼續 | `reserveE2ePorts`、`createE2ePortClaimer` | `[PR62]`、`[PR19]`、`[PR20]` |
+
+### 6.3 輸入空間表
+
+軸: 基準埠狀態 × 環境變數 × 模式; 每格之應然與測試(「—」為該組合不可達).
+
+| 基準埠狀態 | 未設位移 | 已設位移(手動/多開外) | 上層保留(HOLD) | baseOnly |
+|---|---|---|---|---|
+| 空閒 | 基準埠 `[PR01]` | 依指定 `[PR30]` | 沿用 `[PR31]` | 基準埠 `[PR50]` |
+| 部分或全部被占用 | 整組移位 `[PR02]`、`[RA1]` | 不換埠, 告警 `[PR30]`、`[PR30b]` | 沿用, 不偵測 `[PR31]` | 等待 `[PR51]`、`[RA7]` |
+| 全部位移皆被占用 | 拋 EXHAUSTED `[PR04]`、`[RA6]` | 同上 | 同上 | 逾時拋 BASE_BUSY `[PR52]`、`[RA7b]` |
+| 被他人預約(存活) | 換埠 `[PR10]`、`[RA2]` | 告警 `[PR30]` | 沿用 | 等待(同上) |
+| 他人預約已死、本專案、有 known | 依身分殺, 回基準埠 `[PR15]`、`[RA4]` | 同左(`tryOffset` 共用) | 不處理 | 同左 |
+| 他人預約已死、他專案 | 只回收預約; 占用者在即換埠 `[PR14]`、`[RA4b]` | 同左 | 不處理 | 等待 |
+| 保留後才被占走 | 管理器拋錯 `[PR80]`、`[RA8]`; 自行監聽者 `reselect` `[PR40]` | 沿用政策(不變) | 沿用政策(不變) | 同未設 |
+
+### 6.4 已知限制
+
+- 只防已導入者互撞與偵測當下之占用者; 未導入者於保留後才綁定, 由管理器大聲報錯, 不自動處理; 非 e2e 測試之撞埠(E8)另案.
+- 登錄目錄在使用者家目錄(刻意不用 `os.tmpdir()`: `TEMP` 可能依工作階段不同, 看不到彼此之預約就失去互斥); 跨使用者帳號不互斥(各帳號仍受實際綁定檢查).
+- 預約之持有者判定用近似起始時間(容差 60 秒), 只用於回收預約; 下殺一律依行程表之真實起始時間(容差 0).
+- `applyEnv:true` 之位移被常數取用後不可重選(常數已過期), 管理器因此只報錯、不重選.
+- 一個實例一個管理器: 同一行程內第二個管理器會把第一個啟動之服務當成他人.
+- POSIX 只有注入測試.
+
+### 6.5 改動範圍 → e2e 檔
+
+改 `reserveE2ePorts`、`checkPortFree`、`resolveE2ePort`: 跑 `unit-reserveE2ePorts`、`api-reserveE2ePorts`、`unit-portOffset`、`api-shardE2e`(`[S-A*]`); 改畫面含埠之指引: `e2e-portInImage`. 固定埠: 19620、19630(`api-reserveE2ePorts`, 位移 100 起)、19640(`e2e-portInImage`, 不監聽). 測試一律以 `E2E_PORT_REG_DIR` 或 `regDir` 另指登錄目錄.

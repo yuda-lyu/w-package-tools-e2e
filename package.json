@@ -1,6 +1,6 @@
 {
   "name": "w-package-tools-e2e",
-  "version": "1.0.21",
+  "version": "1.0.22",
   "dependencies": {
     "dotenv": "^18.0.5",
     "json5": "^2.2.3",

@@ -7,16 +7,19 @@ import { spawn, spawnSync } from 'child_process'
 import { fileURLToPath, pathToFileURL } from 'url'
 import listDirLinks from '../src/listDirLinks.mjs'
 import pidExists from '../src/pidExists.mjs'
-import runShardedE2e, { listProcessTable, readProcessEvidence, reapShardProcesses } from '../src/runShardedE2e.mjs'
+import runShardedE2e, { listProcessTable, reapShardProcesses } from '../src/runShardedE2e.mjs'
 
 
 //runShardedE2e 之真實整合: test/_tmp/shardE2e/ 下建小專案(小型 HTTP 服務 + mocha 檔, 以 resolveE2ePort 取埠), 真 spawn mocha、真 junction、真殺行程。
 //目標完好一律以連結目標內之哨兵檔回驗, 不只看沒有報錯。規格見 sgud/rule/rulebook_shard.md。
 //固定埠(不隨機): 基準 19200、位移 100 → 19200、19300、19400; 第二基準 19210。避開既有之 19030、18930、19050、19051。
+//埠預約之登錄目錄改到夾具內(E2E_PORT_REG_DIR), 不碰使用者之登錄目錄。
 
 
 let fdPkg = path.resolve(fileURLToPath(new URL('..', import.meta.url)))
 let fdRoot = path.resolve('test/_tmp/shardE2e')
+let fdReg = path.join(fdRoot, 'reg')
+let fpOccupantSrv = path.join(fdPkg, 'test', 'tools', 'portFixtureSrv.mjs')
 let fpCli = path.join(fdPkg, 'tools', 'shardE2e.mjs')
 let realMocha = path.join(fdPkg, 'node_modules', 'mocha')
 let BASE = 19200
@@ -40,7 +43,6 @@ let shellMode = false
 export async function startSvc(useShell = false, over = {}) {
     shellMode = useShell
     let env = { ...process.env }
-    if (over.noMark) delete env.E2E_SHARD_RUN
     let cwd = over.outside ? process.env.SHARD_FIX_OUTSIDE : process.cwd()
     let fpSrv = over.outside ? JSON.stringify(path.resolve('srv.mjs')) : 'srv.mjs'
     child = useShell
@@ -67,7 +69,19 @@ export function record(o) {
 }
 export async function hit(file) {
     let j = await (await fetch('http://127.0.0.1:' + port + '/')).json()
-    record({ file, port, servedBy: j.port, cwd: process.cwd(), offset: process.env.E2E_PORT_OFFSET, envExists: fs.existsSync('.env'), mochaPid: process.pid, svcPid: j.pid })
+    record({ file, port, servedBy: j.port, cwd: process.cwd(), offset: process.env.E2E_PORT_OFFSET, hold: process.env.E2E_PORT_HOLD, envExists: fs.existsSync('.env'), mochaPid: process.pid, svcPid: j.pid })
+}
+//等取樣把服務記入鎖檔(實例位於 <workDir>/inst<N>/<專案名>)
+export async function waitSampled(pid) {
+    let t0 = Date.now()
+    while (Date.now() - t0 < 60000) {
+        try {
+            if (JSON.parse(fs.readFileSync(path.resolve('..', '..', 'shard.lock'), 'utf8')).known.some((k) => k.pid === pid)) return
+        }
+        catch (err) {}
+        await new Promise((resolve) => setTimeout(resolve, 50))
+    }
+    throw new Error('sample timeout')
 }
 export async function waitGate() {
     let t0 = Date.now()
@@ -119,6 +133,20 @@ let bodies = {
         process.kill(process.pid)
         await new Promise((resolve) => setTimeout(resolve, 60000))
     })`,
+    hardkillSampled: (name) => `
+    it('${name} 等取樣後硬殺自身之 mocha(服務成孤兒)', async function() {
+        await hit('${name}')
+        await waitSampled(svcPidNow())
+        process.kill(process.pid)
+        await new Promise((resolve) => setTimeout(resolve, 60000))
+    })`,
+    reserve: (name) => `
+    it('${name} 使用端呼叫 reserveE2ePorts', async function() {
+        let m = await import('${urlOf('src/reserveE2ePorts.mjs')}')
+        let h = m.default([${BASE}])
+        record({ file: '${name}', source: h.source, offset: h.offset, ports: h.ports })
+        await hit('${name}')
+    })`,
     gate: (name) => `
     it('${name} 等閘門', async function() {
         await hit('${name}')
@@ -126,14 +154,13 @@ let bodies = {
     })`,
 }
 bodies.gateShell = bodies.gate
-bodies.hardkillNoMark = bodies.hardkill
 bodies.hardkillOutside = bodies.hardkill
 bodies.passThenGate = (name) => `
     it('${name} 先過', function() {})${bodies.gate(name)}`
 //服務經 shell 啟動之行為
-let shellKinds = new Set(['hardkill', 'gateShell', 'hardkillNoMark', 'hardkillOutside'])
-//服務之額外選項: noMark 不帶環境變數標記; outside 另把工作目錄放在實例外
-let svcOver = { hardkillNoMark: '{ noMark: true }', hardkillOutside: '{ noMark: true, outside: true }' }
+let shellKinds = new Set(['hardkill', 'hardkillSampled', 'gateShell', 'hardkillOutside'])
+//服務之額外選項: outside 另把工作目錄放在實例外
+let svcOver = { hardkillOutside: '{ outside: true }' }
 
 
 function mkFixture(specs, over = {}) {
@@ -155,7 +182,8 @@ function mkFixture(specs, over = {}) {
     for (let [name, kind] of Object.entries(specs)) {
         fs.writeFileSync(path.join(root, 'test', `e2e-${name}.test.mjs`), `
 import fs from 'fs'
-import { startSvc, stopSvc, hit, record, waitGate } from './tools/fixtureLib.mjs'
+import { startSvc, stopSvc, hit, record, waitGate, waitSampled } from './tools/fixtureLib.mjs'
+let svcPidNow = () => JSON.parse(fs.readFileSync(process.env.SHARD_FIX_RECORD, 'utf8').trim().split('\\n').pop()).svcPid
 describe('${name}', function() {
     before(async function() {
         await startSvc(${shellKinds.has(kind)}${svcOver[kind] ? `, ${svcOver[kind]}` : ''})
@@ -278,7 +306,7 @@ exit 0
 }
 
 
-//使孤兒「未曾被取樣」: mocha 存活期間行程表一律回失敗(取樣與鎖檔都記不到), mocha 結束後才給真實表; 其餘(證據、下殺)走真實。mocha 開跑後第一次取樣有時趕得上服務, 不注入則結果不定
+//使孤兒「未曾被取樣」: mocha 存活期間行程表一律回失敗(取樣與鎖檔都記不到), mocha 結束後才給真實表; 其餘(下殺)走真實。mocha 開跑後第一次取樣有時趕得上服務, 不注入則結果不定
 function execNoSample(fx) {
     return (prog, args, o) => {
         if (o.src === 'table') {
@@ -311,12 +339,14 @@ describe('runShardedE2e', function() {
 
     before(function() {
         safeRemove(fdRoot)
+        process.env.E2E_PORT_REG_DIR = fdReg
     })
 
     after(function() {
         delete process.env.SHARD_FIX_RECORD
         delete process.env.SHARD_FIX_GATE
         delete process.env.SHARD_FIX_OUTSIDE
+        delete process.env.E2E_PORT_REG_DIR
         safeRemove(fdRoot)
         //不得傷到本套件真實依賴
         assert.strict.ok(fs.existsSync(path.join(realMocha, 'package.json')))
@@ -562,17 +592,16 @@ describe('runShardedE2e', function() {
 
     describe('子行程被殺與終止訊號', function() {
 
-        it('[S-I12] mocha 被硬殺、服務成孤兒: 孤兒被清、埠釋放、實例移除、目標完好、離開碼非 0', async function() {
-            let fx = mkFixture({ a: 'hardkill', b: 'ok' })
-            let { pm } = await runApi(fx, { instances: 2, durations: { 'e2e-a.test.mjs': 2, 'e2e-b.test.mjs': 1 } })
+        it('[S-I12] mocha 被硬殺、服務已被取樣之孤兒: 依身分被清、埠釋放、實例移除、目標完好、離開碼非 0', async function() {
+            let fx = mkFixture({ a: 'hardkillSampled', b: 'ok' })
+            let { pm } = await runApi(fx, { instances: 2, durations: { 'e2e-a.test.mjs': 2, 'e2e-b.test.mjs': 1 }, treeSampleMs: 200 })
             let r = await pm
             let rec = fx.records().find((v) => v.file === 'a')
             assert.strict.equal(pidExists(rec.svcPid), false, '孤兒服務應已被終止')
-            //依據視開跑後第一次取樣是否趕得上服務而定(identity 或 env-marker), 皆為正面確認; 未曾被取樣之情形見 [S-I12b]
+            //fixture 等取樣後才硬殺: 依據必為 identity; 未曾被取樣之情形見 [S-I12b]
             let killed = r.kills.find((v) => v.pid === rec.svcPid)
             assert.ok(killed, JSON.stringify(r.kills))
-            assert.strict.ok(['identity', 'env-marker'].includes(killed.basis), JSON.stringify(killed))
-            assert.strict.deepEqual([killed.phase, killed.result], ['teardown', 'killed'])
+            assert.strict.deepEqual([killed.basis, killed.phase, killed.result], ['identity', 'teardown', 'killed'])
             assert.strict.ok(/node/i.test(killed.image) && Number.isFinite(killed.startMs) && killed.start !== '', JSON.stringify(killed))
             let sum = JSON.parse(fs.readFileSync(path.join(r.outDir, 'summary.json'), 'utf8'))
             assert.strict.ok(sum.kills.some((v) => v.pid === rec.svcPid), '紀錄入 summary.json')
@@ -585,18 +614,30 @@ describe('runShardedE2e', function() {
             assertTargetsIntact(fx)
         })
 
-        it('[S-I12b] 根被硬殺且服務未曾被取樣: 依環境變數標記確認身分後下殺, 埠釋放、實例移除、目標完好', async function() {
+        //pe309: 改寫。原為「依環境變數標記確認身分後下殺」; 拿掉環境區塊與工作目錄證據後, 未曾被取樣之孤兒(不論工作目錄在實例內外)一律不殺, 占埠者大聲報錯
+        it('[S-I12b] 根被硬殺且服務未曾被取樣(工作目錄在實例內): 不下殺, 大聲報錯、實例保留、離開碼非 0; 停掉後重跑清除', async function() {
             let fx = mkFixture({ a: 'hardkill' })
             let { pm, logs } = await runApi(fx, { instances: 1, exec: execNoSample(fx) })
             let r = await pm
             let rec = fx.records().find((v) => v.file === 'a')
-            assert.strict.equal(r.knownCount.total, 0, '未曾被取樣')
-            assert.strict.equal(pidExists(rec.svcPid), false, '孤兒服務應已被終止')
-            let killed = r.kills.find((v) => v.pid === rec.svcPid)
-            assert.ok(killed, JSON.stringify(r.kills))
-            assert.strict.deepEqual([killed.basis, killed.phase, killed.result], ['env-marker', 'teardown', 'killed'])
-            assert.strict.ok(logs.some((l) => l.includes(`下殺 PID ${rec.svcPid} `) && l.includes('依據 env-marker')), logs.join('\n'))
-            assert.strict.deepEqual(r.teardownErrors, [])
+            try {
+                assert.strict.equal(r.knownCount.total, 0, '未曾被取樣')
+                assert.strict.equal(pidExists(rec.svcPid), true, '未確認身分不得下殺')
+                assert.strict.ok(!r.kills.some((v) => v.pid === rec.svcPid), JSON.stringify(r.kills))
+                assert.strict.ok(r.killSkipped.some((v) => v.pid === rec.svcPid && v.reason === 'no-evidence' && v.port === rec.port), JSON.stringify(r.killSkipped))
+                assert.strict.notEqual(r.exitCode, 0)
+                assert.strict.ok(r.teardownErrors.some((e) => e.includes(`埠 ${rec.port} 未釋放`) && e.includes(`PID ${rec.svcPid}`)), r.teardownErrors.join('|'))
+                assert.strict.ok(logs.some((l) => l.includes(`埠 ${rec.port} 之監聽者 PID ${rec.svcPid}`) && /無身分證據, 不下殺/.test(l)), logs.join('\n'))
+                assert.strict.equal(fs.existsSync(path.join(fx.workDir, 'inst0', 'proj')), true, '實例保留待查')
+            }
+            finally {
+                //只殺本測試自建之服務(紀錄內之 PID, 仍占本測試之埠)
+                spawnSync('taskkill', ['/F', '/PID', String(rec.svcPid)], { stdio: 'ignore', windowsHide: true })
+            }
+            await until(() => !pidExists(rec.svcPid), '服務已停')
+            fs.writeFileSync(path.join(fx.root, 'test', 'e2e-a.test.mjs'), 'describe(\'a\', function() {\n    it(\'x\', function() {})\n})\n')
+            let r2 = await (await runApi(fx, { instances: 1 })).pm
+            assert.strict.equal(r2.exitCode, 0)
             assert.strict.equal(await bindFree(rec.port), true)
             assertInstancesGone(fx)
             assertTargetsIntact(fx)
@@ -733,26 +774,14 @@ exit $LASTEXITCODE
             assertTargetsIntact(fx)
         })
 
-        it('[S-I26] 未曾被取樣且不帶標記(自訂環境變數)之孤兒服務: 工作目錄位於實例內即下殺, 埠釋放、實例移除', async function() {
-            let fx = mkFixture({ a: 'hardkillNoMark' })
-            let { pm } = await runApi(fx, { instances: 1, exec: execNoSample(fx) })
-            let r = await pm
-            let rec = fx.records().find((v) => v.file === 'a')
-            assert.strict.equal(pidExists(rec.svcPid), false, '孤兒服務應已被終止')
-            assert.strict.equal(r.kills.find((v) => v.pid === rec.svcPid).basis, 'instance-cwd')
-            assert.strict.deepEqual(r.teardownErrors, [])
-            assert.strict.equal(await bindFree(rec.port), true)
-            assertInstancesGone(fx)
-            assertTargetsIntact(fx)
-        })
-
-        it('[S-I27] 孤兒之取捨: 未曾被取樣、不帶標記且工作目錄在實例外之服務不下殺, 大聲報錯、實例保留、離開碼非 0; 停掉後重跑清除', async function() {
+        //[S-I26](工作目錄位於實例內即下殺)已刪除: 依據 instance-cwd 不復存在; 同一情境之新行為見 [S-I12b]
+        it('[S-I27] 孤兒之取捨: 未曾被取樣且工作目錄在實例外之服務不下殺, 大聲報錯、實例保留、離開碼非 0; 停掉後重跑清除', async function() {
             let fx = mkFixture({ a: 'hardkillOutside' })
             let { pm, logs } = await runApi(fx, { instances: 1, exec: execNoSample(fx) })
             let r = await pm
             let rec = fx.records().find((v) => v.file === 'a')
             try {
-                assert.strict.equal(pidExists(rec.svcPid), true, '無證據不得下殺')
+                assert.strict.equal(pidExists(rec.svcPid), true, '未確認身分不得下殺')
                 assert.strict.ok(!r.kills.some((v) => v.pid === rec.svcPid), JSON.stringify(r.kills))
                 assert.strict.ok(r.killSkipped.some((v) => v.pid === rec.svcPid && v.reason === 'no-evidence'), JSON.stringify(r.killSkipped))
                 assert.strict.notEqual(r.exitCode, 0)
@@ -800,26 +829,19 @@ exit $LASTEXITCODE
             }
         }
 
-        it('[S-I28] 起始時間每次相同; 標記與工作目錄讀得到, 行程改過環境變數後仍讀得到; 無標記者與不存在之 PID 無證據', async function() {
-            let mark = 'E2E_SHARD_RUN=real-probe-1'
-            let a = await spawnHolder({ env: { E2E_SHARD_RUN: 'real-probe-1' } }, 'process.env.PAD = "x".repeat(40000); process.env.PAD2 = "y"; delete process.env.PATH')
-            let b = await spawnHolder({ env: { E2E_SHARD_RUN: 'real-probe-other' } })
+        //pe309: 改寫。刪除讀環境區塊與工作目錄之部分, 保留身分比對之前提
+        it('[S-I28] 起始時間每次相同(身分比對之前提, 容差為 0); 映像名與父 PID 取得到', async function() {
+            let a = await spawnHolder()
             try {
                 let t1 = listProcessTable()
                 let t2 = listProcessTable()
                 let rowOf = (t, c) => t.find((p) => p.pid === c.pid)
-                //身分比對之前提: 同一行程每次相同(容差為 0)
                 assert.strict.equal(rowOf(t1, a.child).startMs, rowOf(t2, a.child).startMs)
                 assert.strict.ok(/node/i.test(rowOf(t1, a.child).image))
                 assert.strict.equal(rowOf(t1, a.child).ppid, process.pid)
-                let m = readProcessEvidence([a.child.pid, b.child.pid, 2], { marker: mark, dirs: [`${a.fd}${path.sep}`] })
-                assert.strict.deepEqual(m.get(a.child.pid), { env: true, cwd: true })
-                assert.strict.deepEqual(m.get(b.child.pid), { env: false, cwd: false }, '前綴相同之他人標記不算')
-                assert.strict.equal(m.has(2), false, '讀不到視同無證據')
             }
             finally {
                 a.stop()
-                b.stop()
             }
         })
 
@@ -956,7 +978,7 @@ exit $LASTEXITCODE
                     throw err
                 })
                 try {
-                    let err = await runShardedE2e({ root: fx.root, ports: [BASE], instances: 2, availMemGb: 64, log: () => {} }).then(() => null, (e) => e)
+                    let err = await runShardedE2e({ root: fx.root, ports: [BASE], instances: 2, portTries: 1, availMemGb: 64, log: () => {} }).then(() => null, (e) => e)
                     assert.ok(err, '應拋錯')
                     assert.strict.ok(/預檢失敗/.test(err.message), err.message)
                     assert.strict.ok(err.message.includes(String(BASE + 100)), err.message)
@@ -1082,12 +1104,187 @@ describe('look', function() {
             let s = net.createServer()
             await new Promise((resolve) => s.listen(BASE + 110, '127.0.0.1', resolve))
             try {
-                await assert.rejects(runShardedE2e({ root: fx.root, ports: [BASE, BASE + 10], instances: 2, availMemGb: 64, log: () => {} }), /埠 19310\(基準 19210\+100\)/)
+                await assert.rejects(runShardedE2e({ root: fx.root, ports: [BASE, BASE + 10], instances: 2, portTries: 1, availMemGb: 64, log: () => {} }), /埠 19310\(基準 19210\+100\)/)
             }
             finally {
                 await new Promise((resolve) => s.close(resolve))
             }
             assert.strict.equal(fs.existsSync(fx.workDir), false)
+        })
+
+    })
+
+    //pe309: 多開與自動換埠之關係。占用者由測試自建(獨立行程、真實監聽), 回驗毫髮無傷
+    describe('埠被占用與預約', function() {
+
+        let occupants = []
+
+        async function spawnOccupant(port) {
+            let child = spawn(process.execPath, [fpOccupantSrv, 'occupant', String(port), '127.0.0.1'], { stdio: 'ignore', windowsHide: true })
+            occupants.push(child)
+            let t0 = Date.now()
+            while (Date.now() - t0 < 30000) {
+                try {
+                    let j = await (await fetch(`http://127.0.0.1:${port}/`)).json()
+                    if (j.pid === child.pid) {
+                        return { child, port }
+                    }
+                }
+                catch (err) {}
+                await new Promise((resolve) => setTimeout(resolve, 50))
+            }
+            throw new Error('占用者未就緒')
+        }
+
+        async function assertIntact(o, r) {
+            assert.strict.equal(o.child.exitCode, null, '占用者不得結束')
+            let j = await (await fetch(`http://127.0.0.1:${o.port}/`)).json()
+            assert.strict.deepEqual([j.role, j.pid], ['occupant', o.child.pid])
+            if (r) {
+                assert.strict.ok(!r.kills.some((v) => v.pid === o.child.pid), JSON.stringify(r.kills))
+            }
+        }
+
+        let regFiles = () => (fs.existsSync(fdReg) ? fs.readdirSync(fdReg) : [])
+
+        afterEach(function() {
+            occupants.splice(0).forEach((c) => {
+                try {
+                    c.kill()
+                }
+                catch (err) {}
+            })
+        })
+
+        it('[S-A1] 第 1 組之埠被占用: 改用下一個空槽、全綠、占用者毫髮無傷; 沒被占用之組不動; 預約於收尾釋放', async function() {
+            let fx = mkFixture({ a: 'ok', b: 'ok' })
+            let o = await spawnOccupant(BASE + 100)
+            let { pm, logs } = await runApi(fx, { instances: 2, durations: { 'e2e-a.test.mjs': 2, 'e2e-b.test.mjs': 1 } })
+            let r = await pm
+            assert.strict.equal(r.exitCode, 0, logs.join('\n'))
+            let by = Object.fromEntries(fx.records().map((v) => [v.file, v]))
+            assert.strict.deepEqual([by.a.port, by.b.port], [BASE, BASE + 200])
+            assert.strict.deepEqual([by.a.servedBy, by.b.servedBy], [BASE, BASE + 200])
+            assert.strict.deepEqual(r.groups.map((g) => [g.index, g.offset, g.ports]), [[0, 0, [BASE]], [1, 200, [BASE + 200]]])
+            assert.strict.ok(logs.some((l) => l.includes('第 1 組之埠不可用, 改用位移 200') && l.includes(`PID ${o.child.pid}`)), logs.join('\n'))
+            await assertIntact(o, r)
+            assert.strict.deepEqual(regFiles(), [], '預約全部釋放')
+            assertInstancesGone(fx)
+            assertTargetsIntact(fx)
+        })
+
+        it('[S-A2] 第 0 組之埠被占用且無 officialOnly: 第 0 組移位, 他組順延不重疊', async function() {
+            let fx = mkFixture({ a: 'ok', b: 'ok' })
+            let o = await spawnOccupant(BASE)
+            let { pm, logs } = await runApi(fx, { instances: 2, durations: { 'e2e-a.test.mjs': 2, 'e2e-b.test.mjs': 1 } })
+            let r = await pm
+            assert.strict.equal(r.exitCode, 0, logs.join('\n'))
+            assert.strict.deepEqual(r.groups.map((g) => [g.index, g.offset]), [[0, 100], [1, 200]])
+            await assertIntact(o, r)
+        })
+
+        it('[S-A3] 含 officialOnly 之第 0 組: 基準埠被占用時等待、不換埠; 占用者結束後跑在位移 0', async function() {
+            let fx = mkFixture({ a: 'ok', b: 'ok' })
+            let o = await spawnOccupant(BASE)
+            let { pm, logs } = await runApi(fx, { instances: 2, officialOnly: ['e2e-a.test.mjs'] })
+            await until(() => logs.some((l) => l.includes('只能用基準埠, 被占用時等待')), `進入等待; ${logs.join('\n')}`)
+            assert.strict.deepEqual(fx.records(), [], '等待期間尚未開跑')
+            await assertIntact(o)
+            o.child.kill()
+            let r = await pm
+            assert.strict.equal(r.exitCode, 0, logs.join('\n'))
+            assert.strict.deepEqual(r.groups.map((g) => [g.index, g.offset]), [[0, 0], [1, 100]])
+            assert.strict.equal(fx.records().find((v) => v.file === 'a').port, BASE)
+        })
+
+        it('[S-A3b] 含 officialOnly 之第 0 組等待逾時: 拋錯列出占用者, 未建立實例, 占用者毫髮無傷', async function() {
+            let fx = mkFixture({ a: 'ok', b: 'ok' })
+            let o = await spawnOccupant(BASE)
+            let err = await runShardedE2e({ root: fx.root, ports: [BASE], instances: 2, officialOnly: ['e2e-a.test.mjs'], portWaitMs: 500, availMemGb: 64, log: () => {} }).then(() => null, (e) => e)
+            assert.ok(err, '應拋錯')
+            assert.strict.ok(/預檢失敗/.test(err.message) && err.message.includes(`PID ${o.child.pid}`), err.message)
+            assert.strict.equal(err.blocked[0].group, 0)
+            assert.strict.equal(fs.existsSync(fx.workDir), false)
+            assert.strict.deepEqual(regFiles(), [], '已取得之預約一併釋放')
+            await assertIntact(o)
+        })
+
+        it('[S-A4] 多開持有預約時: 別的行程之自動換埠選不到各組之埠; 各組之 mocha 繼承保留', async function() {
+            let fx = mkFixture({ a: 'gate', b: 'gate' })
+            let { pm } = await runApi(fx, { instances: 2 })
+            await until(() => fx.records().length >= 2, '兩組都進入測試')
+            //別的行程: 真實子行程呼叫 reserveE2ePorts
+            let fpOut = path.join(fx.fdCase, 'single.json')
+            let script = `import r from ${JSON.stringify(urlOf('src/reserveE2ePorts.mjs'))}; import fs from 'fs'; let h = r([${BASE}], { log: () => {} }); fs.writeFileSync(${JSON.stringify(fpOut)}, JSON.stringify({ ports: h.ports, offset: h.offset }))`
+            let s = spawnSync(process.execPath, ['--input-type=module', '-e', script], { cwd: fx.fdCase, encoding: 'utf8', windowsHide: true, timeout: 60000, env: { ...process.env, E2E_PORT_OFFSET: '', E2E_PORT_HOLD: '' } })
+            assert.strict.equal(s.status, 0, s.stderr)
+            assert.strict.deepEqual(JSON.parse(fs.readFileSync(fpOut, 'utf8')), { ports: [BASE + 200], offset: 200 }, '避開多開之兩組')
+            for (let rec of fx.records()) {
+                assert.ok(typeof rec.hold === 'string' && rec.hold.length >= 16, '各組之 mocha 繼承保留')
+            }
+            fs.writeFileSync(fx.fpGate, 'open')
+            let r = await pm
+            assert.strict.equal(r.exitCode, 0)
+        })
+
+        it('[S-A5] 別的行程持有預約時(單開先跑): 多開避開, 各組不與之重疊; 單開之服務毫髮無傷', async function() {
+            let fx = mkFixture({ a: 'ok', b: 'ok' })
+            let fpReady = path.join(fx.fdCase, 'ready.json')
+            let fpStop = path.join(fx.fdCase, 'stop')
+            let script = `
+import r from ${JSON.stringify(urlOf('src/reserveE2ePorts.mjs'))}
+import fs from 'fs'
+import http from 'http'
+let h = r([${BASE}], { log: () => {} })
+let srv = http.createServer((q, s) => s.end(JSON.stringify({ role: 'single', pid: process.pid }))).listen(h.portOf(${BASE}), '127.0.0.1', () => fs.writeFileSync(${JSON.stringify(fpReady)}, JSON.stringify({ port: h.portOf(${BASE}) })))
+let t = setInterval(() => { if (fs.existsSync(${JSON.stringify(fpStop)})) { clearInterval(t); srv.close(); process.exit(0) } }, 50)
+`
+            let single = spawn(process.execPath, ['--input-type=module', '-e', script], { cwd: fx.fdCase, stdio: 'ignore', windowsHide: true, env: { ...process.env, E2E_PORT_OFFSET: '', E2E_PORT_HOLD: '' } })
+            occupants.push(single)
+            await until(() => fs.existsSync(fpReady), '單開就緒')
+            assert.strict.deepEqual(JSON.parse(fs.readFileSync(fpReady, 'utf8')), { port: BASE })
+            let { pm, logs } = await runApi(fx, { instances: 2, durations: { 'e2e-a.test.mjs': 2, 'e2e-b.test.mjs': 1 } })
+            let r = await pm
+            assert.strict.equal(r.exitCode, 0, logs.join('\n'))
+            assert.strict.deepEqual(r.groups.map((g) => g.offset), [100, 200])
+            let j = await (await fetch(`http://127.0.0.1:${BASE}/`)).json()
+            assert.strict.deepEqual([j.role, j.pid], ['single', single.pid], '單開之服務毫髮無傷')
+            fs.writeFileSync(fpStop, 'x')
+            await new Promise((resolve) => single.once('close', resolve))
+        })
+
+        it('[S-A6] 組內之 mocha 呼叫 reserveE2ePorts: 沿用工具指定之位移, 不換埠、不重複預約', async function() {
+            let fx = mkFixture({ a: 'reserve', b: 'reserve' })
+            let { pm, logs } = await runApi(fx, { instances: 2, durations: { 'e2e-a.test.mjs': 2, 'e2e-b.test.mjs': 1 } })
+            let r = await pm
+            assert.strict.equal(r.exitCode, 0, logs.join('\n'))
+            let rec = fx.records().filter((v) => v.source)
+            assert.strict.deepEqual(rec.map((v) => [v.file, v.source, v.offset, v.ports[0]]).sort(), [['a', 'inherited', 0, BASE], ['b', 'inherited', 100, BASE + 100]])
+        })
+
+        it('[S-A7] 工具被硬殺留下之預約: 持有者已死, 下次開跑回收, 不換埠', async function() {
+            let fx = mkFixture({ a: 'gateShell' })
+            let c = spawnCli(fx, ['--ports', String(BASE), '--instances', '1', '--progress-min', '60', '--tree-sample-ms', '200'])
+            await until(() => fx.records().length >= 1, `進入測試; 輸出: ${c.out()}`)
+            let rec = fx.records()[0]
+            assert.strict.deepEqual(regFiles(), [`p${BASE}.json`])
+            await until(() => {
+                try {
+                    return JSON.parse(fs.readFileSync(path.join(fx.workDir, 'shard.lock'), 'utf8')).known.some((g) => g.pid === rec.svcPid)
+                }
+                catch (err) {
+                    return false
+                }
+            }, '取樣寫入鎖檔')
+            c.child.kill('SIGKILL')
+            await c.closed
+            assert.strict.deepEqual(regFiles(), [`p${BASE}.json`], '硬殺後預約殘留')
+            fs.writeFileSync(fx.fpGate, 'open')
+            let { pm, logs } = await runApi(fx, { instances: 1 })
+            let r = await pm
+            assert.strict.equal(r.exitCode, 0, logs.join('\n'))
+            assert.strict.deepEqual(r.groups.map((g) => g.offset), [0], '回收後仍為位移 0')
+            assert.strict.deepEqual(regFiles(), [])
         })
 
     })

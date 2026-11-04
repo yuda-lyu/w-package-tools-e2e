@@ -1,5 +1,9 @@
+//本行程已取過實際埠之基準埠: reserveE2ePorts 據以擋下「保留前已取值」(其後換埠時那些值會過期)
+export let resolvedBasePorts = new Set()
+
+
 /**
- * 依環境變數E2E_PORT_OFFSET把基準埠位移為本實例之實際埠(多開臨時實例用)
+ * 依環境變數E2E_PORT_OFFSET把基準埠位移為本實例之實際埠(多開臨時實例與自動換埠共用；自動換埠由reserveE2ePorts寫入位移)
  *
  * 實際埠＝基準埠＋位移；位移未設、空字串或為0時原樣回傳基準埠(不驗證、不轉型，與未支援位移前逐位元一致)。
  * 位移須為非負整數字串，位移後之埠須為1～65535之整數，否則拋錯(不靜默沿用基準埠：沿用即會連到他實例之服務)。
@@ -21,6 +25,9 @@
  */
 function resolveE2ePort(basePort, opt = {}) {
     let { env = process.env, offsetEnv = 'E2E_PORT_OFFSET' } = opt
+    if (env === process.env && offsetEnv === 'E2E_PORT_OFFSET') {
+        resolvedBasePorts.add(Number(basePort))
+    }
     let raw = env[offsetEnv]
     if (raw === undefined || raw === null || String(raw).trim() === '') {
         return basePort

@@ -44,6 +44,9 @@ import createBaselineCollector from '../src/createBaselineCollector.mjs'
 import writeBaselineIfChanged from '../src/writeBaselineIfChanged.mjs'
 import createServiceManager from '../src/createServiceManager.mjs'
 import resolveE2ePort from '../src/resolveE2ePort.mjs'
+import reserveE2ePorts, { assertE2eBasePort } from '../src/reserveE2ePorts.mjs'
+import checkPortFree from '../src/checkPortFree.mjs'
+import reapShardProcesses from '../src/reapShardProcesses.mjs'
 import registerCleanupHooks from '../src/registerCleanupHooks.mjs'
 import probeHttp from '../src/probeHttp.mjs'
 import createTempSettings from '../src/createTempSettings.mjs'
@@ -123,6 +126,10 @@ describe('WPackageToolsE2e', function() {
             'writeBaselineIfChanged',
             'createServiceManager',
             'resolveE2ePort',
+            'reserveE2ePorts',
+            'assertE2eBasePort',
+            'checkPortFree',
+            'reapShardProcesses',
             'registerCleanupHooks',
             'probeHttp',
             'createTempSettings',
@@ -210,6 +217,10 @@ describe('WPackageToolsE2e', function() {
             writeBaselineIfChanged,
             createServiceManager,
             resolveE2ePort,
+            reserveE2ePorts,
+            assertE2eBasePort,
+            checkPortFree,
+            reapShardProcesses,
             registerCleanupHooks,
             probeHttp,
             createTempSettings,

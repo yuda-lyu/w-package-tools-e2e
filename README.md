@@ -96,6 +96,9 @@ let browser2 = await wpte.launchBrowser()
 |---|---|---|
 | `createServiceManager(opt)` | 沿用政策（reuse）之啟動 / 重啟 / 收尾（C2 / C3，§2.4）；`services[].port` 為基準埠，探測、url、spawn 收到之 `port`、殺監聽者皆用 `E2E_PORT_OFFSET` 位移後之實際埠（§2.10），`portOf(name)` 回實際埠 | sso 實跑、單元 |
 | `resolveE2ePort(basePort, opt)` | 基準埠＋`E2E_PORT_OFFSET`（未設、空或 0 原樣回傳）；專案組 baseUrl、設定檔之埠、`killPortListeners` 之對象皆經此（§2.10） | 單元、子行程實跑（2026-10-28 新增，Gitea issue #19） |
+| `reserveE2ePorts(basePorts, opt)` | 自動換埠：沒有占用時即基準埠；被占用時整組移位並寫入 `E2E_PORT_OFFSET`；跨行程預約，同時開跑不會選到同一組（§2.12）；具名匯出 `assertE2eBasePort`（畫面含埠之流程確認跑在基準埠）、`createE2ePortClaimer`、`getActiveE2ePortReservation` | 單元、真實監聽行程（2026-11-05 新增） |
+| `checkPortFree(port)` | 以實際綁定檢查埠（`127.0.0.1`、`0.0.0.0`、`::`、`::1`）；具名匯出 `waitPortsFree` | `runShardedE2e`、`reserveE2ePorts` 共用（2026-11-05 自 `runShardedE2e` 抽出） |
+| `reapShardProcesses(opt)` | 只殺身分已正面確認之行程並留紀錄（§2.11〈行程身分〉）；具名匯出 `listProcessTable`、`sampleShardKnown`、`findProcessDescendants`、`describePortOwners`（`runShardedE2e` 亦轉出前四者） | `api-shardKillIdentity`、`unit-shardProcIdentity`（2026-11-05 自 `runShardedE2e` 抽出） |
 | `registerCleanupHooks(cleanup, opt)` | root after＋exit / SIGINT / SIGTERM；**須於模組頂層呼叫** | sso 實跑、單元 |
 | `probeHttp(url, opt)` | 任何 HTTP 回應即 true；`accept` / `identify` 可收緊 | sso 實跑、單元 |
 | `createTempSettings(opt)` | 臨時設定檔（JSON5 基底淺合併、tmpDir 必填、forbiddenKeys） | sso 實跑、單元 |
@@ -215,7 +218,8 @@ prepare(ctx) → launch() → openPage(browser) → beforeRun(ctx) → run(page,
 | `E2E_BASELINE_KEEP_MAXDIFF` | 同上（僅 `KEEP_SAME=1` 時讀取並驗格式） | 保留之差異上限（非負整數；未設＝比對端容差 `maxDiffPixels`，預設 100；`0`＝只保留 RGBA 逐像素相同者） |
 | `E2E_PORT_OFFSET` | `resolveE2ePort`、`createServiceManager` | 加到各基準埠（非負整數；未設、空或 `0` 不變），§2.10；`runShardedE2e` 依組序設定 |
 | `E2E_SHARD_RESULT` | `tools/shardE2eReporter.cjs` | 各組統計 JSON 之路徑（`runShardedE2e` 設定，使用端不必理會） |
-| `E2E_SHARD_RUN` | `runShardedE2e` | 本次執行之識別碼，設給各組 mocha 並由子孫繼承，供確認未曾被取樣之孤兒之身分（§2.11〈行程身分〉；使用端不必理會，啟動服務時請保留繼承之環境變數） |
+| `E2E_PORT_HOLD` | `reserveE2ePorts`、`runShardedE2e` | 上層已保留埠之識別碼，子行程繼承即沿用上層之位移、不再換埠（§2.12；使用端不必理會） |
+| `E2E_PORT_REG_DIR` | `reserveE2ePorts`、`runShardedE2e` | 埠預約之登錄目錄；未設為 `<家目錄>/.w-package-tools-e2e/port-reservations`（§2.12；同一台機器之行程須看到同一目錄才互斥，只有測試才改） |
 
 ### 2.7 `itemsUnionBox` 之圖形內容（`graphics`、`graphicAreas`；Gitea issue #6）
 
@@ -329,7 +333,7 @@ let baseUrl = `http://127.0.0.1:${resolveE2ePort(8080)}` //前端網址、後端
 
 - 設定檔（JSON5 等）內寫死之埠：以 `createTempSettings` 之 overrides 寫入 `resolveE2ePort(基準埠)`；前端 dev server 之 proxy 目標同。
 - 實例仍須各自一份資料庫、上傳檔與 `test/_tmp/`（多開臨時實例時整樹複製或另指資料目錄），但不必改任何原始碼。
-- 位移後之埠須仍 ≥ 8000 且與他專案錯開（全域技能 role-coder-for-test §5）；位移值由多開之調度方指定（例：100、200）。
+- 位移後之埠須仍 ≥ 8000 且與他專案錯開（全域技能 role-coder-for-test §5）；位移值由多開之調度方指定（例：100、200），或由自動換埠選定（§2.12）。
 
 ### 2.11 分組多開（`runShardedE2e`、`tools/shardE2e.mjs`；2026-11-04）
 
@@ -347,7 +351,9 @@ let baseUrl = `http://127.0.0.1:${resolveE2ePort(8080)}` //前端網址、後端
 | `together` | 必須同組之檔名陣列之陣列；有交集者合併 | `[]` |
 | `durations` | 各檔耗時（分），只用於分組；缺者以已知檔之平均值估算 | `{}` |
 | `exclude` | 額外不複製之路徑（相對專案根） | `[]` |
-| `portStep` | 各組埠位移間距，第 i 組位移＝i×portStep | 100 |
+| `portStep` | 各組埠位移間距，沒有占用時第 i 組位移＝i×portStep | 100 |
+| `portTries` | 每組最多試幾個位移槽；給 1 即只試組序對應之槽，被占用即拋錯 | 20 |
+| `portWaitMs` | 含 `officialOnly` 之第 0 組等待基準埠之上限（毫秒） | 1800000 |
 
 ```json
 {
@@ -359,7 +365,7 @@ let baseUrl = `http://127.0.0.1:${resolveE2ePort(8080)}` //前端網址、後端
 }
 ```
 
-**CLI**（於專案根）：`node node_modules/w-package-tools-e2e/tools/shardE2e.mjs [選項]`；選項 `--root`、`--config`、`--plan`、`--ports a,b`、`--instances N`、`--official-only a,b`、`--together "a,b;c,d"`、`--durations <JSON>`、`--exclude a,b`、`--port-step N`、`--mem-per-instance GB`、`--work-dir`、`--out-dir`、`--mocha-args "--timeout 300000"`、`--group-timeout-min`、`--progress-min`、`--tree-sample-ms`、`--update-durations`、`--debug`。`--plan` 只印分組與預估，不取鎖、不建立任何東西、不執行。
+**CLI**（於專案根）：`node node_modules/w-package-tools-e2e/tools/shardE2e.mjs [選項]`；選項 `--root`、`--config`、`--plan`、`--ports a,b`、`--instances N`、`--official-only a,b`、`--together "a,b;c,d"`、`--durations <JSON>`、`--exclude a,b`、`--port-step N`、`--port-tries N`、`--port-wait-min 分`、`--mem-per-instance GB`、`--work-dir`、`--out-dir`、`--mocha-args "--timeout 300000"`、`--group-timeout-min`、`--progress-min`、`--tree-sample-ms`、`--update-durations`、`--debug`。`--plan` 只印分組與預估，不取鎖、不建立任何東西、不執行。
 
 **流程與保證**：
 
@@ -367,9 +373,9 @@ let baseUrl = `http://127.0.0.1:${resolveE2ePort(8080)}` //前端網址、後端
 2. **記憶體守門**：依可用記憶體（`os.freemem()`，每實例預設 1.5 GB）調降並印原因；連 1 個都不夠時仍跑 1 個並警告。
 3. **鎖**：`<workDir>/shard.lock` 擋第二個同時執行者；持有者 PID 已死、或 PID 存在而起始時間與鎖檔不完全相同（PID 回收）之鎖可接手；鎖檔沒有真實起始時間（舊格式、或當時取不到行程表）而 PID 存在者視為仍在。
 4. **清殘留**：接手死鎖時只殺身分已確認之殘留（見下方〈行程身分〉；舊格式鎖檔一律不殺並記警告），再依第 8 點移除上次留下之 `inst<N>`。
-5. **預檢**：每個實例之每個埠（基準埠＋位移）於 `127.0.0.1`、`0.0.0.0`、`::`、`::1` 試綁定；未過於建立實例前拋錯並列出占用者（PID 與映像名稱），**不沿用**。
+5. **配發埠**：每組之每個埠先預約（§2.12，跨行程排他，持有至收尾）再於 `127.0.0.1`、`0.0.0.0`、`::`、`::1` 試綁定，**不沿用**。沒有占用時第 i 組位移＝i×portStep（同未支援換埠前）；該組之埠被占用或被他人預約時**不殺占用者**，改用下一個空的位移槽（至多 `portTries` 個）並印原因；含 `officialOnly` 之第 0 組畫面含埠，只用位移 0，被占用時等待（至多 `portWaitMs`）。皆未過於建立實例前拋錯並列出占用者（PID 與映像名稱）。
 6. **建立實例**：`<專案根>/tmp/e2e-shards/inst<N>/<專案名>`（可改 `workDir`；`workDir`、`outDir` 之相對路徑以專案根解析）。排除 `node_modules`、`.git`、`docs`、`tmp`、`testPending`、`logs`、`sgud`、`test/pics`、`test/_tmp` 與 `exclude`（皆相對專案根）；`node_modules`、`test/pics` 以 junction 指回；來源樹（不含排除項）內另有連結即拋錯列出；實例內建空 `logs`。**`.env` 等只由 OS 複製，工具不讀內容、不印出，隨實例刪除**——`workDir` 請留在 gitignore 範圍內。
-7. **執行**：各實例 `E2E_PORT_OFFSET=<第 i 組×portStep>`，`cwd` 為實例根，`node node_modules/mocha/bin/mocha.js --no-parallel <該組檔案> --timeout 180000 --reporter <本套件報告器>`（`mochaArgs` 可調，不可含 `--reporter`、`--parallel`）；隱藏視窗；輸出分寫 `<outDir>/group<i>.log`（執行中直接寫，行程被硬殺仍在）；報告器之輸出同內建 spec，另寫統計 `group<i>.result.json`；每 5 分印一行進度；每組逾 4 小時（`groupTimeoutMs`）終止。
+7. **執行**：各實例 `E2E_PORT_OFFSET=<配發之位移>`（並帶 `E2E_PORT_HOLD`，組內呼叫 `reserveE2ePorts` 時沿用、不再換埠），`cwd` 為實例根，`node node_modules/mocha/bin/mocha.js --no-parallel <該組檔案> --timeout 180000 --reporter <本套件報告器>`（`mochaArgs` 可調，不可含 `--reporter`、`--parallel`）；隱藏視窗；輸出分寫 `<outDir>/group<i>.log`（執行中直接寫，行程被硬殺仍在）；報告器之輸出同內建 spec，另寫統計 `group<i>.result.json`；每 5 分印一行進度；每組逾 4 小時（`groupTimeoutMs`）終止。
 8. **收尾**（成功、失敗、例外、SIGINT、SIGTERM、SIGBREAK、SIGHUP 皆執行）：樹狀終止存活之子行程、下殺身分已確認之孤兒（〈行程身分〉） → 回驗本次各埠已釋放 → 各實例 `testPending` 搬回正式專案（不覆蓋，撞名加 `-N`）→ 以不跟進連結之方式列出連結、逐一拆除、回驗清單為空且目標完好 → 遞迴刪除並確認已不存在。任一步失敗大聲報錯、不繼續刪除該實例、離開碼非 0。**Windows 之 `taskkill /F`、`child.kill()` 為 TerminateProcess，處理器來不及執行，由下次開跑清除**；真實訊號只有主控台事件。
 9. **彙整**：逐組印耗時、通過、失敗、pending 與檔案；最後印 mocha 同格式之 `N passing`、`M failing`、`P pending` 與失敗案例標題。有失敗、未跑完、某組沒有統計、0 案例、mocha 離開碼與統計不符或收尾失敗，`exitCode` 即非 0；收到訊號為 128＋訊號值。回傳值含各組結果與實際耗時。另印可貼回之 `durations`；`--update-durations` 才寫回，預設不改檔。
 
@@ -380,18 +386,96 @@ let baseUrl = `http://127.0.0.1:${resolveE2ePort(8080)}` //前端網址、後端
 | `own-child-handle` | 根：持有之 `child` 尚未 exit，走 `killOwnTree`（`taskkill /F /T`） | 未 exit 前 PID 不會被回收 |
 | `identity` | PID 與起始時間皆與存活時之紀錄**完全相同**（容差 0；`CreationDate` 同一行程每次相同） | 同一行程；紀錄只來自行程表，不用 `Date.now()` |
 | `chain:<父PID>` | 由身分已確認之存活行程，沿存活父子鏈走到，且起始不早於其父 | 父自起始至今持續持有該 PID，此期間建立且 ppid 為該 PID 者必為其子 |
-| `env-marker` | 父已結束（或為仍占本次埠之監聽者），環境變數帶本次之 `E2E_SHARD_RUN=<id>` | 識別碼每次不同，只有本次之子孫會繼承 |
-| `instance-cwd` | 同上，工作目錄位於 `workDir` 內 | `workDir` 由鎖獨占；涵蓋自訂環境變數之服務 |
 
-本行程與其祖先鏈永不下殺，也不經其往下走。取不到行程表、讀不到證據一律不殺並記警告。除根以外之下殺不帶 `/T`（子孫已自行走訪、逐筆留紀錄）；Windows 先取 handle 釘住行程、在同一 handle 上比對起始時間才終止，比對與下殺之間 PID 不可能被回收。證據之讀取：Windows 由 PowerShell（`Add-Type`，每次約 0.5 秒）讀候選行程 PEB 之環境區塊與工作目錄；Linux 讀 `/proc`；其他平台無證據可用。**只回傳是否相符，內容不離開讀取程式**（可能含憑證），也不取命令列。
+本行程與其祖先鏈永不下殺，也不經其往下走。取不到行程表一律不殺並記警告。除根以外之下殺不帶 `/T`（子孫已自行走訪、逐筆留紀錄）；Windows 先取 handle 釘住行程、在同一 handle 上比對起始時間才終止，比對與下殺之間 PID 不可能被回收。**不讀其他行程之環境區塊與工作目錄**（可能碰到憑證，又依賴未公開之 PEB 配置），也不取命令列。身分靠取樣：開跑後立即取樣一次，之後每 `treeSampleMs`（預設 10 秒，單次約 0.5 秒）沿存活父子鏈記下子孫。
 
-**紀錄**：每次下殺印一列 `[shard] 下殺 PID <pid> <映像名> 起始 <ISO> 依據 <basis> 階段 <phase> 結果 <result>`，並寫入回傳值與 `summary.json` 之 `kills`（`{pid,image,startMs,start,basis,phase,result}`；`phase` 為 `stop`、`teardown`、`teardown-port`、`stale-lock`；`result` 為 `killed`、`pending`、`gone`、`mismatch`、`error`、`exec-failed`、`tree-kill-requested`）；未下殺者入 `killSkipped`（`reason`：`no-evidence`、`evidence-unreadable`、`protected`，占埠者帶 `port`；其中多為他人之行程）；`knownCount` 為 `{current,total}`。開跑前之例外若已有下殺，例外帶 `err.kills`，並寫入 `outDir` 之 `summary.json`。
+**紀錄**：每次下殺印一列 `[shard] 下殺 PID <pid> <映像名> 起始 <ISO> 依據 <basis> 階段 <phase> 結果 <result>`，並寫入回傳值與 `summary.json` 之 `kills`（`{pid,image,startMs,start,basis,phase,result}`；`phase` 為 `stop`、`teardown`、`teardown-port`、`stale-lock`；`result` 為 `killed`、`pending`、`gone`、`mismatch`、`error`、`exec-failed`、`tree-kill-requested`）；未下殺者入 `killSkipped`（`reason`：`no-evidence`、`protected`，占埠者帶 `port`；其中多為他人之行程）；`knownCount` 為 `{current,total}`。開跑前之例外若已有下殺，例外帶 `err.kills`，並寫入 `outDir` 之 `summary.json`。
 
-**代價**：未曾被取樣、環境變數被換掉（不繼承 `process.env`）且工作目錄不在實例內之孤兒殺不到——占埠者收尾大聲報錯（埠未釋放，列出占用者）、該實例保留、離開碼非 0，手動停掉後重跑工具清除；不占埠也不鎖實例者留在機器上，只有 `killSkipped` 有紀錄。POSIX 路徑只有注入測試，未實機跑過。
+**代價**：未曾被取樣之孤兒（服務起來後、下一次取樣前，其父鏈就斷了）殺不到——占埠者收尾大聲報錯（埠未釋放，列出占用者）、該實例保留、離開碼非 0，手動停掉後重跑工具清除；不占埠也不鎖實例者留在機器上，只有 `killSkipped` 有紀錄。POSIX 路徑只有注入測試，未實機跑過。
 
 **不得多開之流程**（SKILL §1.5）：畫面或期望值含主機與埠者列 `officialOnly`；共用同一真實收件匣者不要在兩個實例同時跑（放在同一組）；未通過首次等價驗證之專案不得以實例結果當標準圖依據（本工具本來就不寫標準圖）。
 
 **切勿**直接遞迴刪除或以 robocopy 鏡像清除 `workDir`：實例內尚有 junction 時會穿過連結刪到正式專案；工具留下之殘留一律重跑工具清除。
+
+### 2.12 自動換埠（`reserveE2ePorts`；2026-11-05）
+
+單開 e2e 被占用時自動換埠，使不同套件可同時跑。**沒有占用時即基準埠，位移環境變數維持未設，埠、行為與標準圖皆與未導入相同。** 不是第二套解析：只把選定之位移寫入 `E2E_PORT_OFFSET`，`resolveE2ePort`、`createServiceManager`、前端 proxy 與子行程照舊由它取得實際埠（§2.10）。
+
+**導入**（`test/tools/e2e-setup.mjs` 最上層，在任何 `resolveE2ePort`、`createServiceManager` 之前；一次宣告本實例全部基準埠）：
+
+```js
+import reserveE2ePorts from 'w-package-tools-e2e/src/reserveE2ePorts.mjs'
+import resolveE2ePort from 'w-package-tools-e2e/src/resolveE2ePort.mjs'
+
+reserveE2ePorts([11007, 8080]) //被占用時印 [e2e-port] 基準埠 [11007, 8080] → 實際埠 [11107, 8180](位移 100), 並列出占用者
+let baseUrl = `http://127.0.0.1:${resolveE2ePort(8080)}`
+```
+
+**選定流程**：位移 0、`portStep`、2×`portStep`…逐一試（至多 `maxTries`，預設 20）：①預約該位移之每個埠（登錄目錄內每埠一檔，排他建立，由小到大取）→ ②實際綁定驗證（`127.0.0.1`、`0.0.0.0`、`::`、`::1`）→ 全部通過才採用，預約持有至行程結束；任一埠被占用或被他人預約即撤回已取得者、換下一個位移。用盡即拋錯（`err.code` 為 `E2E_PORT_EXHAUSTED`，訊息與 `err.blocked` 列出每個埠之占用者）。`opt.avoid` 列專案其他測試寫死之埠（如 `api-` 測試之固定埠），落在其上之位移直接跳過、不計次數。
+
+**競爭**：同時開跑者以預約檔排他，不會選到同一組；被預約之埠不做實際綁定（不干擾持有者）。**預約殘留**：持有者已死（PID 不存在，或 PID 存在而起始時間差逾 60 秒＝PID 回收；行程表取不到時視為仍在）即回收；不可讀之預約檔 60 秒內視為仍在。正常結束與 `process.exit` 時自動釋放；`taskkill /F` 者由下次開跑回收。
+
+**占用者一律不殺**（E4）。唯一例外：同一專案（`root` 相同，預設 `process.cwd()`）之殘留預約記有已確認身分之行程時，只依 `identity`、`chain` 下殺這些行程（階段 `stale-reservation`，每筆印 `[e2e-port] 下殺…`），之後回到基準埠。身分由 `createServiceManager` 於服務就緒後背景取樣（`noteOwn`；未用管理器者自行呼叫 `reservation.noteOwn(child)`），寫入預約檔；未曾被取樣者不殺。
+
+**與 `E2E_PORT_OFFSET`、多開之關係**：
+
+| 情形 | 行為 | 回傳之 `source` |
+|---|---|---|
+| 未設 | 自動選定，寫入 `E2E_PORT_HOLD` 與（位移非 0 時）`E2E_PORT_OFFSET` | `auto` |
+| 已設（手動；含 `E2E_PORT_OFFSET=0`） | **不換埠**，只預約與告警；`0` 即明確要求基準埠與沿用政策之逃生口（開發中之服務沿用即用此） | `pinned` |
+| 上層已保留（`E2E_PORT_HOLD`；逐檔 runner 之子行程、`runShardedE2e` 之各組） | 沿用上層之位移，不偵測、不預約 | `inherited` |
+
+多開由工具指定位移，工具配發時走同一套預約（§2.11 第 5 點），故單開選不到多開之埠，多開也避開單開已保留之埠；多開未持有之 `ports` 外之埠不受此保護（§2.11〈ports 須列全〉）。
+
+**綁定被搶走**（偵測與綁定之間被未導入者占走）：`createServiceManager` 發現保留後埠已有回應且尚未啟動過，拋錯寫明占用者，**不沿用、不下殺**（重跑即重選）；服務於就緒前結束立即拋錯，不等到逾時。在行程內自行監聽者（靜態站）可以 `applyEnv:false` 取獨立保留，綁定遇 `EADDRINUSE` 呼叫 `reselect()` 換下一個位移：
+
+```js
+let r = reserveE2ePorts([8136], { applyEnv: false })
+while (true) {
+    try {
+        await listen(r.portOf(8136))
+        break
+    }
+    catch (err) {
+        if (err.code !== 'EADDRINUSE') throw err
+        r.reselect('EADDRINUSE') //次數與選定共用上限, 用盡即拋錯寫明占用者
+    }
+}
+```
+
+`applyEnv:true`（預設）之位移已被常數取用後不可重選（常數已過期）；管理器因此不自動重選。
+
+**已導入時 `createServiceManager` 之差異**（未導入者完全不變）：①保留後被占用不沿用；②`restart` 要殺非自建之監聽者時（`killForeignOnRestart`），改走 `reservation.killOwnListeners(port)`，只殺身分已確認屬本實例者，其餘拋錯寫明占用者；③服務就緒前結束即拋錯。
+
+**畫面含埠之流程**（規格 E7；全綠不能證明畫面不含埠：差異可能低於容差，實測見 `test/e2e-portInImage.test.mjs` `[PI1]`）。使用端依下表擇一：
+
+| 作法 | 怎麼做 | 何時選 |
+|---|---|---|
+| **比對端覆蓋**（首選） | `runBaselineCase` 之 `compareBuf` 以 `overlayRegions` 把含埠之矩形換成標準圖同座標內容（與截圖同一畫面狀態下量，涵蓋到行尾），被覆蓋之值另以語意斷言驗為實際埠；標準圖不動 | 含埠之處是畫面一小段、位置固定，且該流程要能併行 |
+| **只能在基準埠跑** | `reserveE2ePorts(ports, { baseOnly: true })`：被占用時**等待**（至多 `waitTimeoutMs`，預設 30 分）不換埠，逾時拋 `E2E_PORT_BASE_BUSY`；多開時列 `officialOnly`；流程開頭 `assertE2eBasePort('流程名')` 防止跑到位移實例 | 含埠之處多或散、難以量測，或期望值含埠而不便改；代價是同機同基準埠者要排隊 |
+
+```js
+//比對端覆蓋
+await runBaselineCase({
+    //…
+    compareBuf: async (buf, baselinePath) => {
+        let box = await page.locator('#url').boundingBox()
+        return overlayRegions(buf, [{ x: box.x - 3, y: box.y - 3, w: box.width + 40, h: box.height + 6 }], fs.readFileSync(baselinePath))
+    },
+})
+assert.strictEqual(await page.textContent('#url'), `http://127.0.0.1:${resolveE2ePort(8080)}/?view=user`) //被覆蓋之值另以語意斷言驗
+```
+
+**各套件要改哪裡**：
+
+1. `test/tools/e2e-setup.mjs` 最上層呼叫 `reserveE2ePorts(本實例全部基準埠)`；`opt.avoid` 列同套件 `api-`、`unit-` 測試寫死之埠。
+2. 前端、後端、redirect、CORS、種子內網址、設定檔之埠一律由 `resolveE2ePort` 衍生；`Grep "localhost:|127\.0\.0\.1:" test/` 逐筆確認（§2.10）。`vue-cli-service serve` 要帶 `--port <實際埠>`（否則其 portfinder 會靜默改埠）。
+3. 逐檔 runner（`run-e2e-isolated.mjs`）於最上層先呼叫一次，子行程之 mocha 繼承保留；其 `killPortListeners(埠)` 改為 `reservation.killOwnListeners(埠)`（回傳形狀相容 `{pids,killed}`，多 `skipped`）。
+4. 不用 `createServiceManager` 者：自建之服務就緒後呼叫 `reservation.noteOwn(child)`；被占用即拋錯之檢查可移除。
+5. 畫面含埠者依上表處理；`test/tools/e2eShard.json` 之 `officialOnly` 改為覆蓋者可移出。
+6. 實測（規格 §3）：①人為占用基準埠，e2e 全綠且占用者無恙；②兩個套件同時跑全綠；③沒有占用時，標準圖比對結果與導入前相同。
+
+**限制**：只防已導入者之間互撞與偵測當下之占用者；未導入者（含非 e2e 測試寫死之埠）在保留之後才綁定者，由管理器大聲報錯，不自動處理（規格 E8 另案）。登錄目錄在使用者家目錄（不是暫存目錄：`TEMP` 可能因工作階段不同而不同，就看不到彼此之預約）；持有者 PID 判定只用於回收預約，不用於下殺。同一行程內多個管理器管同一埠時，第二個會把第一個啟動之服務當成他人（一個實例一個管理器）。POSIX 只有注入測試。
 
 ## 3. 採用步驟（以 w-web-sso 為例）
 
@@ -441,6 +525,15 @@ let captureStableWithBox = (page, target, opts = {}) => pkgCaptureStableWithBox(
 6. 結束後 `diffBaselineSnapshots` 須 unchanged（added / removed / changed / touched 皆空）且 `git status --porcelain -- test/pics` 為空。
 
 ## 5. 改版須知：哪些變更會動到使用端之標準圖
+
+### 行為變更（2026-11-05，自動換埠；拿掉讀其他行程環境區塊之證據）
+
+不影響標準圖像素；沒有占用時埠與行為不變。新增 `reserveE2ePorts`（opt-in，§2.12），未呼叫者行為不變。
+
+- **`runShardedE2e` 之埠被占用時**：原為預檢失敗即拋錯，現改用下一個空的位移槽（至多 `portTries`）並持有預約；要維持舊行為給 `portTries: 1`。含 `officialOnly` 之第 0 組改為等待基準埠（至多 `portWaitMs`）。回傳值之 `groups[].offset` 為實際位移。沒有占用時第 i 組仍為 i×portStep。
+- **移除 `env-marker`、`instance-cwd` 兩種下殺依據**：`readProcessEvidence` 匯出、`reapShardProcesses` 之 `marker`／`dirs`／`procRoot` 選項、`killSkipped` 之 `evidence-unreadable`、環境變數 `E2E_SHARD_RUN`、鎖檔之 `runId` 一併移除（舊鎖檔之 `runId` 忽略；`known` 照用）。下殺依據只留 `identity`、`chain:<父PID>`、`own-child-handle`。未曾被取樣之孤兒不再殺得到：占埠者收尾大聲報錯、實例保留、離開碼非 0（§2.11〈代價〉）。
+- **`treeSampleMs` 預設由 30 秒改 10 秒**，以縮短未被取樣之窗口。
+- **模組搬移**：`listProcessTable`、`sampleShardKnown`、`findProcessDescendants`、`reapShardProcesses` 移至 `src/reapShardProcesses.mjs`，`src/runShardedE2e.mjs` 照舊轉出；埠之綁定檢查移至 `src/checkPortFree.mjs`。入口多 `reserveE2ePorts`、`assertE2eBasePort`、`checkPortFree`、`reapShardProcesses`。
 
 ### 行為變更（2026-11-04，分組多開之下殺須正面確認身分）
 

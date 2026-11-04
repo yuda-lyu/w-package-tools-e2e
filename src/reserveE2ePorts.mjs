@@ -1,0 +1,852 @@
+import fs from 'fs'
+import os from 'os'
+import path from 'path'
+import { spawn, spawnSync } from 'child_process'
+import { randomUUID } from 'crypto'
+import { fileURLToPath } from 'url'
+import getTrace from 'wsemi/src/getTrace.mjs'
+import resolveE2ePort, { resolvedBasePorts } from './resolveE2ePort.mjs'
+import pidExists from './pidExists.mjs'
+import sleepSync from './sleepSync.mjs'
+import isChildAlive from './isChildAlive.mjs'
+import listenerPids from './listenerPids.mjs'
+import reapShardProcesses, { describePortOwners, keyOf, listProcessTable, parseProcessTable, processTableCommand, sampleShardKnown } from './reapShardProcesses.mjs'
+
+
+let OFFSET_ENV = 'E2E_PORT_OFFSET'
+let HOLD_ENV = 'E2E_PORT_HOLD'
+let REG_ENV = 'E2E_PORT_REG_DIR'
+//偵測工具位於本套件 tools/(模組自身位置, 全域 §7.1 場景 B)
+let PROBE_TOOL = fileURLToPath(new URL('../tools/portProbe.mjs', import.meta.url))
+//持有者起始時間之容差: 只用於判斷預約是否殘留(PID 回收), 不用於下殺; 誤判為仍在只是多換一次埠, 誤判為已死才會撞埠, 故取寬
+let START_TOLERANCE_MS = 60000
+//內容不可讀之預約檔(剛建立尚未寫完)視為仍在之時限
+let UNREADABLE_GRACE_MS = 60000
+let KNOWN_LIMIT = 200
+
+//寫入環境變數之保留(一個行程一份: 位移為行程層級, 子行程繼承)
+let active = null
+//行程內尚未釋放之保留, 行程結束時釋放
+let live = new Set()
+let exitHooked = false
+
+
+let isObj = (v) => !!v && typeof v === 'object' && !Array.isArray(v)
+
+
+function pickPosInt(v, def) {
+    return Number.isInteger(v) && v > 0 ? v : def
+}
+
+
+//目前之位移(以環境變數之副本解析: 此處不算「已取過實際埠」)
+function offsetOf(env, base) {
+    return resolveE2ePort(base, { env: { [OFFSET_ENV]: env[OFFSET_ENV] } }) - base
+}
+
+
+function checkBases(basePorts) {
+    if (!Array.isArray(basePorts)) {
+        throw new Error('reserveE2ePorts: basePorts 須為基準埠陣列')
+    }
+    let list = basePorts.map((p) => (typeof p === 'string' && p.trim() !== '' ? Number(p) : p))
+    let bad = list.filter((p) => !Number.isInteger(p) || p < 1 || p > 65535)
+    if (bad.length > 0) {
+        throw new Error(`reserveE2ePorts: basePorts 含不合法之埠: ${basePorts.filter((p, i) => bad.includes(list[i])).join(', ')}`)
+    }
+    return [...new Set(list)]
+}
+
+
+function regDirOf(opt, env) {
+    return path.resolve(opt.regDir || env[REG_ENV] || path.join(os.homedir(), '.w-package-tools-e2e', 'port-reservations'))
+}
+
+
+let fileOf = (regDir, port) => path.join(regDir, `p${port}.json`)
+let isBusyFsError = (err) => ['EEXIST', 'EPERM', 'EBUSY', 'EACCES'].includes(err && err.code)
+let sameRoot = (a, b) => (process.platform === 'win32' ? String(a).toLowerCase() === String(b).toLowerCase() : a === b)
+
+
+function readHolder(fp) {
+    try {
+        let o = JSON.parse(fs.readFileSync(fp, 'utf8'))
+        return isObj(o) ? o : null
+    }
+    catch (err) {
+        return null
+    }
+}
+
+
+//預約之持有者是否仍在: PID 不存在即已死; PID 存在而起始時間差超過容差為 PID 回收; 查不到行程表時視為仍在(收嚴)
+function holderAlive(info, c) {
+    if (!Number.isInteger(info.pid) || !c.exists(info.pid)) {
+        return false
+    }
+    if (!Number.isFinite(info.startApproxMs)) {
+        return true
+    }
+    let table = c.table()
+    let cur = table ? table.find((p) => p.pid === info.pid) : null
+    if (!cur) {
+        return true
+    }
+    return Math.abs(cur.startMs - info.startApproxMs) <= START_TOLERANCE_MS
+}
+
+
+//judge: gone 為檔案已不存在
+function judgeHolder(fp, c) {
+    let cur = readHolder(fp)
+    if (cur) {
+        return { cur, alive: holderAlive(cur, c), gone: false }
+    }
+    let st = fs.statSync(fp, { throwIfNoEntry: false })
+    if (!st) {
+        return { cur: null, alive: false, gone: true }
+    }
+    return { cur: null, alive: Date.now() - st.mtimeMs < UNREADABLE_GRACE_MS, gone: false }
+}
+
+
+//回收殘留之預約: 在接手守衛(.takeover)內再判一次, 免兩個回收者都以為取得
+function reclaim(fp, write, c) {
+    let fpGuard = `${fp}.takeover`
+    let stGuard = fs.statSync(fpGuard, { throwIfNoEntry: false })
+    if (stGuard && Date.now() - stGuard.mtimeMs > UNREADABLE_GRACE_MS) {
+        fs.rmSync(fpGuard, { force: true })
+    }
+    try {
+        fs.writeFileSync(fpGuard, String(process.pid), { flag: 'wx' })
+    }
+    catch (err) {
+        if (isBusyFsError(err)) {
+            return { ok: false, holder: null, note: '另一行程正在回收' }
+        }
+        throw err
+    }
+    try {
+        let j = judgeHolder(fp, c)
+        if (j.alive) {
+            return { ok: false, holder: j.cur }
+        }
+        fs.rmSync(fp, { force: true })
+        write()
+        return { ok: true, stale: j.cur }
+    }
+    catch (err) {
+        if (isBusyFsError(err)) {
+            return { ok: false, holder: null, note: `預約檔忙碌(${err.code})` }
+        }
+        throw err
+    }
+    finally {
+        fs.rmSync(fpGuard, { force: true })
+    }
+}
+
+
+//預約一個埠: 排他建立; 已屬本持有鏈者視為已持有; 持有者仍在即失敗; 持有者已死則回收
+function claimPort(regDir, port, info, c) {
+    let fp = fileOf(regDir, port)
+    let write = () => fs.writeFileSync(fp, JSON.stringify({ ...info, port }), { flag: 'wx' })
+    for (let i = 0; i < 3; i++) {
+        try {
+            write()
+            return { ok: true }
+        }
+        catch (err) {
+            if (!isBusyFsError(err)) {
+                throw err
+            }
+            if (err.code !== 'EEXIST') {
+                //刪除中之檔(Windows 之 delete pending)或防毒掃描: 稍後重試, 屢試不成才視為忙碌
+                sleepSync(20)
+                continue
+            }
+        }
+        let j = judgeHolder(fp, c)
+        if (j.gone) {
+            continue
+        }
+        if (j.cur && c.ownTokens.includes(j.cur.token)) {
+            return { ok: true, already: true }
+        }
+        if (j.alive) {
+            return { ok: false, holder: j.cur }
+        }
+        return reclaim(fp, write, c)
+    }
+    return { ok: false, holder: null, note: '預約檔忙碌' }
+}
+
+
+//只刪除屬於本持有者之預約檔
+function dropClaims(regDir, ports, token) {
+    for (let p of ports) {
+        let fp = fileOf(regDir, p)
+        let cur = readHolder(fp)
+        if (cur && cur.token === token) {
+            try {
+                fs.rmSync(fp, { force: true })
+            }
+            catch (err) {}
+        }
+    }
+}
+
+
+//預設偵測: 子行程以實際綁定檢查; 子行程本身失敗回 null
+function probeDef(ports) {
+    let r = spawnSync(process.execPath, [PROBE_TOOL, ...ports.map(String)], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 30000, windowsHide: true })
+    if (r.error || r.status !== 0) {
+        return null
+    }
+    try {
+        return JSON.parse(r.stdout)
+    }
+    catch (err) {
+        return null
+    }
+}
+
+
+/**
+ * 建立跨行程之埠預約器(reserveE2ePorts與runShardedE2e共用)：tryOffset把一組基準埠於某位移下預約並以實際綁定驗證，全部通過才算取得
+ *
+ * 預約：登錄目錄(預設<家目錄>/.w-package-tools-e2e/port-reservations，opt.regDir或環境變數E2E_PORT_REG_DIR可改)內每埠一個檔，以排他建立取得，由小到大取以免互相卡住。
+ * 持有者已死(PID不存在，或PID存在而起始時間差逾60秒＝PID回收)之預約可回收；同一專案(root相同)之殘留預約記有已確認身分之行程時，依identity與chain下殺其殘留(只殺這些)，其餘占用者一律不動。
+ *
+ * @param {Object} [opt={}] 輸入設定物件，預設{}
+ * @param {String} [opt.root=process.cwd()] 輸入專案根目錄字串，判定殘留是否屬本專案，預設process.cwd()
+ * @param {String} [opt.regDir] 輸入登錄目錄字串，預設取環境變數E2E_PORT_REG_DIR，再預設<家目錄>/.w-package-tools-e2e/port-reservations
+ * @param {Object} [opt.env=process.env] 輸入環境變數物件，預設process.env
+ * @param {Array} [opt.ownTokens=[]] 輸入視同本持有鏈之識別碼陣列，預設[]
+ * @param {Function} [opt.probe] 輸入偵測函數(ports)=>元素為{port,free,host,code}之陣列或null，預設以子行程實際綁定
+ * @param {Function} [opt.exec] 輸入同步執行子指令函數(與child_process.spawnSync同形)，預設為不經shell、隱藏視窗之spawnSync
+ * @param {Function} [opt.exists=pidExists] 輸入判斷PID存在之函數，預設pidExists
+ * @param {Function} [opt.log=console.log] 輸入輸出函數，預設console.log
+ * @returns {Object} 回傳物件{token,root,regDir,tryOffset(bases,offset),release(ports),releaseAll(),held()}，tryOffset回傳{ok,ports,kills,blocked}，blocked元素為{base,offset,port,code,host,owners}
+ * @example
+ *
+ * import { createE2ePortClaimer } from 'w-package-tools-e2e/src/reserveE2ePorts.mjs'
+ *
+ * let c = createE2ePortClaimer({ root: process.cwd() })
+ * let r = c.tryOffset([8080, 11007], 100)
+ * console.log(r.ok, r.ports)
+ * // => true [8180, 11107]
+ * c.releaseAll()
+ *
+ */
+export function createE2ePortClaimer(opt = {}) {
+    let env = opt.env || process.env
+    let token = opt.token || randomUUID()
+    let root = path.resolve(opt.root || process.cwd())
+    let regDir = regDirOf(opt, env)
+    let log = typeof opt.log === 'function' ? opt.log : console.log
+    let probe = typeof opt.probe === 'function' ? opt.probe : probeDef
+    let exec = typeof opt.exec === 'function' ? opt.exec : undefined
+    let exists = typeof opt.exists === 'function' ? opt.exists : pidExists
+    let ownTokens = [token, ...(Array.isArray(opt.ownTokens) ? opt.ownTokens : [])]
+    let held = new Set()
+    let tableCache
+    let c = {
+        exists,
+        ownTokens,
+        table: () => {
+            if (tableCache === undefined) {
+                tableCache = listProcessTable({ exec })
+            }
+            return tableCache
+        },
+    }
+    let regOk = true
+    try {
+        fs.mkdirSync(regDir, { recursive: true })
+    }
+    catch (err) {
+        regOk = false
+        log(`[e2e-port] 警告: 無法建立預約目錄 ${regDir}(${err.code || err.message}), 不預約, 只以實際綁定偵測; 同時開跑之行程可能選到同一組埠`)
+    }
+    let warnedProbe = false
+
+    function tryOffset(bases, offset, meta = {}) {
+        //行程表只快取一輪判定: 持有者可能隨時結束
+        tableCache = undefined
+        let ports = bases.map((b) => b + offset)
+        let info = { token, pid: process.pid, startApproxMs: Date.now() - process.uptime() * 1000, root, offset, t: Date.now(), known: [], ...meta }
+        let got = []
+        let staleList = []
+        if (regOk) {
+            //由小到大取: 同時開跑者先搶同一個最小之埠, 不會各持一部分而互相讓開
+            let order = bases.map((b) => ({ base: b, port: b + offset })).sort((a, b) => a.port - b.port)
+            for (let t of order) {
+                let r = claimPort(regDir, t.port, info, c)
+                if (!r.ok) {
+                    dropClaims(regDir, got, token)
+                    let who = r.holder ? `已被預約: PID ${r.holder.pid}${r.holder.root ? ` ${r.holder.root}` : ''}` : (r.note || '預約檔忙碌')
+                    return { ok: false, ports, kills: [], blocked: [{ base: t.base, offset, port: t.port, code: 'RESERVED', host: '', owners: who }] }
+                }
+                if (!r.already) {
+                    got.push(t.port)
+                }
+                if (r.stale) {
+                    staleList.push(r.stale)
+                }
+            }
+        }
+        //本專案之殘留預約: 只殺其記下之身分已確認行程
+        let kills = []
+        let residue = staleList.filter((s) => sameRoot(s.root, root) && Array.isArray(s.known) && s.known.length > 0)
+        if (residue.length > 0) {
+            let map = new Map()
+            residue.flatMap((s) => s.known).forEach((k) => map.set(keyOf(k), k))
+            log(`[e2e-port] 回收本專案之殘留預約(持有者 PID ${[...new Set(residue.map((s) => s.pid))].join(', ')} 已結束): 依身分終止其記下之 ${map.size} 個行程`)
+            kills = reapShardProcesses({ known: [...map.values()], phase: 'stale-reservation', exec, log: (s) => log(s.replace(/^\[shard\]/, '[e2e-port]')) }).kills
+        }
+        let res = probe(ports)
+        if (res === null) {
+            if (!warnedProbe) {
+                warnedProbe = true
+                log('[e2e-port] 警告: 偵測子行程失敗, 無法確認埠是否可用, 照預約結果繼續')
+            }
+            got.forEach((p) => held.add(p))
+            return { ok: true, ports, kills, blocked: [] }
+        }
+        let busy = res.filter((r) => !r.free)
+        //剛殺掉殘留時埠可能還要片刻才釋放
+        if (busy.length > 0 && kills.length > 0) {
+            for (let i = 0; i < 25 && busy.length > 0; i++) {
+                sleepSync(200)
+                busy = (probe(ports) || []).filter((r) => !r.free)
+            }
+        }
+        if (busy.length > 0) {
+            dropClaims(regDir, got, token)
+            let blocked = busy.map((b) => ({
+                base: bases[ports.indexOf(b.port)],
+                offset,
+                port: b.port,
+                code: b.code,
+                host: b.host,
+                owners: describePortOwners(b.port, { exec }),
+            }))
+            return { ok: false, ports, kills, blocked }
+        }
+        got.forEach((p) => held.add(p))
+        return { ok: true, ports, kills, blocked: [] }
+    }
+
+    function release(ports) {
+        dropClaims(regDir, ports, token)
+        ports.forEach((p) => held.delete(p))
+    }
+
+    function releaseAll() {
+        release([...held])
+    }
+
+    return { token, root, regDir, tryOffset, release, releaseAll, held: () => [...held], read: (port) => readHolder(fileOf(regDir, port)) }
+}
+
+
+function fmtBlocked(b) {
+    return `埠 ${b.port}(基準 ${b.base}+${b.offset}): ${b.code}${b.host ? `@${b.host}` : ''}; ${b.owners}`
+}
+
+
+//把已確認身分之行程併入預約檔(整檔換掉, 讀者不會讀到半份); 失敗不影響測試
+function writeKnown(regDir, ports, known) {
+    for (let p of ports) {
+        let fp = fileOf(regDir, p)
+        let cur = readHolder(fp)
+        if (!cur) {
+            continue
+        }
+        let map = new Map((Array.isArray(cur.known) ? cur.known : []).map((k) => [keyOf(k), k]))
+        known.forEach((k) => map.set(keyOf(k), k))
+        cur.known = [...map.values()].slice(-KNOWN_LIMIT)
+        let tmp = `${fp}.${process.pid}.tmp`
+        try {
+            fs.writeFileSync(tmp, JSON.stringify(cur))
+            fs.renameSync(tmp, fp)
+        }
+        catch (err) {
+            fs.rmSync(tmp, { force: true })
+        }
+    }
+}
+
+
+//非同步取行程表(服務已就緒後背景取樣, 不阻塞測試)
+function tableAsync(cb) {
+    let { prog, args } = processTableCommand()
+    let out = ''
+    let done = false
+    let finish = (table) => {
+        if (!done) {
+            done = true
+            cb(table)
+        }
+    }
+    let cp
+    try {
+        cp = spawn(prog, args, { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true })
+    }
+    catch (err) {
+        finish(null)
+        return
+    }
+    cp.stdout.on('data', (d) => {
+        out += d
+    })
+    cp.once('error', () => finish(null))
+    cp.once('close', (code) => finish(code === 0 ? parseProcessTable(out) : null))
+    //不阻擋本行程結束
+    cp.unref()
+    cp.stdout.unref()
+}
+
+
+function makeHandle(s) {
+    let exec = s.exec
+    let sampling = false
+    let dirty = false
+    let children = new Set()
+    let known = []
+
+    function sample() {
+        if (sampling) {
+            dirty = true
+            return
+        }
+        sampling = true
+        s.tableAsync((table) => {
+            sampling = false
+            if (table) {
+                let seeds = [...known]
+                for (let child of children) {
+                    if (isChildAlive(child)) {
+                        let row = table.find((p) => p.pid === child.pid)
+                        if (row) {
+                            seeds.push({ pid: row.pid, startMs: row.startMs, image: row.image || '' })
+                        }
+                    }
+                    else {
+                        children.delete(child)
+                    }
+                }
+                known = sampleShardKnown(table, seeds).known
+                if (s.regDir) {
+                    writeKnown(s.regDir, h.ports, known)
+                }
+            }
+            if (dirty) {
+                dirty = false
+                sample()
+            }
+        })
+    }
+
+    let h = {
+        source: s.source,
+        token: s.token,
+        offset: s.offset,
+        shifted: s.offset !== 0,
+        basePorts: s.bases,
+        ports: s.bases.map((b) => b + s.offset),
+        portOf: (base) => Number(base) + h.offset,
+        //記下本實例之服務行程: 背景取其真實起始時間與子孫, 寫入預約檔; 供下次開跑與restart依身分確認殘留
+        noteOwn: (child) => {
+            if (!child || !child.pid) {
+                return
+            }
+            children.add(child)
+            sample()
+        },
+        //只殺身分已確認屬本實例之監聽者(identity、chain); 其餘占用者留在skipped; 回傳形狀相容killPortListeners之{pids,killed}
+        killOwnListeners: (port) => {
+            let pids = listenerPids(port, { useBoth: true, timeout: 5000, exec })
+            if (pids === null || pids.length === 0) {
+                return { pids, killed: [], skipped: [] }
+            }
+            let map = new Map(known.map((k) => [keyOf(k), k]))
+            if (s.regDir) {
+                let cur = readHolder(fileOf(s.regDir, port))
+                if (cur && Array.isArray(cur.known) && s.ownTokens.includes(cur.token)) {
+                    cur.known.forEach((k) => map.set(keyOf(k), k))
+                }
+            }
+            let r = reapShardProcesses({ known: [...map.values()], only: pids.map(Number), phase: 'own-listener', exec, log: (t) => s.log(t.replace(/^\[shard\]/, '[e2e-port]')) })
+            let killed = r.kills.filter((v) => v.result === 'killed').map((v) => String(v.pid))
+            return { pids, killed, skipped: pids.filter((p) => !killed.includes(p)), kills: r.kills }
+        },
+        reselect: (reason = '') => s.reselect(h, reason),
+        release: () => s.release(h),
+    }
+    return h
+}
+
+
+//行程結束時釋放預約(正常結束、process.exit; TerminateProcess 者由下次開跑回收)
+function hookExit() {
+    if (exitHooked) {
+        return
+    }
+    exitHooked = true
+    process.once('exit', () => {
+        for (let fn of live) {
+            try {
+                fn()
+            }
+            catch (err) {}
+        }
+    })
+}
+
+
+/**
+ * 依基準埠自動選定本實例之一組埠：沒有占用時即基準埠(行為同未導入)；被占用時整組一起移位，把位移寫入環境變數E2E_PORT_OFFSET，其後resolveE2ePort、createServiceManager與子行程一律取得同一組實際埠
+ *
+ * 須於任何resolveE2ePort與createServiceManager之前呼叫(通常在e2e-setup模組最上層)，一次宣告本實例全部基準埠。絕不下殺占用者。
+ * 選定流程：位移0、portStep、2×portStep…逐一試(至多maxTries個)：預約該位移之每個埠(跨行程排他，同時開跑者不會選到同一組)→以實際綁定驗證→全部通過才採用，預約持有至本行程結束。
+ * 任一埠被占用或被他人預約即換下一個位移；用盡即拋錯(err.code為'E2E_PORT_EXHAUSTED'，err.blocked列出每個埠之占用者)。實際埠印入輸出([e2e-port])。
+ * 環境變數E2E_PORT_OFFSET已指定(多開工具或手動；手動指定0即明確要求基準埠與沿用政策)：不換埠，只預約與告警；上層已保留(環境變數E2E_PORT_HOLD)：沿用上層之位移。
+ * baseOnly用於畫面含埠之流程：只用基準埠，被占用時等待(至多waitTimeoutMs)，不換埠；位移已被指定為非0即拋錯。
+ * applyEnv為false時不寫環境變數，由回傳值之portOf取實際埠：供一個行程內多組彼此獨立、由行程內自行監聽之服務，綁定遇EADDRINUSE可呼叫reselect換下一個位移。
+ *
+ * @param {Array} basePorts 輸入本實例全部基準埠之數字陣列
+ * @param {Object} [opt={}] 輸入設定物件，預設{}
+ * @param {Number} [opt.portStep=100] 輸入位移間距，預設100
+ * @param {Number} [opt.maxTries=20] 輸入最多試幾個位移，預設20
+ * @param {Array} [opt.avoid=[]] 輸入不可使用之實際埠陣列(專案其他測試寫死之埠)，落在其上之位移直接跳過且不計次數，預設[]
+ * @param {Boolean} [opt.baseOnly=false] 輸入是否只能用基準埠布林值，預設false
+ * @param {Number} [opt.waitTimeoutMs=1800000] 輸入baseOnly時等待上限毫秒數，預設1800000(30分)
+ * @param {Number} [opt.waitPollMs=1000] 輸入baseOnly時輪詢間隔毫秒數，預設1000
+ * @param {Boolean} [opt.applyEnv=true] 輸入是否寫入環境變數布林值，預設true
+ * @param {String} [opt.root=process.cwd()] 輸入專案根目錄字串，判定殘留預約是否屬本專案，預設process.cwd()
+ * @param {String} [opt.regDir] 輸入登錄目錄字串，預設取環境變數E2E_PORT_REG_DIR，再預設<家目錄>/.w-package-tools-e2e/port-reservations
+ * @param {Object} [opt.env=process.env] 輸入環境變數物件，預設process.env
+ * @param {Function} [opt.probe] 輸入偵測函數(ports)=>元素為{port,free,host,code}之陣列或null，預設以子行程實際綁定
+ * @param {Function} [opt.exec] 輸入同步執行子指令函數(與child_process.spawnSync同形)，預設為不經shell、隱藏視窗之spawnSync
+ * @param {Function} [opt.exists=pidExists] 輸入判斷PID存在之函數，預設pidExists
+ * @param {Function} [opt.sleepFn=sleepSync] 輸入同步等待函數(ms)，預設sleepSync
+ * @param {Function} [opt.log=console.log] 輸入輸出函數，預設console.log
+ * @param {Function} [opt.onTrace=null] 輸入觀察回調函數，傳入凍結之事件物件{ type, ... }，type為'try'(試某位移；offset)、'blocked'(該位移不可用；offset、ports、codes)、'wait'(baseOnly等待中；offset)、'selected'(已選定；offset、ports、source)、'exhausted'(重選用盡；tries)，預設null
+ * @returns {Object} 回傳物件{source,token,offset,shifted,basePorts,ports,portOf(base),noteOwn(child),killOwnListeners(port),reselect(reason),release()}，source為'auto'(本行程選定)、'pinned'(環境變數已指定)、'inherited'(上層已保留)
+ * @example
+ *
+ * import reserveE2ePorts from 'w-package-tools-e2e/src/reserveE2ePorts.mjs'
+ * import resolveE2ePort from 'w-package-tools-e2e/src/resolveE2ePort.mjs'
+ *
+ * reserveE2ePorts([11007, 8080])
+ * //8080被占用時印出 [e2e-port] 基準埠 [11007, 8080] → 實際埠 [11107, 8180] (位移 100) ...
+ * let baseUrl = `http://127.0.0.1:${resolveE2ePort(8080)}` //http://127.0.0.1:8180
+ *
+ */
+function reserveE2ePorts(basePorts, opt = {}) {
+    if (!isObj(opt)) {
+        opt = {}
+    }
+    let bases = checkBases(basePorts)
+    let env = opt.env || process.env
+    let log = typeof opt.log === 'function' ? opt.log : console.log
+    let trace = getTrace(opt)
+    let portStep = pickPosInt(opt.portStep, 100)
+    let maxTries = pickPosInt(opt.maxTries, 20)
+    let waitTimeoutMs = pickPosInt(opt.waitTimeoutMs, 1800000)
+    let waitPollMs = pickPosInt(opt.waitPollMs, 1000)
+    let sleepFn = typeof opt.sleepFn === 'function' ? opt.sleepFn : sleepSync
+    let avoid = new Set(Array.isArray(opt.avoid) ? opt.avoid.map(Number) : [])
+    let baseOnly = opt.baseOnly === true
+    let applyEnv = opt.applyEnv !== false
+    let exec = typeof opt.exec === 'function' ? opt.exec : undefined
+
+    //E2E_PORT_OFFSET 之合法性同 resolveE2ePort(不合法即拋錯)
+    let rawOffset = env[OFFSET_ENV]
+    let hasOffset = !(rawOffset === undefined || rawOffset === null || String(rawOffset).trim() === '')
+    let curOffset = offsetOf(env, bases.length > 0 ? bases[0] : 1)
+    let hold = env[HOLD_ENV] ? String(env[HOLD_ENV]) : ''
+
+    if (baseOnly && curOffset !== 0) {
+        throw new Error(`reserveE2ePorts: 本實例之畫面含埠(baseOnly), 只能在基準埠跑; ${OFFSET_ENV}=${rawOffset} 已指定非 0 位移`)
+    }
+
+    //同一行程再次呼叫: 位移已定, 只補預約新增之埠
+    if (applyEnv && active && active.env === env) {
+        return extendActive(active, bases, log)
+    }
+
+    let claimer = createE2ePortClaimer({ root: opt.root, regDir: opt.regDir, env, ownTokens: hold ? [hold] : [], probe: opt.probe, exec, exists: opt.exists, log })
+
+    let s = {
+        bases,
+        env,
+        log,
+        exec,
+        token: claimer.token,
+        regDir: claimer.regDir,
+        ownTokens: [claimer.token, ...(hold ? [hold] : [])],
+        tableAsync: typeof opt.tableAsync === 'function' ? opt.tableAsync : tableAsync,
+        offset: curOffset,
+        source: 'auto',
+        reselect: null,
+        release: null,
+    }
+
+    let finish = (handle, saved) => {
+        if (trace) {
+            trace('selected', { offset: handle.offset, ports: [...handle.ports], source: handle.source })
+        }
+        let released = false
+        s.release = (h) => {
+            if (released) {
+                return
+            }
+            released = true
+            live.delete(s.releaseNow)
+            claimer.releaseAll()
+            if (saved) {
+                for (let [k, v] of Object.entries(saved)) {
+                    if (v === undefined) {
+                        delete env[k]
+                    }
+                    else {
+                        env[k] = v
+                    }
+                }
+            }
+            if (active && active.handle === h) {
+                active = null
+            }
+        }
+        s.releaseNow = () => s.release(handle)
+        live.add(s.releaseNow)
+        hookExit()
+        if (applyEnv) {
+            active = { handle, env, s, claimer }
+        }
+        return handle
+    }
+    let notSelectable = (source) => () => {
+        throw new Error(`reserveE2ePorts: 位移由${source === 'inherited' ? '上層保留' : ` ${OFFSET_ENV} 指定`}, 不可重選`)
+    }
+
+    //上層已保留: 沿用其位移, 不預約、不偵測
+    if (hold && applyEnv) {
+        s.source = 'inherited'
+        s.reselect = notSelectable('inherited')
+        log(`[e2e-port] 沿用上層保留: 埠 [${bases.map((b) => b + curOffset).join(', ')}](位移 ${curOffset})`)
+        s.ownTokens = [hold]
+        return finish(makeHandle(s), null)
+    }
+
+    //環境變數已指定位移: 不換埠(多開工具或手動), 只預約與告警
+    if (hasOffset && applyEnv) {
+        s.source = 'pinned'
+        s.reselect = notSelectable('pinned')
+        let r = claimer.tryOffset(bases, curOffset, { basePorts: bases })
+        if (!r.ok) {
+            log(`[e2e-port] 警告: ${OFFSET_ENV}=${rawOffset} 已指定, 不換埠, 但下列埠不可用:\n${r.blocked.map((b) => `  ${fmtBlocked(b)}`).join('\n')}`)
+        }
+        log(`[e2e-port] 依 ${OFFSET_ENV}=${rawOffset}: 埠 [${r.ports.join(', ')}]`)
+        let saved = { [HOLD_ENV]: env[HOLD_ENV] }
+        env[HOLD_ENV] = claimer.token
+        return finish(makeHandle(s), saved)
+    }
+
+    //保留前已取過實際埠: 其後換埠時那些常數會過期, 服務之間就連不上
+    if (applyEnv && env === process.env) {
+        let early = bases.filter((b) => resolvedBasePorts.has(b))
+        if (early.length > 0) {
+            throw new Error(`reserveE2ePorts: resolveE2ePort(${early.join(', ')}) 或 createServiceManager 已於保留前呼叫; 請把 reserveE2ePorts 移到最前面, 否則換埠時先前之值會過期`)
+        }
+    }
+
+    let select = (startOffset, used) => {
+        let blocked = []
+        let tries = used
+        let off = startOffset
+        while (tries < maxTries) {
+            let ports = bases.map((b) => b + off)
+            if (ports.some((p) => p > 65535)) {
+                blocked.push({ base: bases[0], offset: off, port: Math.max(...ports), code: 'OVERFLOW', host: '', owners: '位移後超過 65535' })
+                break
+            }
+            if (ports.some((p) => avoid.has(p))) {
+                off += portStep
+                continue
+            }
+            tries++
+            if (trace) {
+                trace('try', { offset: off })
+            }
+            let r = claimer.tryOffset(bases, off, { basePorts: bases })
+            if (r.ok) {
+                return { offset: off, tries, blocked }
+            }
+            if (trace) {
+                trace('blocked', { offset: off, ports: r.blocked.map((b) => b.port), codes: r.blocked.map((b) => b.code) })
+            }
+            blocked.push(...r.blocked)
+            off += portStep
+        }
+        if (trace) {
+            trace('exhausted', { tries })
+        }
+        let err = new Error(`reserveE2ePorts: 試了 ${tries} 個位移皆不可用(基準埠 [${bases.join(', ')}]; 未下殺任何占用者):\n${blocked.map((b) => `  ${fmtBlocked(b)}`).join('\n')}`)
+        err.code = 'E2E_PORT_EXHAUSTED'
+        err.blocked = blocked
+        throw err
+    }
+
+    let saved = applyEnv ? { [OFFSET_ENV]: env[OFFSET_ENV], [HOLD_ENV]: env[HOLD_ENV] } : null
+    let applyOffset = (off) => {
+        if (!applyEnv) {
+            return
+        }
+        env[HOLD_ENV] = claimer.token
+        if (off !== 0) {
+            env[OFFSET_ENV] = String(off)
+        }
+        else {
+            delete env[OFFSET_ENV]
+        }
+    }
+
+    let printOutcome = (off, blocked, verb = '') => {
+        let ports = bases.map((b) => b + off)
+        if (off === curOffset && blocked.length === 0) {
+            log(`[e2e-port] ${verb}埠 [${ports.join(', ')}](${off === 0 ? '基準埠' : `位移 ${off}`})`)
+            return
+        }
+        log(`[e2e-port] ${verb}基準埠 [${bases.join(', ')}] → 實際埠 [${ports.join(', ')}](位移 ${off})`)
+        blocked.forEach((b) => log(`[e2e-port]   略過 ${fmtBlocked(b)}`))
+    }
+
+    if (baseOnly) {
+        //畫面含埠: 只用基準埠, 被占用時等待
+        let t0 = Date.now()
+        let tLog = 0
+        let last = null
+        while (true) {
+            let r = claimer.tryOffset(bases, 0, { basePorts: bases, baseOnly: true })
+            if (r.ok) {
+                break
+            }
+            last = r
+            if (Date.now() - t0 >= waitTimeoutMs) {
+                let err = new Error(`reserveE2ePorts: 基準埠等待 ${Math.round(waitTimeoutMs / 1000)} 秒仍被占用(baseOnly, 不換埠, 未下殺任何占用者):\n${r.blocked.map((b) => `  ${fmtBlocked(b)}`).join('\n')}`)
+                err.code = 'E2E_PORT_BASE_BUSY'
+                err.blocked = r.blocked
+                throw err
+            }
+            if (Date.now() - tLog >= 30000) {
+                tLog = Date.now()
+                log(`[e2e-port] 基準埠被占用, 等待中(baseOnly, 不換埠): ${r.blocked.map(fmtBlocked).join(' | ')}`)
+            }
+            if (trace) {
+                trace('wait', { offset: 0 })
+            }
+            sleepFn(waitPollMs)
+        }
+        if (last) {
+            log('[e2e-port] 基準埠已釋放')
+        }
+        s.offset = 0
+        s.reselect = () => {
+            throw new Error('reserveE2ePorts: baseOnly 只能用基準埠, 不可重選')
+        }
+        applyOffset(0)
+        printOutcome(0, [])
+        return finish(makeHandle(s), saved)
+    }
+
+    let startOffset = curOffset
+    let picked = select(startOffset, 0)
+    s.offset = picked.offset
+    let triesUsed = picked.tries
+    applyOffset(picked.offset)
+    printOutcome(picked.offset, picked.blocked)
+    s.reselect = (h, reason) => {
+        let prev = h.offset
+        claimer.release(h.ports)
+        let r = select(prev + portStep, triesUsed)
+        triesUsed = r.tries
+        h.offset = r.offset
+        h.shifted = r.offset !== 0
+        h.ports = bases.map((b) => b + r.offset)
+        applyOffset(r.offset)
+        if (trace) {
+            trace('selected', { offset: r.offset, ports: [...h.ports], source: h.source })
+        }
+        log(`[e2e-port] 重選(${reason || '綁定失敗'}): 位移 ${prev} → ${r.offset}; 埠 [${h.ports.join(', ')}]`)
+        r.blocked.forEach((b) => log(`[e2e-port]   略過 ${fmtBlocked(b)}`))
+        return h
+    }
+    return finish(makeHandle(s), saved)
+}
+
+
+//同一行程再次呼叫: 位移已定且已被使用, 不可再變; 新增之埠只能在同一位移下預約
+function extendActive(a, bases, log) {
+    let h = a.handle
+    let extra = bases.filter((b) => !h.basePorts.includes(b))
+    if (extra.length === 0) {
+        return h
+    }
+    if (h.source === 'auto') {
+        let r = a.claimer.tryOffset(extra, h.offset, { basePorts: extra })
+        if (!r.ok) {
+            throw new Error(`reserveE2ePorts: 本行程已選定位移 ${h.offset}, 新增之埠在此位移不可用(請一次宣告全部基準埠, 或各組以 applyEnv:false 分開保留):\n${r.blocked.map((b) => `  ${fmtBlocked(b)}`).join('\n')}`)
+        }
+    }
+    h.basePorts = [...h.basePorts, ...extra]
+    h.ports = h.basePorts.map((b) => b + h.offset)
+    log(`[e2e-port] 新增埠 [${extra.map((b) => b + h.offset).join(', ')}](位移 ${h.offset})`)
+    return h
+}
+
+
+/**
+ * 取得本行程寫入環境變數之保留，沒有回傳null(createServiceManager據以判斷是否已導入)
+ *
+ * @returns {Object|null} 回傳reserveE2ePorts之回傳物件或null
+ * @example
+ *
+ * import { getActiveE2ePortReservation } from 'w-package-tools-e2e/src/reserveE2ePorts.mjs'
+ *
+ * console.log(getActiveE2ePortReservation())
+ * // => null
+ *
+ */
+export function getActiveE2ePortReservation() {
+    return active ? active.handle : null
+}
+
+
+/**
+ * 確認目前跑在基準埠：畫面含埠之流程於開頭呼叫，位移非0即拋錯(比對端未覆蓋時，位移後之標準圖差異可能低於容差而假綠)
+ *
+ * @param {String} [flow=''] 輸入流程名稱字串，寫入錯誤訊息，預設''
+ * @param {Object} [opt={}] 輸入設定物件，預設{}
+ * @param {Object} [opt.env=process.env] 輸入環境變數物件，預設process.env
+ * @returns {undefined} 無回傳
+ * @example
+ *
+ * import { assertE2eBasePort } from 'w-package-tools-e2e/src/reserveE2ePorts.mjs'
+ *
+ * assertE2eBasePort('e2e-apitest')
+ *
+ */
+export function assertE2eBasePort(flow = '', opt = {}) {
+    let env = (isObj(opt) && opt.env) || process.env
+    let offset = offsetOf(env, 1)
+    if (offset !== 0) {
+        throw new Error(`流程${flow ? ` ${flow} ` : ''}之畫面含埠, 只能在基準埠跑(目前 ${OFFSET_ENV}=${offset}); 請以 reserveE2ePorts 之 baseOnly 或多開之 officialOnly 排在基準埠`)
+    }
+}
+
+
+export default reserveE2ePorts
