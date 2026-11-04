@@ -3,6 +3,7 @@ import os from 'os'
 import net from 'net'
 import path from 'path'
 import { spawn, spawnSync } from 'child_process'
+import { randomUUID } from 'crypto'
 import { fileURLToPath } from 'url'
 import planE2eShards from './planE2eShards.mjs'
 import listDirLinks from './listDirLinks.mjs'
@@ -22,6 +23,19 @@ let SIGNALS = ['SIGINT', 'SIGTERM', 'SIGBREAK', 'SIGHUP']
 let SIGNAL_CODES = { SIGHUP: 129, SIGINT: 130, SIGTERM: 143, SIGBREAK: 149 }
 //報告器位於本套件 tools/(模組自身位置, 全域 §7.1 場景 B)
 let REPORTER = fileURLToPath(new URL('../tools/shardE2eReporter.cjs', import.meta.url))
+//各組 mocha 之環境變數標記(子孫繼承): 未曾被取樣之孤兒靠它確認身分
+let MARK_ENV = 'E2E_SHARD_RUN'
+let BASIS_IDENTITY = 'identity'
+let BASIS_ENV = 'env-marker'
+let BASIS_CWD = 'instance-cwd'
+let BASIS_OWN = 'own-child-handle'
+let PS_TABLE = 'Get-CimInstance Win32_Process | ForEach-Object { if ($_.CreationDate) { \'{0} {1} {2} {3}\' -f $_.ProcessId, $_.ParentProcessId, $_.CreationDate.ToUniversalTime().ToString(\'o\'), $_.Name } }'
+
+
+//預設執行函數(spawnSync形, 同 killPortListeners 之 opt.exec): 不經 shell、隱藏視窗、帶逾時
+function execDef(prog, args, { timeout, maxBuffer }) {
+    return spawnSync(prog, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout, maxBuffer, windowsHide: true })
+}
 
 
 let sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -162,14 +176,15 @@ async function waitPortsFree(ports, timeoutMs) {
 
 
 //PID 之映像名稱(只取名稱, 不取命令列: 命令列可能含憑證)
-function procName(pid) {
+function procName(pid, ctx = {}) {
+    let run = ctx.exec || execDef
     try {
         if (process.platform === 'win32') {
-            let r = spawnSync('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], { encoding: 'utf8', windowsHide: true, timeout: 10000 })
+            let r = run('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], { src: 'tasklist', timeout: 10000, maxBuffer: 1024 * 1024 })
             let m = /^"([^"]+)"/.exec(String(r.stdout || '').trim())
             return m ? m[1] : ''
         }
-        let r = spawnSync('ps', ['-o', 'comm=', '-p', String(pid)], { encoding: 'utf8', timeout: 10000 })
+        let r = run('ps', ['-o', 'comm=', '-p', String(pid)], { src: 'tasklist', timeout: 10000, maxBuffer: 1024 * 1024 })
         return String(r.stdout || '').trim()
     }
     catch (err) {
@@ -179,149 +194,521 @@ function procName(pid) {
 
 
 //列出占用者字串
-function describeOwners(port) {
-    let pids = listenerPids(port, { useBoth: true, timeout: 5000 })
+function describeOwners(port, ctx = {}) {
+    let pids = listenerPids(port, { useBoth: true, timeout: 5000, exec: ctx.exec })
     if (pids === null) {
         return '占用者查詢失敗'
     }
     if (pids.length === 0) {
         return '查無監聽者(可能為保留埠或非監聽之占用)'
     }
-    return pids.map((pid) => `PID ${pid}${procName(pid) ? ` ${procName(pid)}` : ''}`).join(', ')
+    return pids.map((pid) => {
+        let name = procName(pid, ctx)
+        return `PID ${pid}${name ? ` ${name}` : ''}`
+    }).join(', ')
 }
 
 
-//行程表 [{pid,ppid,startMs}]: 查父子關係用(已結束之父之 PID 仍留在子之 ParentProcessId); 只取數字與時間, 不取命令列
-function listProcessTable() {
-    if (process.platform === 'win32') {
-        let cmd = 'Get-CimInstance Win32_Process | ForEach-Object { if ($_.CreationDate) { \'{0} {1} {2}\' -f $_.ProcessId, $_.ParentProcessId, $_.CreationDate.ToUniversalTime().ToString(\'o\') } }'
-        let r = spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', cmd], { encoding: 'utf8', windowsHide: true, timeout: 30000, maxBuffer: 16 * 1024 * 1024 })
-        if (r.error || r.status !== 0) {
-            return null
-        }
-        return String(r.stdout || '').split(/\r?\n/).map((l) => {
-            let m = /^(\d+) (\d+) (\S+)$/.exec(l.trim())
-            return m ? { pid: Number(m[1]), ppid: Number(m[2]), startMs: Date.parse(m[3]) } : null
-        }).filter((v) => v && Number.isFinite(v.startMs))
-    }
-    let r = spawnSync('ps', ['-A', '-o', 'pid=,ppid=,lstart='], { encoding: 'utf8', timeout: 30000, maxBuffer: 16 * 1024 * 1024 })
-    if (r.error || r.status !== 0) {
-        return null
-    }
-    return String(r.stdout || '').split(/\r?\n/).map((l) => {
-        let m = /^\s*(\d+)\s+(\d+)\s+(.+)$/.exec(l)
-        return m ? { pid: Number(m[1]), ppid: Number(m[2]), startMs: Date.parse(m[3]) } : null
-    }).filter((v) => v && Number.isFinite(v.startMs))
+//以 UTF-16 編碼傳 PowerShell 腳本: 免引號與非 ASCII 路徑之跳脫問題
+function psArgs(script) {
+    return ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')]
 }
 
 
 /**
- * 由行程表找出根行程(可已結束)之全部子孫，供收尾時殺孤兒(根行程被硬殺後taskkill /T已找不到其子孫，其服務仍佔埠與實例目錄)
+ * 取行程表：PID、父PID、起始時間與映像名，不取命令列(命令列可能含憑證)
  *
- * 根仍存活者須起始時間與紀錄相符(差距在slackMs內，否則為PID回收，不走其下)；子孫須晚於其父之起始時間，免把PID回收後之無關行程算進來
+ * Windows之CreationDate同一行程每次相同(2026-11-04實測全部行程5次查詢1256筆比對0差異)，故可作身分比對；其他平台之lstart為秒級
  *
- * @param {Array} table 輸入行程表陣列，元素為{pid,ppid,startMs}
- * @param {Array} roots 輸入根行程陣列，元素為{pid,startMs}
  * @param {Object} [opt={}] 輸入設定物件，預設{}
- * @param {Number} [opt.slackMs=60000] 輸入起始時間比對之容許差毫秒數，預設60000
- * @returns {Array} 回傳PID數字陣列(含仍存活且身分相符之根，由子孫往根排序)
+ * @param {Function} [opt.exec] 輸入同步執行子指令函數，格式為(prog, args, { src, timeout, maxBuffer })=>{ status, stdout, error }(與child_process.spawnSync同形)，src為'table'，預設為不經shell、隱藏視窗之spawnSync
+ * @param {String} [opt.platform=process.platform] 輸入作業系統字串，預設process.platform
+ * @returns {Array|null} 回傳行程陣列，元素為{pid,ppid,startMs,image}；查詢失敗或查無任何行程回傳null(呼叫端不得把null當成無行程)
+ * @example
+ *
+ * import { listProcessTable } from 'w-package-tools-e2e/src/runShardedE2e.mjs'
+ *
+ * let table = listProcessTable()
+ * console.log(table.find((p) => p.pid === process.pid).image)
+ * // => 'node.exe'
+ *
  */
-export function findProcessDescendants(table, roots, opt = {}) {
-    let { slackMs = 60000 } = opt
-    let byPid = new Map(table.map((p) => [p.pid, p]))
+export function listProcessTable(opt = {}) {
+    let { exec, platform = process.platform } = opt
+    let run = exec || execDef
+    let o = { src: 'table', timeout: 30000, maxBuffer: 16 * 1024 * 1024 }
+    let win = platform === 'win32'
+    let r
+    try {
+        r = win
+            ? run('powershell', ['-NoProfile', '-NonInteractive', '-Command', PS_TABLE], o)
+            : run('ps', ['-A', '-o', 'pid=,ppid=,lstart=,comm='], o)
+    }
+    catch (err) {
+        return null
+    }
+    if (!r || r.error || r.status !== 0) {
+        return null
+    }
+    let re = win ? /^(\d+) (\d+) (\S+) ?(.*)$/ : /^\s*(\d+)\s+(\d+)\s+(\S+\s+\S+\s+\d+\s+[\d:]+\s+\d+)\s*(.*)$/
+    let rows = String(r.stdout || '').split(/\r?\n/).map((l) => {
+        let m = re.exec(win ? l.trim() : l)
+        return m ? { pid: Number(m[1]), ppid: Number(m[2]), startMs: Date.parse(m[3]), image: m[4].trim() } : null
+    }).filter((v) => v && Number.isFinite(v.startMs))
+    return rows.length > 0 ? rows : null
+}
+
+
+//身分鍵: PID 與起始時間皆須完全相同
+let keyOf = (p) => `${Number(p.pid)}@${p.startMs}`
+
+
+//由種子沿存活之父子鏈走訪: 父自起始至今持續持有該 PID, 此期間建立且 ppid 為該 PID 者必為其子; 起始較早者為 PID 回收造成之假關係。回傳由深到淺
+function walkLiveTree(table, seeds, protect = new Set()) {
     let found = new Map()
     let queue = []
-    for (let r of roots) {
-        let cur = byPid.get(Number(r.pid))
-        if (cur) {
-            if (Math.abs(cur.startMs - r.startMs) > slackMs) {
-                continue
-            }
-            found.set(cur.pid, 0)
-            queue.push({ pid: cur.pid, startMs: cur.startMs, depth: 0 })
-        }
-        else {
-            queue.push({ pid: Number(r.pid), startMs: r.startMs, depth: 0 })
+    for (let { row, basis } of seeds) {
+        if (!found.has(row.pid) && !protect.has(row.pid)) {
+            let v = { row, basis, depth: 0 }
+            found.set(row.pid, v)
+            queue.push(v)
         }
     }
     while (queue.length > 0) {
         let p = queue.shift()
         for (let c of table) {
-            if (c.ppid === p.pid && !found.has(c.pid) && c.startMs >= p.startMs - 2000) {
-                found.set(c.pid, p.depth + 1)
-                queue.push({ pid: c.pid, startMs: c.startMs, depth: p.depth + 1 })
+            if (c.ppid === p.row.pid && c.pid !== p.row.pid && !found.has(c.pid) && !protect.has(c.pid) && c.startMs >= p.row.startMs) {
+                let v = { row: c, basis: `chain:${p.row.pid}`, depth: p.depth + 1 }
+                found.set(c.pid, v)
+                queue.push(v)
             }
         }
     }
-    return [...found.entries()].sort((a, b) => b[1] - a[1]).map((v) => v[0])
+    return [...found.values()].sort((a, b) => b.depth - a.depth)
 }
 
 
-//殺一棵樹: 回驗交呼叫端
-function killPidTree(pid) {
-    if (process.platform === 'win32') {
-        spawnSync('taskkill', ['/F', '/T', '/PID', String(pid)], { stdio: 'ignore', windowsHide: true, timeout: 15000 })
-        return
+/**
+ * 由行程表找出身分已確認且仍存活之根行程，及沿存活父子鏈走到之全部子孫
+ *
+ * 根須PID相同且起始時間與紀錄完全相同；已結束之根不走其下：Windows之ParentProcessId於父結束後仍留在子行程上，且PID會回收，
+ * 「父已結束＋ppid相同＋起始較晚」不足以判定為子孫(2026-11-04疑似誤殺他套件派工之成因)。子孫須起始不早於其存活之父
+ *
+ * @param {Array} table 輸入行程表陣列，元素為{pid,ppid,startMs}
+ * @param {Array} roots 輸入根行程陣列，元素為{pid,startMs}
+ * @param {Object} [opt={}] 輸入設定物件，預設{}
+ * @param {Array} [opt.protect=[]] 輸入不納入且不往下走之PID陣列，預設[]
+ * @returns {Array} 回傳PID數字陣列(含身分相符之根，由子孫往根排序)
+ * @example
+ *
+ * import { findProcessDescendants } from 'w-package-tools-e2e/src/runShardedE2e.mjs'
+ *
+ * let table = [{ pid: 10, ppid: 1, startMs: 100 }, { pid: 11, ppid: 10, startMs: 110 }]
+ * console.log(findProcessDescendants(table, [{ pid: 10, startMs: 100 }]))
+ * // => [11, 10]
+ *
+ */
+export function findProcessDescendants(table, roots, opt = {}) {
+    let keys = new Set(roots.map(keyOf))
+    let seeds = table.filter((row) => keys.has(keyOf(row))).map((row) => ({ row, basis: BASIS_IDENTITY }))
+    return walkLiveTree(table, seeds, new Set(opt.protect || [])).map((v) => v.row.pid)
+}
+
+
+/**
+ * 取樣：依行程表更新已確認身分之行程清單
+ *
+ * 只保留仍存活且身分相符者(已結束者之紀錄日後不可能再相符)，並加入沿存活父子鏈走到之新子孫；父已結束者一律不納入，避免把誤認寫進清單
+ *
+ * @param {Array} table 輸入行程表陣列，元素為{pid,ppid,startMs,image}
+ * @param {Array} known 輸入已確認身分之行程陣列，元素為{pid,startMs,image}
+ * @returns {Object} 回傳物件{known,added,dropped}，known為更新後之陣列，added、dropped為新增與移除筆數
+ * @example
+ *
+ * import { sampleShardKnown } from 'w-package-tools-e2e/src/runShardedE2e.mjs'
+ *
+ * let table = [{ pid: 10, ppid: 1, startMs: 100, image: 'a' }, { pid: 11, ppid: 10, startMs: 110, image: 'b' }]
+ * console.log(sampleShardKnown(table, [{ pid: 10, startMs: 100, image: 'a' }]).added)
+ * // => 1
+ *
+ */
+export function sampleShardKnown(table, known) {
+    let keys = new Set(known.map(keyOf))
+    let seeds = table.filter((row) => keys.has(keyOf(row))).map((row) => ({ row, basis: BASIS_IDENTITY }))
+    let next = walkLiveTree(table, seeds).map((v) => ({ pid: v.row.pid, startMs: v.row.startMs, image: v.row.image || '' }))
+    let nextKeys = new Set(next.map(keyOf))
+    return {
+        known: next,
+        added: next.filter((k) => !keys.has(keyOf(k))).length,
+        dropped: [...keys].filter((k) => !nextKeys.has(k)).length,
     }
+}
+
+
+//本行程與祖先鏈: 祖先須起始不晚於其子, 否則為 PID 回收之假關係而停止往上(停在父已結束處)
+function protectedPids(table, selfPid, parentPid) {
+    let set = new Set([selfPid, parentPid].filter((v) => Number.isInteger(v)))
+    let byPid = new Map(table.map((p) => [p.pid, p]))
+    let cur = byPid.get(selfPid)
+    while (cur) {
+        let par = byPid.get(cur.ppid)
+        if (!par || par.pid === cur.pid || par.startMs > cur.startMs) {
+            break
+        }
+        set.add(par.pid)
+        cur = par
+    }
+    return set
+}
+
+
+//Windows: 自目標行程之 PEB 讀環境變數區塊與工作目錄, 只回傳「是否相符」, 內容不離開 PowerShell(可能含憑證)。讀不到一律視為無證據
+let CS_EVIDENCE = `
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+public static class ShardEv {
+    [StructLayout(LayoutKind.Sequential)] struct PBI { public IntPtr A; public IntPtr Peb; public IntPtr B; public IntPtr C; public IntPtr D; public IntPtr E; }
+    [DllImport("ntdll.dll")] static extern int NtQueryInformationProcess(IntPtr h, int c, ref PBI p, int l, out int r);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr OpenProcess(uint a, bool i, int p);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool ReadProcessMemory(IntPtr h, IntPtr a, byte[] b, IntPtr s, out IntPtr r);
+    [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
+    static byte[] Rd(IntPtr h, IntPtr a, long n) {
+        byte[] b = new byte[n]; IntPtr got;
+        return ReadProcessMemory(h, a, b, new IntPtr(n), out got) && got.ToInt64() == n ? b : null;
+    }
+    static IntPtr Ptr(IntPtr h, long a) { byte[] b = Rd(h, new IntPtr(a), 8); return b == null ? IntPtr.Zero : new IntPtr(BitConverter.ToInt64(b, 0)); }
+    public static string Check(int pid, string mark, string[] dirs) {
+        if (IntPtr.Size != 8) return "err";
+        IntPtr h = OpenProcess(0x1010, false, pid);
+        if (h == IntPtr.Zero) return "err";
+        try {
+            PBI p = new PBI(); int r;
+            if (NtQueryInformationProcess(h, 0, ref p, Marshal.SizeOf(typeof(PBI)), out r) != 0) return "err";
+            long pp = Ptr(h, p.Peb.ToInt64() + 0x20).ToInt64();
+            if (pp == 0) return "err";
+            bool env = false; bool cwd = false;
+            byte[] sz = Rd(h, new IntPtr(pp + 0x3F0), 8);
+            IntPtr envp = Ptr(h, pp + 0x80);
+            long n = sz == null ? 0 : BitConverter.ToInt64(sz, 0);
+            if (envp != IntPtr.Zero && n > 0 && n < 67108864) {
+                byte[] e = Rd(h, envp, n);
+                env = e != null && Encoding.Unicode.GetString(e).IndexOf(mark, StringComparison.Ordinal) >= 0;
+            }
+            byte[] us = Rd(h, new IntPtr(pp + 0x38), 16);
+            if (us != null) {
+                int len = BitConverter.ToUInt16(us, 0);
+                byte[] c = len > 0 ? Rd(h, new IntPtr(BitConverter.ToInt64(us, 8)), len) : null;
+                string s = c == null ? "" : Encoding.Unicode.GetString(c);
+                foreach (string d in dirs) { if (s.StartsWith(d, StringComparison.OrdinalIgnoreCase)) cwd = true; }
+            }
+            return "env=" + (env ? "1" : "0") + " cwd=" + (cwd ? "1" : "0");
+        }
+        finally { CloseHandle(h); }
+    }
+}
+`
+
+
+//Linux: 讀 <procRoot>/<pid>/environ 與 cwd; 無此目錄之平台回 null(無證據可用)
+function readEvidenceProc(pids, marker, dirs, procRoot) {
+    if (!fs.existsSync(procRoot)) {
+        return null
+    }
+    let res = new Map()
+    for (let pid of pids) {
+        let env = false
+        let cwd = false
+        try {
+            env = fs.readFileSync(path.join(procRoot, String(pid), 'environ'), 'utf8').split('\0').includes(marker)
+        }
+        catch (err) {}
+        try {
+            let c = fs.readlinkSync(path.join(procRoot, String(pid), 'cwd'))
+            let p = c.endsWith(path.sep) ? c : `${c}${path.sep}`
+            cwd = dirs.some((d) => p.startsWith(d))
+        }
+        catch (err) {}
+        res.set(pid, { env, cwd })
+    }
+    return res
+}
+
+
+/**
+ * 讀取行程之身分證據：環境變數是否帶本次之標記、工作目錄是否位於實例目錄內；只回傳是否相符，不回傳內容
+ *
+ * 標記由runShardedE2e設給各組之mocha並由其子孫繼承；無法讀取者視為無證據
+ *
+ * @param {Array} pids 輸入PID數字陣列
+ * @param {Object} opt 輸入設定物件
+ * @param {String} opt.marker 輸入環境變數標記字串，格式為'E2E_SHARD_RUN=<id>'
+ * @param {Array} opt.dirs 輸入目錄字串陣列，每個須以路徑分隔符結尾
+ * @param {Function} [opt.exec] 輸入同步執行子指令函數(與child_process.spawnSync同形)，src為'evidence'，另帶targets(PID陣列)，預設為不經shell、隱藏視窗之spawnSync
+ * @param {String} [opt.platform=process.platform] 輸入作業系統字串，預設process.platform
+ * @param {String} [opt.procRoot='/proc'] 輸入非Windows平台之行程資訊目錄字串，預設'/proc'
+ * @returns {Map|null} 回傳Map，鍵為PID，值為{env,cwd}布林值物件；整批讀取失敗或平台無法讀取回傳null
+ * @example
+ *
+ * import { readProcessEvidence } from 'w-package-tools-e2e/src/runShardedE2e.mjs'
+ *
+ * let m = readProcessEvidence([1234], { marker: 'E2E_SHARD_RUN=abc', dirs: ['C:\\p\\tmp\\e2e-shards\\'] })
+ * console.log(m.get(1234))
+ * // => { env: true, cwd: true }
+ *
+ */
+export function readProcessEvidence(pids, opt = {}) {
+    let { marker, dirs = [], exec, platform = process.platform, procRoot = '/proc' } = opt
+    if (platform !== 'win32') {
+        return readEvidenceProc(pids, marker, dirs, procRoot)
+    }
+    let b64 = (v) => `[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${Buffer.from(v).toString('base64')}'))`
+    let script = [
+        '$ErrorActionPreference=\'Stop\'',
+        'Add-Type -TypeDefinition @\'',
+        CS_EVIDENCE,
+        '\'@',
+        `$mark=${b64(marker)}`,
+        `$dirs=[string[]]@(${dirs.map(b64).join(',')})`,
+        `foreach ($id in @(${pids.join(',')})) { "$id " + [ShardEv]::Check($id, $mark, $dirs) }`,
+    ].join('\n')
+    let r
     try {
-        process.kill(-pid, 'SIGKILL')
+        r = (exec || execDef)('powershell', psArgs(script), { src: 'evidence', targets: [...pids], timeout: 60000, maxBuffer: 1024 * 1024 })
     }
     catch (err) {
+        return null
+    }
+    if (!r || r.error || r.status !== 0) {
+        return null
+    }
+    let res = new Map()
+    for (let l of String(r.stdout || '').split(/\r?\n/)) {
+        let m = /^(\d+) env=([01]) cwd=([01])$/.exec(l.trim())
+        if (m) {
+            res.set(Number(m[1]), { env: m[2] === '1', cwd: m[3] === '1' })
+        }
+    }
+    return res
+}
+
+
+//下殺已確認身分之行程(不帶 /T: 子孫已自行走訪、逐筆留紀錄)。Windows 先取 handle 釘住行程再比對起始時間, 比對與下殺之間 PID 不可能被回收。回傳 Map(pid → 結果)
+function killIdentified(rows, ctx = {}) {
+    let { exec, platform = process.platform } = ctx
+    let run = exec || execDef
+    let targets = rows.map((r) => ({ pid: r.pid, startMs: r.startMs }))
+    let res = new Map()
+    if (platform === 'win32') {
+        let list = rows.map((r) => `'${r.pid}|${new Date(r.startMs).toISOString()}'`).join(',')
+        let script = [
+            `foreach ($t in @(${list})) {`,
+            '  $a = $t.Split(\'|\'); $id = [int]$a[0]; $p = $null',
+            '  try { $p = [Diagnostics.Process]::GetProcessById($id) } catch { "$id gone"; continue }',
+            '  try {',
+            '    $null = $p.Handle',
+            '    $s = $p.StartTime.ToUniversalTime().ToString(\'yyyy-MM-ddTHH:mm:ss.fffZ\', [Globalization.CultureInfo]::InvariantCulture)',
+            '    if ($s -ne $a[1]) { "$id mismatch"; continue }',
+            '    $p.Kill()',
+            '    if ($p.WaitForExit(5000)) { "$id killed" } else { "$id pending" }',
+            '  } catch { "$id error" }',
+            '}',
+        ].join('\n')
+        let r
         try {
-            process.kill(pid, 'SIGKILL')
+            r = run('powershell', psArgs(script), { src: 'kill', targets, timeout: 60000, maxBuffer: 1024 * 1024 })
         }
-        catch (err2) {}
-    }
-}
-
-
-//殺根行程(可已結束)之全部子孫; 行程表取不到時只能盡力, 由後續回驗埠與刪目錄把關
-function killDescendants(roots, log) {
-    if (process.platform !== 'win32') {
-        //POSIX: 各組以獨立行程群組啟動, 根已結束時群組仍可殺
-        roots.forEach((r) => {
-            try {
-                process.kill(-Number(r.pid), 'SIGKILL')
+        catch (err) {
+            r = null
+        }
+        if (r && !r.error && r.status === 0) {
+            for (let l of String(r.stdout || '').split(/\r?\n/)) {
+                let m = /^(\d+) (\w+)$/.exec(l.trim())
+                if (m) {
+                    res.set(Number(m[1]), m[2])
+                }
             }
-            catch (err) {}
+        }
+        rows.forEach((v) => {
+            if (!res.has(v.pid)) {
+                res.set(v.pid, 'exec-failed')
+            }
         })
-        return
+        return res
     }
-    let table = listProcessTable()
+    for (let v of rows) {
+        let r
+        try {
+            r = run('sh', ['-c', 'kill -9 "$1"', 'sh', String(v.pid)], { src: 'kill', targets: [{ pid: v.pid, startMs: v.startMs }], timeout: 15000, maxBuffer: 1024 * 1024 })
+        }
+        catch (err) {
+            r = null
+        }
+        res.set(v.pid, r && !r.error && r.status === 0 ? 'killed' : 'exec-failed')
+    }
+    return res
+}
+
+
+//下殺紀錄之一筆
+function mkKillRecord(row, basis, phase, result) {
+    return {
+        pid: row.pid,
+        image: row.image || '',
+        startMs: Number.isFinite(row.startMs) ? row.startMs : null,
+        start: Number.isFinite(row.startMs) ? new Date(row.startMs).toISOString() : '',
+        basis,
+        phase,
+        result,
+    }
+}
+
+
+//紀錄之輸出列
+function fmtKillRecord(rec) {
+    return `[shard] 下殺 PID ${rec.pid} ${rec.image || '(映像名未知)'} 起始 ${rec.start || '(未知)'} 依據 ${rec.basis} 階段 ${rec.phase} 結果 ${rec.result}`
+}
+
+
+/**
+ * 清理一次執行留下之行程：只殺身分已正面確認者，每筆留紀錄
+ *
+ * 可下殺者：①PID與起始時間皆與存活時之紀錄完全相同(依據identity)；②由身分已確認之存活行程沿存活父子鏈走到之子孫(依據chain:<父PID>)；
+ * ③父已結束且起始不早於since(或為extra所列之監聽者)，環境變數帶本次標記(依據env-marker)或工作目錄位於實例目錄內(依據instance-cwd)者及其存活子孫。
+ * 其餘一律不殺：沒有行程表、讀不到證據、舊紀錄之PID已被回收皆然。本行程與祖先鏈永不下殺，亦不經其往下走。
+ * 下殺不帶/T；Windows於同一handle上比對起始時間後才終止。
+ *
+ * @param {Object} opt 輸入設定物件
+ * @param {Array} [opt.known=[]] 輸入存活時記下之行程陣列，元素為{pid,startMs}
+ * @param {String} [opt.marker=''] 輸入環境變數標記字串，空字串不查證據
+ * @param {Array} [opt.dirs=[]] 輸入實例目錄字串陣列，每個須以路徑分隔符結尾
+ * @param {Number} [opt.since] 輸入起始時間下限毫秒數，早於此者不視為本次之孤兒候選；未給不查孤兒
+ * @param {Array} [opt.extra=[]] 輸入額外須查證據之行程陣列，元素為{pid,port}(仍占埠之監聽者)，無證據者另記警告
+ * @param {String} [opt.phase=''] 輸入階段字串，寫入紀錄
+ * @param {Function} [opt.exec] 輸入同步執行子指令函數(與child_process.spawnSync同形)，src為'table'、'evidence'、'kill'(後二者另帶targets)，預設為不經shell、隱藏視窗之spawnSync
+ * @param {String} [opt.platform=process.platform] 輸入作業系統字串，預設process.platform
+ * @param {Number} [opt.selfPid=process.pid] 輸入本行程PID，預設process.pid
+ * @param {Number} [opt.parentPid=process.ppid] 輸入本行程之父PID，預設process.ppid
+ * @param {String} [opt.procRoot='/proc'] 輸入非Windows平台之行程資訊目錄字串，預設'/proc'
+ * @param {Function} [opt.log] 輸入輸出函數，預設不輸出
+ * @returns {Object} 回傳物件{tableOk,kills,skipped}，kills元素為{pid,image,startMs,start,basis,phase,result}，skipped元素為{pid,image,startMs,start,reason,phase,port}，reason為'protected'、'no-evidence'、'evidence-unreadable'
+ * @example
+ *
+ * import { reapShardProcesses } from 'w-package-tools-e2e/src/runShardedE2e.mjs'
+ *
+ * let r = reapShardProcesses({ known: [{ pid: 1234, startMs: 1793319707455 }], phase: 'teardown', log: console.log })
+ * console.log(r.kills.map((v) => v.basis))
+ * // => ['identity']
+ *
+ */
+export function reapShardProcesses(opt = {}) {
+    let { known = [], marker = '', dirs = [], since, extra = [], phase = '', exec, platform = process.platform, selfPid = process.pid, parentPid = process.ppid, procRoot, log = () => {} } = opt
+    let ctx = { exec, platform }
+    let kills = []
+    let skipped = []
+    let table = listProcessTable(ctx)
     if (table === null) {
-        log('[shard] 警告: 取行程表失敗, 無法確認孤兒行程')
-        return
+        log(`[shard] 警告: 取行程表失敗(階段 ${phase}), 無法確認身分, 一律不下殺; 由回驗埠與刪實例把關`)
+        return { tableOk: false, kills, skipped }
     }
-    for (let pid of findProcessDescendants(table, roots)) {
-        if (pid !== process.pid) {
-            killPidTree(pid)
+    let skip = (row, reason, port) => {
+        skipped.push({ ...mkKillRecord(row, '', phase, ''), reason, ...(port ? { port } : {}) })
+    }
+    let protect = protectedPids(table, selfPid, parentPid)
+    let keys = new Set(known.map(keyOf))
+    let identified = table.filter((row) => keys.has(keyOf(row)))
+    for (let row of identified.filter((v) => protect.has(v.pid))) {
+        skip(row, 'protected')
+        log(`[shard] 警告: PID ${row.pid} ${row.image || ''} 為本行程或其祖先, 不下殺`)
+    }
+    let seeds = identified.map((row) => ({ row, basis: BASIS_IDENTITY }))
+    let tree = walkLiveTree(table, seeds, protect)
+
+    //尚未確認者: 父已結束之候選與仍占埠之監聽者, 須有證據才下殺
+    let inTree = new Set(tree.map((v) => v.row.pid))
+    let byPid = new Map(table.map((p) => [p.pid, p]))
+    let isOrphan = (row) => {
+        //非 Windows: 父結束後由 init(PID 1)收養
+        if (platform !== 'win32' && row.ppid === 1) {
+            return true
+        }
+        let par = byPid.get(row.ppid)
+        return !par || par.startMs > row.startMs
+    }
+    let cands = marker && Number.isFinite(since)
+        ? table.filter((row) => row.startMs >= since && !protect.has(row.pid) && !inTree.has(row.pid) && isOrphan(row))
+        : []
+    let portOf = new Map()
+    for (let e of extra) {
+        let row = byPid.get(Number(e.pid))
+        if (!row || inTree.has(row.pid)) {
+            continue
+        }
+        if (protect.has(row.pid)) {
+            skip(row, 'protected', e.port)
+            continue
+        }
+        portOf.set(row.pid, e.port)
+        if (!cands.includes(row)) {
+            cands.push(row)
         }
     }
+    let confirmed = []
+    if (cands.length > 0) {
+        let ev = marker ? readProcessEvidence(cands.map((v) => v.pid), { marker, dirs, exec, platform, ...(procRoot ? { procRoot } : {}) }) : null
+        if (ev === null) {
+            log(`[shard] 警告: 讀取身分證據失敗(階段 ${phase}), 未確認身分之 ${cands.length} 個行程一律不下殺`)
+        }
+        for (let row of cands) {
+            let e = ev ? ev.get(row.pid) : null
+            if (e && e.env) {
+                confirmed.push({ row, basis: BASIS_ENV })
+            }
+            else if (e && e.cwd) {
+                confirmed.push({ row, basis: BASIS_CWD })
+            }
+            else {
+                skip(row, ev === null ? 'evidence-unreadable' : 'no-evidence', portOf.get(row.pid))
+                if (portOf.has(row.pid)) {
+                    log(`[shard] 警告: 埠 ${portOf.get(row.pid)} 之監聽者 PID ${row.pid} ${row.image || ''} 無身分證據, 不下殺`)
+                }
+            }
+        }
+        let nOther = skipped.filter((v) => v.phase === phase && v.reason !== 'protected' && !v.port).length
+        if (nOther > 0) {
+            log(`[shard] 父已結束而無身分證據、未下殺之行程 ${nOther} 個(多為他人之行程; 清單見 summary.json 之 killSkipped)`)
+        }
+    }
+    let list = confirmed.length > 0 ? walkLiveTree(table, [...seeds, ...confirmed], protect) : tree
+    if (list.length === 0) {
+        return { tableOk: true, kills, skipped }
+    }
+    let results = killIdentified(list.map((v) => v.row), ctx)
+    for (let v of list) {
+        let rec = mkKillRecord(v.row, v.basis, phase, results.get(v.row.pid) || 'exec-failed')
+        kills.push(rec)
+        log(fmtKillRecord(rec))
+    }
+    return { tableOk: true, kills, skipped }
 }
 
 
-//本行程之起始時間(寫入鎖檔供身分確認)
-function selfStartMs() {
-    return Date.now() - Math.round(process.uptime() * 1000)
-}
-
-
-//鎖檔之持有者是否仍在: PID 存在且起始時間相符(查不到起始時間時視為仍在, 收嚴)
-function lockHolderAlive(info) {
+//鎖檔之持有者是否仍在: PID 存在且起始時間完全相符(查不到起始時間或紀錄無此欄時視為仍在, 收嚴)
+function lockHolderAlive(info, ctx = {}) {
     if (!Number.isInteger(info.pid) || !pidExists(info.pid)) {
         return false
     }
-    let table = listProcessTable()
+    let table = listProcessTable(ctx)
     let cur = table ? table.find((p) => p.pid === info.pid) : null
-    if (!cur || !Number.isFinite(info.procStartMs)) {
+    if (!cur || !Number.isFinite(info.procCreateMs)) {
         return true
     }
-    return Math.abs(cur.startMs - info.procStartMs) <= 60000
+    return cur.startMs === info.procCreateMs
 }
 
 
 //取得鎖: 排他建立; 持有者仍在即拋錯; 已死之鎖在接手守衛(.takeover)內移除後重建, 免兩個接手者都以為取得
-function acquireLock(workDir, info) {
+function acquireLock(workDir, info, ctx = {}) {
     fs.mkdirSync(workDir, { recursive: true })
     let fp = path.join(workDir, LOCK_NAME)
     let fpGuard = `${fp}.takeover`
@@ -346,7 +733,7 @@ function acquireLock(workDir, info) {
     let judge = () => {
         let cur = read()
         if (cur) {
-            return { cur, alive: lockHolderAlive(cur) }
+            return { cur, alive: lockHolderAlive(cur, ctx) }
         }
         //內容不可讀: 剛建立尚未寫完者視為仍在; 放久了才算已死
         let st = fs.statSync(fp, { throwIfNoEntry: false })
@@ -496,6 +883,7 @@ function printPlan(plan, table, portStep, log) {
  * 流程：讀設定(test/tools/e2eShard.json，可不存在，opt可覆寫)→列舉檔案與分組(含記憶體守門)→取鎖→清除上次中斷之殘留→預檢各實例之每個埠可綁定(不沿用；未過者於建立實例前拋錯並列出占用者)→
  * 檢查來源樹無額外連結→建立實例(排除清單以外整份複製；node_modules與test/pics以junction指回；.env等只複製不讀取)→各實例以E2E_PORT_OFFSET=<組序×portStep>執行mocha(cwd為實例根，輸出分寫各組log，不彈視窗)→彙整→收尾。
  * 收尾(成功、失敗、例外、SIGINT、SIGTERM、SIGBREAK、SIGHUP皆執行；Windows之taskkill /F與child.kill為TerminateProcess，處理器來不及執行，由下次開跑之殘留清除處理)：樹狀終止子行程與孤兒→回驗本次各埠已釋放→搬回各實例testPending(不覆蓋)→依全域技能full-run-and-instances §5.5拆連結、回驗、遞迴刪除並確認已不存在。任一步失敗大聲報錯、不繼續刪除該實例、離開碼非0。
+ * 未經正面確認身分之行程一律不殺(reapShardProcesses)：取樣、收尾與下次開跑之殘留清除皆同；每次下殺之PID、映像名、起始時間與判定依據寫入[shard]輸出與summary.json。
  * log於執行中即直接寫入outDir(行程被硬殺仍保留)。有失敗、未跑完、某組沒有統計或收尾失敗，exitCode即非0；收到訊號時為128加訊號值。
  * 專案須已依E2E_PORT_OFFSET宣告埠(README §2.10)，ports未給、E2E_REGEN=1或mochaArgs含--baseline皆拋錯。
  *
@@ -517,13 +905,14 @@ function printPlan(plan, table, portStep, log) {
  * @param {Array} [opt.mochaArgs=['--timeout','180000']] 輸入附加於檔案之後之mocha參數陣列，不可含--reporter、-R、--baseline、--parallel、-p
  * @param {Number} [opt.groupTimeoutMs=14400000] 輸入每組之執行上限毫秒數，逾時樹狀終止該組並判為未跑完，預設14400000(4小時)
  * @param {Number} [opt.progressMs=300000] 輸入進度列印間隔毫秒數，預設300000(5分)
- * @param {Number} [opt.treeSampleMs=30000] 輸入取樣各組子孫行程之間隔毫秒數，預設30000；取樣結果寫入鎖檔，供父子鏈中斷時(中間行程已結束)仍能以PID與起始時間辨識孤兒
+ * @param {Number} [opt.treeSampleMs=30000] 輸入取樣各組子孫行程之間隔毫秒數，預設30000；取樣結果(只含身分已確認者)寫入鎖檔，供父子鏈中斷時(中間行程已結束)仍能以PID與起始時間辨識孤兒
+ * @param {Function} [opt.exec] 輸入同步執行子指令函數，供測試注入行程表與下殺，格式為(prog, args, { src, timeout, maxBuffer })=>{ status, stdout, error }(與child_process.spawnSync同形)，src為'table'、'evidence'、'kill'(後二者另帶targets)、'tasklist'及listenerPids之'netstat'、'powershell'、'lsof'，預設為不經shell、隱藏視窗之spawnSync
  * @param {Boolean} [opt.plan=false] 輸入是否只印分組與預估布林值，為true時不取鎖、不建立任何東西、不執行，預設false
  * @param {Boolean} [opt.updateDurations=false] 輸入是否把實測耗時寫回設定檔布林值，預設false(只印不改檔)
  * @param {Boolean} [opt.debug=false] 輸入是否印出因非預期值而改用預設之選項布林值，預設false
  * @param {Function} [opt.log=console.log] 輸入輸出函數，預設console.log
  * @param {Object} [opt.proc=process] 輸入註冊訊號處理器之對象，供測試注入，預設process
- * @returns {Promise} 回傳Promise，resolve回傳物件{planned,exitCode,signal,plan,groups,totals,wallMs,durations,outDir,teardownErrors}，groups元素為{index,offset,ports,files,ms,exit,signal,passing,failing,pending,total,complete,note,failures,logPath,resultPath}，totals為{passing,failing,pending,failures,incomplete}；預檢、設定、鎖等開跑前之問題reject
+ * @returns {Promise} 回傳Promise，resolve回傳物件{planned,exitCode,signal,plan,groups,totals,wallMs,durations,outDir,teardownErrors,kills,killSkipped,knownCount}，groups元素為{index,offset,ports,files,ms,exit,signal,passing,failing,pending,total,complete,note,failures,logPath,resultPath}，totals為{passing,failing,pending,failures,incomplete}，kills元素為{pid,image,startMs,start,basis,phase,result}，killSkipped元素為{pid,image,startMs,start,reason,phase,port}，knownCount為{current,total}；預檢、設定、鎖等開跑前之問題reject(err.kills帶已發生之下殺紀錄，有紀錄時亦寫入outDir之summary.json)
  * @example
  *
  * import runShardedE2e from 'w-package-tools-e2e/src/runShardedE2e.mjs'
@@ -542,6 +931,7 @@ async function runShardedE2e(opt = {}) {
     }
     let log = typeof opt.log === 'function' ? opt.log : console.log
     let proc = opt.proc && typeof opt.proc.on === 'function' ? opt.proc : process
+    let ctx = { exec: typeof opt.exec === 'function' ? opt.exec : undefined }
     let probs = []
 
     //設定: opt 覆寫設定檔
@@ -609,7 +999,7 @@ async function runShardedE2e(opt = {}) {
     })
     let table = buildPortTable(plan.groups, ports, portStep)
     printPlan(plan, table, portStep, log)
-    let base = { plan, groups: [], totals: { passing: 0, failing: 0, pending: 0, failures: [], incomplete: [] }, wallMs: 0, durations: {}, outDir, teardownErrors: [] }
+    let base = { plan, groups: [], totals: { passing: 0, failing: 0, pending: 0, failures: [], incomplete: [] }, wallMs: 0, durations: {}, outDir, teardownErrors: [], kills: [], killSkipped: [], knownCount: { current: 0, total: 0 } }
 
     if (opt.plan === true) {
         if (!portsGiven) {
@@ -650,11 +1040,26 @@ async function runShardedE2e(opt = {}) {
         ...(fs.existsSync(path.join(root, 'test', 'pics')) ? [{ path: path.join(root, 'test', 'pics'), ...(expectPics ? { expect: expectPics } : {}) }] : []),
     ]
 
-    let lockInfo = { pid: process.pid, procStartMs: selfStartMs(), startMs: Date.now(), root, groups: [] }
-    let lock = acquireLock(workDir, lockInfo)
+    //鎖檔: procCreateMs 為行程表之真實起始時間(取不到時為 null, 他人視為仍在); runId 為本次之環境變數標記; known 只含身分已確認者
+    let runId = randomUUID()
+    let tableSelf = listProcessTable(ctx)
+    let rowSelf = tableSelf ? tableSelf.find((p) => p.pid === process.pid) : null
+    let lockInfo = { pid: process.pid, procCreateMs: rowSelf ? rowSelf.startMs : null, startMs: Date.now(), root, runId, known: [] }
+    let lock = acquireLock(workDir, lockInfo, ctx)
     let writeLock = () => fs.writeFileSync(lock.fp, JSON.stringify(lockInfo))
 
     let t0 = Date.now()
+    let kills = []
+    let killSkipped = []
+    let knownEver = new Set()
+    let dirs = [`${workDir}${path.sep}`]
+    //下殺一律經此: 只殺身分已確認者並留紀錄
+    let reap = (o) => {
+        let r = reapShardProcesses({ ...ctx, dirs, log, ...o })
+        kills.push(...r.kills)
+        killSkipped.push(...r.skipped)
+        return r
+    }
     let signal = null
     let groups = []
     let started = []
@@ -694,10 +1099,21 @@ async function runShardedE2e(opt = {}) {
     }
 
     try {
-        //上一次中斷之殘留: 先殺其存活之子行程, 再依拆除程序清掉
-        if (lock.stale && Array.isArray(lock.stale.groups) && lock.stale.groups.length > 0) {
-            log(`[shard] 接手已死之鎖(PID ${lock.stale.pid}): 終止其殘留之子行程`)
-            killDescendants(lock.stale.groups, log)
+        //上一次中斷之殘留: 先殺其存活且身分相符之子行程, 再依拆除程序清掉; 鎖檔可能已存放數日, 同樣逐筆比對
+        if (lock.stale) {
+            if (typeof lock.stale.runId === 'string' && lock.stale.runId !== '') {
+                log(`[shard] 接手已死之鎖(PID ${lock.stale.pid}): 終止其殘留之子行程`)
+                let r = reap({
+                    known: Array.isArray(lock.stale.known) ? lock.stale.known : [],
+                    marker: `${MARK_ENV}=${lock.stale.runId}`,
+                    since: lock.stale.startMs,
+                    phase: 'stale-lock',
+                })
+                log(`[shard] 上次殘留: 鎖檔 known ${Array.isArray(lock.stale.known) ? lock.stale.known.length : 0} 筆, 下殺 ${r.kills.length} 筆`)
+            }
+            else if (Array.isArray(lock.stale.groups) && lock.stale.groups.length > 0) {
+                log(`[shard] 警告: 接手已死之舊格式鎖檔(PID ${lock.stale.pid}), 其 ${lock.stale.groups.length} 筆紀錄無法確認身分, 不下殺; 如有殘留由預檢與刪實例報錯`)
+            }
         }
         let staleInsts = fs.readdirSync(workDir).filter((d) => /^inst\d+$/.test(d))
         for (let d of staleInsts) {
@@ -714,7 +1130,7 @@ async function runShardedE2e(opt = {}) {
         for (let t of table) {
             let r = await checkPortFree(t.port)
             if (!r.free) {
-                blocked.push({ ...t, host: r.host, code: r.code, owners: describeOwners(t.port) })
+                blocked.push({ ...t, host: r.host, code: r.code, owners: describeOwners(t.port, ctx) })
             }
         }
         if (blocked.length > 0) {
@@ -759,6 +1175,22 @@ async function runShardedE2e(opt = {}) {
             }
         }
 
+        //根被樹狀終止前留紀錄(taskkill /T 不回報殺了誰, 故以當下之行程表列出; 取不到時只記根)
+        let recordStop = (run) => {
+            if (run.stopRecorded) {
+                return
+            }
+            run.stopRecorded = true
+            let tb = listProcessTable(ctx)
+            let row = tb ? tb.find((p) => p.pid === run.pid) : null
+            let list = row ? walkLiveTree(tb, [{ row, basis: BASIS_OWN }]) : [{ row: { pid: run.pid, image: '', startMs: null }, basis: BASIS_OWN }]
+            for (let v of list) {
+                let rec = mkKillRecord(v.row, v.basis, 'stop', 'tree-kill-requested')
+                kills.push(rec)
+                log(fmtKillRecord(rec))
+            }
+        }
+
         //執行
         let runGroup = (g) => {
             let offset = g.index * portStep
@@ -797,16 +1229,14 @@ async function runShardedE2e(opt = {}) {
             let tStart = Date.now()
             let child = spawn(process.execPath, args, {
                 cwd,
-                env: { ...process.env, E2E_PORT_OFFSET: String(offset), E2E_SHARD_RESULT: resultPath },
+                env: { ...process.env, E2E_PORT_OFFSET: String(offset), E2E_SHARD_RESULT: resultPath, [MARK_ENV]: runId },
                 stdio: ['ignore', fd, fd],
                 windowsHide: true,
                 detached: process.platform !== 'win32',
             })
             fs.closeSync(fd)
-            let run = { rec, child, pid: child.pid, startMs: tStart, timedOut: false, done: false, known: [{ pid: child.pid, startMs: tStart }] }
+            let run = { rec, child, pid: child.pid, startMs: tStart, timedOut: false, done: false, rootSeen: false, stopRecorded: false, known: [] }
             started.push(run)
-            lockInfo.groups = started.flatMap((r) => r.known)
-            writeLock()
             run.promise = new Promise((resolve) => {
                 let finish = (code, sig, spawnErr) => {
                     if (run.done) {
@@ -827,6 +1257,7 @@ async function runShardedE2e(opt = {}) {
             })
             run.stop = () => {
                 if (!run.done && isChildAlive(child)) {
+                    recordStop(run)
                     try {
                         killOwnTree(child)
                     }
@@ -870,25 +1301,35 @@ async function runShardedE2e(opt = {}) {
                 log(`[shard] 進度 ${min2(Date.now() - t0)} 分: ${parts.join(' | ')}`)
             }, progressMs)
             //取樣子孫: 根或中間行程被硬殺後父子鏈即斷(Windows 之 libuv job 只連帶殺直屬子行程, 其下如 shell:true 之服務成孤兒), 故趁存活時記下 PID 與起始時間
-            timerSample = setInterval(() => {
-                let tb = listProcessTable()
+            //根: 持有 child 且尚未 exit 時 PID 不會被回收, 由行程表取真實起始時間; 其餘只沿存活父子鏈走, 誤認不會進 known
+            let sampleNow = () => {
+                let tb = listProcessTable(ctx)
                 if (!tb) {
                     return
                 }
                 let changed = false
                 for (let r of started) {
-                    for (let pid of findProcessDescendants(tb, r.known)) {
-                        if (!r.known.some((k) => k.pid === pid)) {
-                            r.known.push({ pid, startMs: tb.find((p) => p.pid === pid).startMs })
+                    let seed = r.known
+                    if (!r.rootSeen && !r.done && isChildAlive(r.child)) {
+                        let row = tb.find((p) => p.pid === r.pid)
+                        if (row) {
+                            r.rootSeen = true
                             changed = true
+                            seed = [...r.known, { pid: row.pid, startMs: row.startMs, image: row.image || '' }]
                         }
                     }
+                    let s = sampleShardKnown(tb, seed)
+                    r.known = s.known
+                    r.known.forEach((k) => knownEver.add(`${k.pid}@${k.startMs}`))
+                    changed = changed || s.added > 0 || s.dropped > 0
                 }
                 if (changed) {
-                    lockInfo.groups = started.flatMap((r) => r.known)
+                    lockInfo.known = started.flatMap((r) => r.known)
                     writeLock()
                 }
-            }, treeSampleMs)
+            }
+            sampleNow()
+            timerSample = setInterval(sampleNow, treeSampleMs)
             await Promise.all(started.map((r) => r.promise))
         }
     }
@@ -907,27 +1348,24 @@ async function runShardedE2e(opt = {}) {
     await Promise.all(started.map((r) => r.promise))
     let busyPorts = []
     if (started.length > 0) {
-        killDescendants(started.flatMap((r) => r.known), log)
+        let knownNow = () => started.flatMap((r) => r.known)
+        reap({ known: knownNow(), marker: `${MARK_ENV}=${runId}`, since: t0, phase: 'teardown' })
         let portsOfRun = started.flatMap((r) => r.rec.ports)
         let busy = await waitPortsFree(portsOfRun, 15000)
         if (busy.length > 0) {
-            //父子鏈斷裂之殘留(中間行程已結束): 只殺本次開跑之後才起之監聽者, 開跑前就在者絕不動
-            let tb = listProcessTable()
-            for (let b of busy) {
-                for (let pid of listenerPids(b.port, { useBoth: true, timeout: 5000 }) || []) {
-                    let cur = tb ? tb.find((p) => p.pid === Number(pid)) : null
-                    if (cur && cur.startMs >= t0 && Number(pid) !== process.pid) {
-                        log(`[shard] 終止殘留之監聽者 PID ${pid}(埠 ${b.port})`)
-                        killPidTree(Number(pid))
-                    }
-                }
-            }
+            //仍占埠之監聽者: 開跑後才起之行程不一定是本次的(可能是他人接手該埠), 同樣須有身分證據才下殺; 無證據者由下方大聲報錯
+            let extra = busy.flatMap((b) => (listenerPids(b.port, { useBoth: true, timeout: 5000, exec: ctx.exec }) || []).map((pid) => ({ pid: Number(pid), port: b.port })))
+            reap({ known: knownNow(), marker: `${MARK_ENV}=${runId}`, since: t0, extra, phase: 'teardown-port' })
             busy = await waitPortsFree(busy.map((b) => b.port), 15000)
         }
         busyPorts = busy.map((b) => b.port)
         for (let b of busy) {
-            teardownErrors.push(`埠 ${b.port} 未釋放: ${b.code}@${b.host}; ${describeOwners(b.port)}`)
+            teardownErrors.push(`埠 ${b.port} 未釋放: ${b.code}@${b.host}; ${describeOwners(b.port, ctx)}`)
         }
+    }
+    let knownCount = { current: started.flatMap((r) => r.known).length, total: knownEver.size }
+    if (started.length > 0 || kills.length > 0) {
+        log(`[shard] 行程清理: known 現存 ${knownCount.current} 筆(累計 ${knownCount.total}), 下殺 ${kills.length} 筆, 未下殺 ${killSkipped.length} 筆`)
     }
     let picsChanged = false
     if (picsBefore) {
@@ -975,6 +1413,17 @@ async function runShardedE2e(opt = {}) {
             fatal.message = `${fatal.message}\n另有收尾失敗: ${teardownErrors.join(' | ')}`
         }
         fatal.teardownErrors = teardownErrors
+        fatal.kills = kills
+        //有下殺即須可事後查: 例外路徑沒有彙整, 另寫 summary.json; 沒有下殺則不建立任何東西
+        if (kills.length > 0) {
+            try {
+                fs.mkdirSync(outDir, { recursive: true })
+                fs.writeFileSync(path.join(outDir, 'summary.json'), JSON.stringify({ planned: false, fatal: fatal.message, teardownErrors, kills, killSkipped, knownCount, outDir }, null, 2))
+            }
+            catch (err) {
+                log(`[shard] 警告: 寫 summary.json 失敗(${err.message})`)
+            }
+        }
         throw fatal
     }
 
@@ -1084,6 +1533,9 @@ async function runShardedE2e(opt = {}) {
         durations,
         outDir,
         teardownErrors,
+        kills,
+        killSkipped,
+        knownCount,
     }
     try {
         fs.mkdirSync(outDir, { recursive: true })

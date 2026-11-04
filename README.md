@@ -215,6 +215,7 @@ prepare(ctx) → launch() → openPage(browser) → beforeRun(ctx) → run(page,
 | `E2E_BASELINE_KEEP_MAXDIFF` | 同上（僅 `KEEP_SAME=1` 時讀取並驗格式） | 保留之差異上限（非負整數；未設＝比對端容差 `maxDiffPixels`，預設 100；`0`＝只保留 RGBA 逐像素相同者） |
 | `E2E_PORT_OFFSET` | `resolveE2ePort`、`createServiceManager` | 加到各基準埠（非負整數；未設、空或 `0` 不變），§2.10；`runShardedE2e` 依組序設定 |
 | `E2E_SHARD_RESULT` | `tools/shardE2eReporter.cjs` | 各組統計 JSON 之路徑（`runShardedE2e` 設定，使用端不必理會） |
+| `E2E_SHARD_RUN` | `runShardedE2e` | 本次執行之識別碼，設給各組 mocha 並由子孫繼承，供確認未曾被取樣之孤兒之身分（§2.11〈行程身分〉；使用端不必理會，啟動服務時請保留繼承之環境變數） |
 
 ### 2.7 `itemsUnionBox` 之圖形內容（`graphics`、`graphicAreas`；Gitea issue #6）
 
@@ -364,13 +365,29 @@ let baseUrl = `http://127.0.0.1:${resolveE2ePort(8080)}` //前端網址、後端
 
 1. **分組**（`planE2eShards`）：以 `/^e2e-.*\.test\.mjs$/` 列舉，不靠寫死清單；由大到小放入目前最輕之組；`officialOnly` 固定第 0 組；`together` 不拆開；實例數不超過可分開之單元數。
 2. **記憶體守門**：依可用記憶體（`os.freemem()`，每實例預設 1.5 GB）調降並印原因；連 1 個都不夠時仍跑 1 個並警告。
-3. **鎖**：`<workDir>/shard.lock` 擋第二個同時執行者；行程已死（或 PID 回收）之鎖可接手。
-4. **清殘留**：接手死鎖時先殺鎖檔所記之子孫，再依第 8 點移除上次留下之 `inst<N>`。
+3. **鎖**：`<workDir>/shard.lock` 擋第二個同時執行者；持有者 PID 已死、或 PID 存在而起始時間與鎖檔不完全相同（PID 回收）之鎖可接手；鎖檔沒有真實起始時間（舊格式、或當時取不到行程表）而 PID 存在者視為仍在。
+4. **清殘留**：接手死鎖時只殺身分已確認之殘留（見下方〈行程身分〉；舊格式鎖檔一律不殺並記警告），再依第 8 點移除上次留下之 `inst<N>`。
 5. **預檢**：每個實例之每個埠（基準埠＋位移）於 `127.0.0.1`、`0.0.0.0`、`::`、`::1` 試綁定；未過於建立實例前拋錯並列出占用者（PID 與映像名稱），**不沿用**。
 6. **建立實例**：`<專案根>/tmp/e2e-shards/inst<N>/<專案名>`（可改 `workDir`；`workDir`、`outDir` 之相對路徑以專案根解析）。排除 `node_modules`、`.git`、`docs`、`tmp`、`testPending`、`logs`、`sgud`、`test/pics`、`test/_tmp` 與 `exclude`（皆相對專案根）；`node_modules`、`test/pics` 以 junction 指回；來源樹（不含排除項）內另有連結即拋錯列出；實例內建空 `logs`。**`.env` 等只由 OS 複製，工具不讀內容、不印出，隨實例刪除**——`workDir` 請留在 gitignore 範圍內。
 7. **執行**：各實例 `E2E_PORT_OFFSET=<第 i 組×portStep>`，`cwd` 為實例根，`node node_modules/mocha/bin/mocha.js --no-parallel <該組檔案> --timeout 180000 --reporter <本套件報告器>`（`mochaArgs` 可調，不可含 `--reporter`、`--parallel`）；隱藏視窗；輸出分寫 `<outDir>/group<i>.log`（執行中直接寫，行程被硬殺仍在）；報告器之輸出同內建 spec，另寫統計 `group<i>.result.json`；每 5 分印一行進度；每組逾 4 小時（`groupTimeoutMs`）終止。
-8. **收尾**（成功、失敗、例外、SIGINT、SIGTERM、SIGBREAK、SIGHUP 皆執行）：樹狀終止子行程與孤兒 → 回驗本次各埠已釋放 → 各實例 `testPending` 搬回正式專案（不覆蓋，撞名加 `-N`）→ 以不跟進連結之方式列出連結、逐一拆除、回驗清單為空且目標完好 → 遞迴刪除並確認已不存在。任一步失敗大聲報錯、不繼續刪除該實例、離開碼非 0。**Windows 之 `taskkill /F`、`child.kill()` 為 TerminateProcess，處理器來不及執行，由下次開跑清除**；真實訊號只有主控台事件。
+8. **收尾**（成功、失敗、例外、SIGINT、SIGTERM、SIGBREAK、SIGHUP 皆執行）：樹狀終止存活之子行程、下殺身分已確認之孤兒（〈行程身分〉） → 回驗本次各埠已釋放 → 各實例 `testPending` 搬回正式專案（不覆蓋，撞名加 `-N`）→ 以不跟進連結之方式列出連結、逐一拆除、回驗清單為空且目標完好 → 遞迴刪除並確認已不存在。任一步失敗大聲報錯、不繼續刪除該實例、離開碼非 0。**Windows 之 `taskkill /F`、`child.kill()` 為 TerminateProcess，處理器來不及執行，由下次開跑清除**；真實訊號只有主控台事件。
 9. **彙整**：逐組印耗時、通過、失敗、pending 與檔案；最後印 mocha 同格式之 `N passing`、`M failing`、`P pending` 與失敗案例標題。有失敗、未跑完、某組沒有統計、0 案例、mocha 離開碼與統計不符或收尾失敗，`exitCode` 即非 0；收到訊號為 128＋訊號值。回傳值含各組結果與實際耗時。另印可貼回之 `durations`；`--update-durations` 才寫回，預設不改檔。
+
+**行程身分**（不變式：**未經正面確認身分之行程一律不殺**；取樣、收尾、鎖檔殘留清除、仍占埠之監聽者皆同）。Windows 之 PID 會回收（本機實測連起 2516～21080 個短命行程即回收，10～97 秒），已結束之父 PID 仍留在子行程之 `ParentProcessId`，故「父已結束＋ppid 相同＋起始較晚」、「監聽本次埠＋起始晚於開跑」都不足以下殺。可下殺者與紀錄之 `basis`：
+
+| `basis` | 判定 | 為何可信 |
+|---|---|---|
+| `own-child-handle` | 根：持有之 `child` 尚未 exit，走 `killOwnTree`（`taskkill /F /T`） | 未 exit 前 PID 不會被回收 |
+| `identity` | PID 與起始時間皆與存活時之紀錄**完全相同**（容差 0；`CreationDate` 同一行程每次相同） | 同一行程；紀錄只來自行程表，不用 `Date.now()` |
+| `chain:<父PID>` | 由身分已確認之存活行程，沿存活父子鏈走到，且起始不早於其父 | 父自起始至今持續持有該 PID，此期間建立且 ppid 為該 PID 者必為其子 |
+| `env-marker` | 父已結束（或為仍占本次埠之監聽者），環境變數帶本次之 `E2E_SHARD_RUN=<id>` | 識別碼每次不同，只有本次之子孫會繼承 |
+| `instance-cwd` | 同上，工作目錄位於 `workDir` 內 | `workDir` 由鎖獨占；涵蓋自訂環境變數之服務 |
+
+本行程與其祖先鏈永不下殺，也不經其往下走。取不到行程表、讀不到證據一律不殺並記警告。除根以外之下殺不帶 `/T`（子孫已自行走訪、逐筆留紀錄）；Windows 先取 handle 釘住行程、在同一 handle 上比對起始時間才終止，比對與下殺之間 PID 不可能被回收。證據之讀取：Windows 由 PowerShell（`Add-Type`，每次約 0.5 秒）讀候選行程 PEB 之環境區塊與工作目錄；Linux 讀 `/proc`；其他平台無證據可用。**只回傳是否相符，內容不離開讀取程式**（可能含憑證），也不取命令列。
+
+**紀錄**：每次下殺印一列 `[shard] 下殺 PID <pid> <映像名> 起始 <ISO> 依據 <basis> 階段 <phase> 結果 <result>`，並寫入回傳值與 `summary.json` 之 `kills`（`{pid,image,startMs,start,basis,phase,result}`；`phase` 為 `stop`、`teardown`、`teardown-port`、`stale-lock`；`result` 為 `killed`、`pending`、`gone`、`mismatch`、`error`、`exec-failed`、`tree-kill-requested`）；未下殺者入 `killSkipped`（`reason`：`no-evidence`、`evidence-unreadable`、`protected`，占埠者帶 `port`；其中多為他人之行程）；`knownCount` 為 `{current,total}`。開跑前之例外若已有下殺，例外帶 `err.kills`，並寫入 `outDir` 之 `summary.json`。
+
+**代價**：未曾被取樣、環境變數被換掉（不繼承 `process.env`）且工作目錄不在實例內之孤兒殺不到——占埠者收尾大聲報錯（埠未釋放，列出占用者）、該實例保留、離開碼非 0，手動停掉後重跑工具清除；不占埠也不鎖實例者留在機器上，只有 `killSkipped` 有紀錄。POSIX 路徑只有注入測試，未實機跑過。
 
 **不得多開之流程**（SKILL §1.5）：畫面或期望值含主機與埠者列 `officialOnly`；共用同一真實收件匣者不要在兩個實例同時跑（放在同一組）；未通過首次等價驗證之專案不得以實例結果當標準圖依據（本工具本來就不寫標準圖）。
 
@@ -425,6 +442,15 @@ let captureStableWithBox = (page, target, opts = {}) => pkgCaptureStableWithBox(
 
 ## 5. 改版須知：哪些變更會動到使用端之標準圖
 
+### 行為變更（2026-11-04，分組多開之下殺須正面確認身分）
+
+不影響標準圖像素與分組、埠位移、實例、彙整；變更只在 `runShardedE2e` 之行程清理（§2.11〈行程身分〉）：
+
+- **`findProcessDescendants` 語意收緊**：已結束之根不再往下走（原依 `ppid` 找子孫）；根之起始時間須完全相同（原容許 60 秒），`opt.slackMs` 移除、新增 `opt.protect`；子孫之起始不得早於其父（原容許 2 秒）。回傳形狀不變。
+- **鎖檔格式改變**：`groups`、`procStartMs` 改為 `known`、`procCreateMs`（行程表之真實起始時間），另增 `runId`。舊格式鎖檔不做相容：持有者 PID 已死時可接手，但其紀錄**一律不下殺**並記警告；PID 存在則視為仍在（確認該行程不是工具後刪除鎖檔再跑，或待該 PID 結束）。
+- **孤兒之清理範圍**：以環境變數標記與實例目錄確認身分，取代「監聽本次埠＋起始晚於開跑」；未占埠之未取樣孤兒現在也清得到，但環境變數與工作目錄皆無證據者不再清除（見〈代價〉）。
+- **回傳值與 `summary.json` 多 `kills`、`killSkipped`、`knownCount`**；`opt.exec` 為新增之測試注入點；`src/runShardedE2e.mjs` 新增具名匯出 `listProcessTable`、`sampleShardKnown`、`readProcessEvidence`、`reapShardProcesses`（未列入 `WPackageToolsE2e` 入口）。
+
 ### 行為變更（2026-11-01，Gitea #35：`waitDrawerReady` 只認 WDrawer 根節點）
 
 不影響標準圖像素與既有 API 形狀（簽名、預設逾時 10000ms、逾時不拋錯皆不變）；變更在**認哪些元素**：
@@ -462,7 +488,7 @@ let captureStableWithBox = (page, target, opts = {}) => pkgCaptureStableWithBox(
 - `test/e2e-captureEquivalence.test.mjs` 含 w-web-sso／w-web-perm 當時實作之凍結複本（逐位元等價之對照組）與框幾何之專測，屬行為契約，勿因「看起來重複」刪除；凍結複本區段以 `eslint-disable` 註明保持逐字。
 - `test/e2e-itemsUnionBoxGraphics.test.mjs`：`itemsUnionBox` 圖形內容（svg 圖形、2d canvas、`graphicAreas`）之真 Chromium 語意/幾何測試，標題前綴 `[ID]` 對應 `CLAUDE_rulebook.md` 表 C；斷言以「無圖形內容時之量框」與「框線外緣不越過內容」為準，無標準圖。
 - `test/unit-baselineCollect.test.mjs`（`[C*]`）、`test/unit-keepSame.test.mjs`（`[K*]`）、`test/unit-portOffset.test.mjs`（`[P*]`，含以真實子行程服務於 18930＋100 之實跑）、`test/unit-reviewPending.test.mjs`（`[R*]`，含 CLI 實跑）：Gitea issue #19 三項之開關行為、預設不變、彙整錯誤格式、mtime 不變、位移後之 baseUrl；標題前綴對應 `sgud/rule/rulebook_baselineRun.md` §8.4。
-- `test/unit-planE2eShards.test.mjs`（`[S-G*]`、`[S-M*]`，注入值）、`test/unit-removeE2eInstance.test.mjs`（`[S-R*]`、`[S-L*]`、`[S-T*]`，連結目標內放哨兵檔、以會跟進連結之刪除注入）、`test/api-shardE2e.test.mjs`（`[S-I*]`、`[S-P*]`，`test/_tmp/shardE2e/` 下建小專案：真 mocha、真 HTTP 服務、真 junction、真殺行程與主控台事件；固定埠 19200、19210、19300、19310、19400 須空閒）：分組多開，標題前綴對應 `sgud/rule/rulebook_shard.md`。
+- `test/unit-planE2eShards.test.mjs`（`[S-G*]`、`[S-M*]`，注入值）、`test/unit-removeE2eInstance.test.mjs`（`[S-R*]`、`[S-L*]`、`[S-T*]`，連結目標內放哨兵檔、以會跟進連結之刪除注入）、`test/api-shardE2e.test.mjs`（`[S-I*]`，`test/_tmp/shardE2e/` 下建小專案：真 mocha、真 HTTP 服務、真 junction、真殺**自建**行程與主控台事件；固定埠 19200、19210、19300、19310、19400 須空閒）、`test/unit-shardProcIdentity.test.mjs`（`[S-P*]`、`[S-V*]`，注入行程表與下殺之純判定）、`test/api-shardKillIdentity.test.mjs`（`[S-W*]`，真 mocha 與真鎖檔、行程表疊加夾具列、下殺一律攔下不轉送；固定埠 19500）：分組多開，標題前綴對應 `sgud/rule/rulebook_shard.md`。**後二檔不會對真實行程下殺，變異測試只跑這兩檔**。
 - `test/unit-procPrimitives.test.mjs`：行程原語。`listenerPids`／`killPortListeners` 之案以 spawnSync 形替身（`test/tools/portPidsFake.mjs`）驗判定（對外連線錯置為 LISTENING 不得誤判、netstat 漏列由 `Get-NetTCPConnection` 補、查詢失敗回 null 非 `[]`、`useBoth`／`timeout`／`onTrace` 透傳），標題前綴 `[LP*]`（`listenerPids`）／`[KP*]`（`killPortListeners`）；`[RP*]` 為本機真實案：起真實監聽（固定埠 19050）查得到自己、真實子程序監聽（固定埠 19051）被 `killPortListeners` 殺掉並回驗；兩埠須空閒，否則該條失敗並註明。
 - lint：`npx eslint --ext .mjs src tools test`。
 
