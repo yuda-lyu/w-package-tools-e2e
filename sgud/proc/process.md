@@ -90,6 +90,17 @@
   - 使用端視角: `npm pack` 後安裝至 `./tmp` 之假專案, 自 `node_modules` 深層引用實跑(瀏覽器下載以 `PLAYWRIGHT_BROWSERS_PATH` 導至暫存目錄), 驗產物落地.
   - 會動到使用端像素者: 先在使用端以 `E2E_BASELINE_OUT_DIR` 導出重產並以 `compareImageDirs` 量影響範圍, 發版說明明列受影響類別; 使用端重產另須授權.
 
+## e2e 分組多開之操作與修改(`runShardedE2e`、`tools/shardE2e.mjs`)
+
+- **關聯**: `src/runShardedE2e.mjs`、`src/planE2eShards.mjs`、`src/listDirLinks.mjs`、`src/removeE2eInstance.mjs`、`tools/shardE2e.mjs`、`tools/shardE2eReporter.cjs`; `README.md` §2.10、§2.11; `sgud/rule/rulebook_shard.md`; 全域技能 role-coder-for-test-e2e `references/full-run-and-instances.md` §5.
+- **判斷**: 只跑比對之全套提速才用; 重產、收集趟之流程分配另依技能 §7.11(本工具不寫標準圖, `E2E_REGEN=1` 即拋錯).專案未依 §2.10 接線者多於 1 組即被擋.
+- **處理**:
+  - 上一次中斷留下之 `tmp/e2e-shards`: **一律重跑工具清除**, 不手動刪除——實例內尚有 junction 時, 遞迴刪除或 robocopy 鏡像會穿過連結刪到正式專案.
+  - 收尾報錯(`✘ 收尾失敗`)時不要繞過: 訊息列出停在哪一步與占用者, 查明後重跑.實例內有 `.env` 等憑證副本, 不可放著不管.
+  - 修改移除順序(`removeE2eInstance`)後須跑 `[S-R1]`: 其以會跟進連結之刪除注入, 連結尚在時哨兵檔即被刪; 真 `fs.rmSync` 不穿過 junction, 只用它驗不出順序錯誤.
+  - 測試造孤兒要用 `shell:true`(libuv job 只連帶殺直屬子行程, 見 `sgud/exp/experience.md`「注意事項: 分組多開」); 測試內等待一律以子行程寫入之紀錄為同步點, 不以固定秒數.
+  - 測試之固定埠 19200、19210、19300、19310、19400 須空閒.
+
 ## 使用端提出之套件調整建議(重要)
 
 - **關聯**: 使用端(w-web-sso／perm／api／task)之 agent 寫給本套件之建議文件(例: 2026-09-30 之 `建議w-package-tools-e2e調整.md`)與其草案副本; 全域 CLAUDE.md §8(審計／審查報告之處置); `tools/auditBoxes.mjs`.

@@ -4,8 +4,9 @@
 
 ## 版本與最近驗證
 
-- `package.json` version:1.0.13(pte35 未改;下表標「未發布」者是否已含於 1.0.12／1.0.13 未逐項核對;發布由使用者／主控之自動化流程處理).
-- 最近一次全套驗證:2026-11-01 pte35b(Gitea #35 續,`opt` 依 K3 改用預設),`npm test` 505 passing、0 failing(485 → 505,`e2e-waitDrawerReady` 58 → 78 條;4m,`--lock`)、lint 0 error、變異 33 個全數擊殺(M33 僅因訊息內含預設選擇器字樣而被擊殺,行為等價);修前版本(pte35 完成時)跑新測試 58 passing／20 failing;未派外審.報告 `C:\opensrcOper\dnow\20261031234910\agent-out\pte35b-修正報告.md`.
+- `package.json` version:1.0.19(se302 未改;下表標「未發布」者是否已含於已發布版本未逐項核對,se302 之分組多開確未發布;發布由使用者／主控之自動化流程處理).
+- 最近一次全套驗證:2026-11-04 se302(e2e 分組多開),`npm test` 577 passing、0 failing(505 → 577;約 5 分,`--lock`)、lint 0 error、變異 62 個全數擊殺、3 組無變異基準全綠;另以 w-web-api 副本實跑真瀏覽器 51 passing;未派外審.報告 `C:\opensrcOper\dnow\20261104071854\agent-out\se302-修正報告.md`.
+- 前一輪全套驗證:2026-11-01 pte35b(Gitea #35 續,`opt` 依 K3 改用預設),`npm test` 505 passing、0 failing(485 → 505,`e2e-waitDrawerReady` 58 → 78 條;4m,`--lock`)、lint 0 error、變異 33 個全數擊殺(M33 僅因訊息內含預設選擇器字樣而被擊殺,行為等價);修前版本(pte35 完成時)跑新測試 58 passing／20 failing;未派外審.報告 `C:\opensrcOper\dnow\20261031234910\agent-out\pte35b-修正報告.md`.
 - 前一輪全套驗證:2026-11-01 pte35,`npm test` 485 passing、0 failing(427 → 485)、變異 14/15 擊殺(存活 1 為預期等價體);報告 `pte35-修正報告.md`.
 - 前一輪全套驗證:2026-10-30 e2e01,`npm test` 427 passing、0 failing(412 → 427, 本輪 `unit-procPrimitives` 淨增 15 條; 3m07s, `--lock`)、lint 0 error、變異 24/24 擊殺(`unit-procPrimitives` 之 `listenerPids`／`killPortListeners`);未派外審.報告 `C:\opensrcOper\dnow\20261030064553\agent-out\e2e01-修正報告.md`.
 - 更早一輪全套驗證:2026-10-28 pte2e-run01,`npm test` 412 passing(其中 issue #19 新增 69 條)、lint 0 error、變異 70/70、新舊差分 34 組全同;外審 terra 兩輪(22＋14 條)已處置.報告 `C:\opensrcOper\dnow\20261028061508\agent-out\pte2e-run01-修正報告.md`.
@@ -25,6 +26,7 @@
 | 生命週期與行程(createServiceManager、registerCleanupHooks、所有權與 port 原語、runIsolatedE2e) | 完成(own 政策未提供) | README §2.4 | `unit-serviceManager`、`unit-procPrimitives`、`unit-harnessHelpers` | own 政策(README §7) |
 | 埠之監聽者查詢與處置(`listenerPids`、`killPortListeners`;e2e01,2026-10-30) | 完成,未發布(破壞性: `opt.exec` 改 spawnSync 形、移除 `parseListenerPids`、新增依賴 `wsemi`) | `rulebook_port.md`、README §5 Breaking changes | `unit-procPrimitives` `[LP*]`／`[KP*]`／`[RP*]`(含本機真實監聽與真實子程序) | 下游(w-web-task 等)須改替身形狀並刪 `parseListenerPids` 案、身分確認傳 `useBoth:true`(`rulebook_port.md` §4);lsof 路徑真機未跑;`killOwnTree` 之 `opt.exec` 仍 execSync 形 |
 | settle 掛鉤之元件辨識(`waitDrawerReady` 只認 WDrawer 根節點,預設選擇器 `[state][changedrawerwidth]`、新增 `opt.selector`／`opt.debug`／`opt.funLog`,`opt` 非預期輸入依 K3 改用預設不拋錯;Gitea #35,2026-11-01) | 完成,未發布(行為變更: 自家以裸 `state` 表示過場之元件須傳 `selector`;`timeout` 數字字串／0／負數、`opt=null` 之行為改變;README §5) | `rulebook_settle.md` | `e2e-waitDrawerReady`(78 條)、`e2e-browserPrimitives`、`e2e-captureEquivalence` | 預設選擇器依元件內部屬性 `changedrawerwidth`,元件改版須以 `node test/tools/probeWDrawerDom.mjs <w-component-vue 根目錄>` 複驗;不再順帶等 WDialog／浮層過場(2.5.35 前本就未等) |
+| e2e 分組多開(`runShardedE2e`、`planE2eShards`、`listDirLinks`、`removeE2eInstance`、`tools/shardE2e.mjs`、`tools/shardE2eReporter.cjs`;se302,2026-11-04) | 完成,未發布;共用工具已就緒,`w-web-perm`、`w-web-sso`、`w-web-api` 之導入由主控另派(清單見 `C:\opensrcOper\dnow\20261104071854\agent-out\se302-修正報告.md`) | `rulebook_shard.md` | `unit-planE2eShards`、`unit-removeE2eInstance`、`api-shardE2e` | POSIX 路徑未實測;Windows 之 TerminateProcess 由下次開跑清除;父子鏈中斷、未取樣到且不占本次埠之孤兒認不出(刪除失敗時大聲報錯) |
 | 盤點 CLI(auditBoxes、auditWaits) | 完成 | `sgud/proc/process.md` | `unit-auditWaits`(auditBoxes 無單元測試) | — |
 | 驗證工具(snapshotBaselines、diffBaselineSnapshots、compareImageDirs) | 完成 | README §4 | `unit-baselineTools` | — |
 

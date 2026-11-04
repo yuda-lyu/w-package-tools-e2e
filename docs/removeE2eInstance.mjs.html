@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    
+    <meta charset="utf-8">
+    <title>removeE2eInstance.mjs - Documentation</title>
+    
+    
+    <script src="scripts/prettify/prettify.js"></script>
+    <script src="scripts/prettify/lang-css.js"></script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc.css">
+    <script src="scripts/nav.js" defer></script>
+    
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+
+<input type="checkbox" id="nav-trigger" class="nav-trigger" />
+<label for="nav-trigger" class="navicon-button x">
+  <div class="navicon"></div>
+</label>
+
+<label for="nav-trigger" class="overlay"></label>
+
+<nav >
+    
+    
+    <h2><a href="index.html">Home</a></h2><h3>Global</h3><ul><li><a href="global.html#BOX_PAD">BOX_PAD</a></li><li><a href="global.html#INK_PAD">INK_PAD</a></li><li><a href="global.html#WPackageToolsE2e">WPackageToolsE2e</a></li><li><a href="global.html#acceptPendingShots">acceptPendingShots</a></li><li><a href="global.html#activeBaselineCollector">activeBaselineCollector</a></li><li><a href="global.html#assertBaselineMatch">assertBaselineMatch</a></li><li><a href="global.html#assertTextSpec">assertTextSpec</a></li><li><a href="global.html#canvasInkRects">canvasInkRects</a></li><li><a href="global.html#captureStable">captureStable</a></li><li><a href="global.html#captureStableWithBox">captureStableWithBox</a></li><li><a href="global.html#chromiumLaunchArgs">chromiumLaunchArgs</a></li><li><a href="global.html#collectDomText">collectDomText</a></li><li><a href="global.html#compareImageDirs">compareImageDirs</a></li><li><a href="global.html#createBaselineCollector">createBaselineCollector</a></li><li><a href="global.html#createBaselineGate">createBaselineGate</a></li><li><a href="global.html#createKnownDefect">createKnownDefect</a></li><li><a href="global.html#createServiceManager">createServiceManager</a></li><li><a href="global.html#createTempSettings">createTempSettings</a></li><li><a href="global.html#cropRegion">cropRegion</a></li><li><a href="global.html#diffBaselineSnapshots">diffBaselineSnapshots</a></li><li><a href="global.html#diffLinkTarget">diffLinkTarget</a></li><li><a href="global.html#findOrphanBaselines">findOrphanBaselines</a></li><li><a href="global.html#findProcessDescendants">findProcessDescendants</a></li><li><a href="global.html#getE2eMode">getE2eMode</a></li><li><a href="global.html#gridContentBox">gridContentBox</a></li><li><a href="global.html#insideEnabledCollect">insideEnabledCollect</a></li><li><a href="global.html#isChildAlive">isChildAlive</a></li><li><a href="global.html#itemsUnionBox">itemsUnionBox</a></li><li><a href="global.html#killOwnTree">killOwnTree</a></li><li><a href="global.html#killPortListeners">killPortListeners</a></li><li><a href="global.html#launchBrowser">launchBrowser</a></li><li><a href="global.html#launchChromium">launchChromium</a></li><li><a href="global.html#launchChromiumCore">launchChromiumCore</a></li><li><a href="global.html#listDirLinks">listDirLinks</a></li><li><a href="global.html#listenerPids">listenerPids</a></li><li><a href="global.html#maskRegions">maskRegions</a></li><li><a href="global.html#normalizeShots">normalizeShots</a></li><li><a href="global.html#openCasePage">openCasePage</a></li><li><a href="global.html#overlayImageAt">overlayImageAt</a></li><li><a href="global.html#overlayRegions">overlayRegions</a></li><li><a href="global.html#pageHasText">pageHasText</a></li><li><a href="global.html#pidExists">pidExists</a></li><li><a href="global.html#planE2eShards">planE2eShards</a></li><li><a href="global.html#pollUntil">pollUntil</a></li><li><a href="global.html#probeHttp">probeHttp</a></li><li><a href="global.html#probeStuckTooltip">probeStuckTooltip</a></li><li><a href="global.html#registerCleanupHooks">registerCleanupHooks</a></li><li><a href="global.html#removeE2eInstance">removeE2eInstance</a></li><li><a href="global.html#resetAgGridScroll">resetAgGridScroll</a></li><li><a href="global.html#resolveE2ePort">resolveE2ePort</a></li><li><a href="global.html#resolveKeepSame">resolveKeepSame</a></li><li><a href="global.html#reviewPendingShots">reviewPendingShots</a></li><li><a href="global.html#rowBoxSel">rowBoxSel</a></li><li><a href="global.html#runBaselineCase">runBaselineCase</a></li><li><a href="global.html#runIsolatedE2e">runIsolatedE2e</a></li><li><a href="global.html#runOutsideCollector">runOutsideCollector</a></li><li><a href="global.html#runShardedE2e">runShardedE2e</a></li><li><a href="global.html#runTaggedCall">runTaggedCall</a></li><li><a href="global.html#sleepSync">sleepSync</a></li><li><a href="global.html#snapshotBaselines">snapshotBaselines</a></li><li><a href="global.html#snapshotLinkTarget">snapshotLinkTarget</a></li><li><a href="global.html#stepShots">stepShots</a></li><li><a href="global.html#typeIntoInput">typeIntoInput</a></li><li><a href="global.html#typeIntoNthInput">typeIntoNthInput</a></li><li><a href="global.html#waitAlertGone">waitAlertGone</a></li><li><a href="global.html#waitChildExit">waitChildExit</a></li><li><a href="global.html#waitColResizeOverlay">waitColResizeOverlay</a></li><li><a href="global.html#waitDrawerReady">waitDrawerReady</a></li><li><a href="global.html#waitGridIdle">waitGridIdle</a></li><li><a href="global.html#waitUntilExist">waitUntilExist</a></li><li><a href="global.html#writeBaselineIfChanged">writeBaselineIfChanged</a></li></ul>
+    
+</nav>
+
+<div id="main">
+    
+    <h1 class="page-title">removeE2eInstance.mjs</h1>
+    
+
+    
+
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>import fs from 'fs'
+import path from 'path'
+import listDirLinks from './listDirLinks.mjs'
+
+
+//失敗一律以此拋出: step 標明停在哪一步, 其後各步皆未執行(尤其遞迴刪除)
+function stepError(step, instRoot, msg) {
+    let err = new Error(`removeE2eInstance: [${step}] ${msg}; 實例未刪除: ${instRoot}`)
+    err.step = step
+    err.instRoot = instRoot
+    return err
+}
+
+
+/**
+ * 取連結目標之快照(不跟進連結)，供拆除前後比對目標是否完好
+ *
+ * @param {String} dir 輸入目標目錄字串
+ * @param {Object} [opt={}] 輸入設定物件，預設{}
+ * @param {Number} [opt.depth=Infinity] 輸入遞迴深度，1為只列第一層，預設Infinity
+ * @param {Boolean} [opt.meta=true] 輸入檔案是否記錄大小與修改時間布林值，預設true
+ * @returns {Object} 回傳物件{dir,exists,entries}，entries之鍵為相對路徑，值為'd'(目錄)、'l'(連結)或檔案之`大小:修改時間`(meta為false時為'f')
+ */
+export function snapshotLinkTarget(dir, opt = {}) {
+    let { depth = Infinity, meta = true } = opt
+    let abs = path.resolve(dir)
+    if (!fs.existsSync(abs)) {
+        return { dir: abs, exists: false, entries: {} }
+    }
+    let entries = {}
+    let walk = (d, lv) => {
+        for (let name of fs.readdirSync(d)) {
+            let p = path.join(d, name)
+            let rel = path.relative(abs, p).replace(/\\/g, '/')
+            let st = fs.lstatSync(p)
+            if (st.isSymbolicLink()) {
+                entries[rel] = 'l'
+            }
+            else if (st.isDirectory()) {
+                entries[rel] = 'd'
+                if (lv &lt; depth) {
+                    walk(p, lv + 1)
+                }
+            }
+            else {
+                entries[rel] = meta ? `${st.size}:${st.mtimeMs}` : 'f'
+            }
+        }
+    }
+    walk(abs, 1)
+    return { dir: abs, exists: true, entries }
+}
+
+
+/**
+ * 比對連結目標之兩份快照
+ *
+ * @param {Object} before 輸入先前之快照
+ * @param {Object} after 輸入之後之快照
+ * @returns {Object} 回傳物件{missing,changed,added}，三者皆為相對路徑陣列
+ */
+export function diffLinkTarget(before, after) {
+    let missing = []
+    let changed = []
+    let added = []
+    for (let k of Object.keys(before.entries)) {
+        if (!(k in after.entries)) {
+            missing.push(k)
+        }
+        else if (before.entries[k] !== after.entries[k]) {
+            changed.push(k)
+        }
+    }
+    for (let k of Object.keys(after.entries)) {
+        if (!(k in before.entries)) {
+            added.push(k)
+        }
+    }
+    if (before.exists &amp;&amp; !after.exists) {
+        missing.unshift('.')
+    }
+    return { missing, changed, added }
+}
+
+
+//目標是否完好: 不缺、不變; allowAdded 為假時也不得多出
+function targetProblem(t, before, after) {
+    let d = diffLinkTarget(before, after)
+    let parts = []
+    if (d.missing.length > 0) {
+        parts.push(`缺少 ${d.missing.length} 項(${d.missing.slice(0, 5).join(', ')})`)
+    }
+    if (d.changed.length > 0) {
+        parts.push(`變動 ${d.changed.length} 項(${d.changed.slice(0, 5).join(', ')})`)
+    }
+    if (d.added.length > 0 &amp;&amp; !t.allowAdded) {
+        parts.push(`多出 ${d.added.length} 項(${d.added.slice(0, 5).join(', ')})`)
+    }
+    return parts.length > 0 ? `${t.path}: ${parts.join('; ')}` : ''
+}
+
+
+//只拆連結本身: unlink 不成再 rmdir(不帶遞迴, 實體目錄非空時失敗而不會刪內容), 回傳前確認連結已不存在
+function removeLink(p) {
+    try {
+        fs.unlinkSync(p)
+    }
+    catch (err) {
+        fs.rmdirSync(p)
+    }
+    if (fs.lstatSync(p, { throwIfNoEntry: false })) {
+        throw new Error('拆除後仍存在')
+    }
+}
+
+
+//撞名時之下一個檔名: 證據檔之 N 加在時間戳之後(&lt;標籤>__&lt;時間戳>-N__&lt;種類>, 同 assertBaselineMatch), 其餘加在副檔名之前
+function nextName(name, n) {
+    let m = name.match(/^(.+__\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}-\d{3})(?:-\d+)?(__.+)$/)
+    if (m) {
+        return `${m[1]}-${n}${m[2]}`
+    }
+    let ext = path.extname(name)
+    return `${name.slice(0, name.length - ext.length)}-${n}${ext}`
+}
+
+
+//搬移目錄內全部檔案至 to, 不覆蓋(排他複製, 撞名加序號); 複製成功才刪來源; 來源內之連結不跟進也不搬
+function moveFilesNoOverwrite(from, to) {
+    let moved = []
+    let st = fs.lstatSync(from, { throwIfNoEntry: false })
+    if (!st || !st.isDirectory()) {
+        return moved
+    }
+    let walk = (dir) => {
+        for (let name of fs.readdirSync(dir)) {
+            let p = path.join(dir, name)
+            let s = fs.lstatSync(p)
+            if (s.isSymbolicLink()) {
+                continue
+            }
+            if (s.isDirectory()) {
+                walk(p)
+                continue
+            }
+            let relDir = path.relative(from, dir)
+            let dstDir = path.join(to, relDir)
+            fs.mkdirSync(dstDir, { recursive: true })
+            let dst = path.join(dstDir, name)
+            for (let n = 1; ; n++) {
+                try {
+                    fs.copyFileSync(p, dst, fs.constants.COPYFILE_EXCL)
+                    break
+                }
+                catch (err) {
+                    if (err.code !== 'EEXIST') {
+                        throw err
+                    }
+                    dst = path.join(dstDir, nextName(name, n))
+                }
+            }
+            fs.unlinkSync(p)
+            moved.push(dst)
+        }
+    }
+    walk(from)
+    return moved
+}
+
+
+/**
+ * 移除一個臨時實例：先搬回失敗證據、以不跟進連結之方式列出並逐一拆除連結、回驗清單為空且連結目標完好，才遞迴刪除並確認已不存在
+ *
+ * 實例內之連結指向正式專案之node_modules與test/pics：robocopy鏡像空目錄(含/XJ、/XJD)會穿過junction把目標內容刪光，故尚有連結時絕不遞迴刪除(全域技能full-run-and-instances §5.5)。
+ * 任一步失敗即拋錯(err.step標明停在哪一步)，其後各步皆不執行，不繼續刪除；已拆除連結之實例留待下次執行清除。
+ * 呼叫前須已停止實例之服務並回驗(本函數不殺行程)。
+ *
+ * @param {Object} opt 輸入設定物件
+ * @param {String} opt.instRoot 輸入實例目錄字串，須位於workDir之直屬下且名稱為inst&lt;N>，否則拋錯
+ * @param {String} opt.workDir 輸入實例所在之工作目錄字串
+ * @param {Array} [opt.pendingMoves=[]] 輸入失敗證據之搬移陣列，元素為{from,to}，搬移不覆蓋(撞名加序號)，須先於拆連結與刪除，失敗即不刪除
+ * @param {Array} [opt.targets=[]] 輸入連結目標陣列，元素為{path,depth,meta,allowAdded,expect}，depth、meta同snapshotLinkTarget，allowAdded為true時多出之項不算不完好，expect為先前之快照(未給則以拆連結前當下之快照為準)
+ * @param {Function} [opt.rmDir] 輸入遞迴刪除函數(dir)，預設fs.rmSync(recursive、force、重試10次)，僅供測試注入
+ * @param {Function} [opt.log=console.log] 輸入輸出函數，預設console.log
+ * @returns {Object} 回傳物件{instRoot,links,moved}，links為已拆除之連結相對路徑陣列，moved為已搬回之檔案路徑陣列
+ * @example
+ *
+ * import removeE2eInstance from 'w-package-tools-e2e/src/removeE2eInstance.mjs'
+ *
+ * removeE2eInstance({
+ *     instRoot: './tmp/e2e-shards/inst1',
+ *     workDir: './tmp/e2e-shards',
+ *     pendingMoves: [{ from: './tmp/e2e-shards/inst1/w-web-perm/testPending', to: './testPending' }],
+ *     targets: [{ path: './node_modules', depth: 2, meta: false, allowAdded: true }, { path: './test/pics' }],
+ * })
+ *
+ */
+function removeE2eInstance(opt = {}) {
+    let { instRoot, workDir, pendingMoves = [], targets = [], rmDir, log } = opt
+    if (typeof instRoot !== 'string' || instRoot === '' || typeof workDir !== 'string' || workDir === '') {
+        throw new Error('removeE2eInstance: instRoot 與 workDir 為必填字串')
+    }
+    if (typeof log !== 'function') {
+        log = console.log
+    }
+    if (typeof rmDir !== 'function') {
+        rmDir = (dir) => fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 })
+    }
+    let inst = path.resolve(instRoot)
+    let work = path.resolve(workDir)
+
+    //守門: 遞迴刪除之對象只能是工作目錄直屬之 inst&lt;N>, 路徑組錯時不得刪到別處
+    if (path.dirname(inst) !== work || !/^inst\d+$/.test(path.basename(inst))) {
+        throw stepError('guard', inst, `對象須為 ${work} 直屬之 inst&lt;N>`)
+    }
+    if (!fs.existsSync(inst)) {
+        return { instRoot: inst, links: [], moved: [] }
+    }
+
+    //搬回失敗證據(先於一切刪除動作)
+    let moved = []
+    try {
+        for (let { from, to } of pendingMoves) {
+            moved.push(...moveFilesNoOverwrite(path.resolve(from), path.resolve(to)))
+        }
+    }
+    catch (err) {
+        throw stepError('pending', inst, `搬回失敗證據失敗(${err.message})`)
+    }
+
+    //列出連結(不跟進); 枚舉失敗不得視為沒有連結
+    let links
+    try {
+        links = listDirLinks(inst)
+    }
+    catch (err) {
+        throw stepError('listLinks', inst, `列出連結失敗(${err.message})`)
+    }
+
+    //目標之基準: 給了 expect 者比對整輪(例: 執行前之標準圖快照), 否則比對拆連結前後
+    let bases
+    try {
+        bases = targets.map((t) => (t.expect ? t.expect : snapshotLinkTarget(t.path, t)))
+    }
+    catch (err) {
+        throw stepError('targets', inst, `取連結目標快照失敗(${err.message})`)
+    }
+
+    //逐一拆除, 只拆連結本身
+    let removed = []
+    for (let l of links) {
+        try {
+            removeLink(l.path)
+            removed.push(l.rel)
+        }
+        catch (err) {
+            throw stepError('unlink', inst, `拆除連結失敗 ${l.path}(${err.message})`)
+        }
+    }
+
+    //回驗: 清單須為空
+    let remain
+    try {
+        remain = listDirLinks(inst)
+    }
+    catch (err) {
+        throw stepError('relist', inst, `回驗連結失敗(${err.message})`)
+    }
+    if (remain.length > 0) {
+        throw stepError('relist', inst, `拆除後仍有連結: ${remain.map((v) => v.rel).join(', ')}`)
+    }
+
+    //回驗: 目標完好
+    let checkTargets = (step) => {
+        let probs = []
+        try {
+            targets.forEach((t, i) => {
+                let p = targetProblem(t, bases[i], snapshotLinkTarget(t.path, t))
+                if (p) {
+                    probs.push(p)
+                }
+            })
+        }
+        catch (err) {
+            throw stepError(step, inst, `取連結目標快照失敗(${err.message})`)
+        }
+        if (probs.length > 0) {
+            throw stepError(step, inst, `連結目標不完好: ${probs.join(' | ')}`)
+        }
+    }
+    checkTargets('targets')
+
+    //此時實例內已無連結, 才遞迴刪除並確認已不存在
+    try {
+        rmDir(inst)
+    }
+    catch (err) {
+        throw stepError('rm', inst, `刪除失敗(${err.message}; 實例內已無連結)`)
+    }
+    if (fs.existsSync(inst)) {
+        throw stepError('rm', inst, '刪除後仍存在(實例內已無連結)')
+    }
+    checkTargets('targetsAfter')
+
+    log(`[e2e-instance] 已移除 ${inst}(拆連結 ${removed.length} 個、搬回證據 ${moved.length} 檔)`)
+    return { instRoot: inst, links: removed, moved }
+}
+
+
+export default removeE2eInstance
+</code></pre>
+        </article>
+    </section>
+
+
+
+
+    
+    
+</div>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 4.0.5</a> on Wed Nov 04 2026 09:42:58 GMT+0800 (台北標準時間) using the <a href="https://github.com/clenemt/docdash">docdash</a> theme.
+</footer>
+
+<script>prettyPrint();</script>
+<script src="scripts/polyfill.js"></script>
+<script src="scripts/linenumber.js"></script>
+
+
+
+</body>
+</html>

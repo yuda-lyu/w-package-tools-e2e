@@ -128,7 +128,7 @@
 
 - exit／訊號處理器內之非同步不會被等待 → `cleanup` 須同步(同步 `taskkill`).spawn 之子行程拖住事件迴圈, `exit` 事件要等迴圈清空 → 框架環境由 root after 主動收尾, 直跑則主函式末尾顯式呼叫 `cleanup()`, exit／訊號為備援.
 - `registerCleanupHooks` 須於共用層模組頂層呼叫: 使 root after 排在 api 測試層強制退出之前.
-- SIGINT 於 Windows 無法由外部送 console 事件, 只能以單元測試(注入假 process)覆蓋.
+- SIGINT 於 Windows 由外部送須 `AttachConsole`＋`GenerateConsoleCtrlEvent`, 且目標之 Ctrl-C 不得被繼承停用(見「注意事項: 分組多開」); 一般單元測試以注入假 process 覆蓋.
 - 沿用政策之前提: 該 port 專屬本專案.沿用時無法確認對方跑的是哪份設定與版本(與開發服務共用 port 時尤其); `probeHttp` 之 `identify` 可驗專案識別, 但四專案皆尚未提供識別端點.
 - 就緒判定只看 HTTP 回應; 服務遇 EADDRINUSE 不一定退出(w-web-task 實測), 沿用政策察覺不到綁定失敗(own 政策才偵測).
 - `restart` 殺自建後等 port 釋放(上限 `portReleaseTimeoutMs`)再 spawn; 殺後仍被佔或無自建而被佔時, `killForeignOnRestart:true` 才殺監聽者——**只可用於專案專屬且於映射表明文登錄之 port**.
@@ -144,6 +144,16 @@
 - **spawn 之路徑以 `path.resolve(projRoot, …)` 組**: spawn 之 cwd 為 projRoot, `path.join(projRoot, 相對)` 在 projRoot 本身為相對路徑時仍是相對路徑, 子行程內會再疊一次.
 - **明確給定之選項若會無效或被改寫, 拋錯而不靜默退回**: `mochaBin` 給了卻不存在時若默默改用 npx, 使用者以為用的是指定版本; npx 退路之參數改寫同理.
 - **埠位移(2026-10-28, issue #19)**: 套件內組埠處只有 `createServiceManager`(盤點: `Grep "port|url|baseUrl" src`); `probeHttp`／`killPortListeners`／`listenerPids` 收完整網址或埠, 在其內再加位移會與呼叫端以 `resolveE2ePort` 組成者重複相加, 故不加.字串 url 之埠不等於基準埠時拋錯——不位移就會探測到他實例而「沿用」之.未位移時 `resolveE2ePort` 原樣回傳(不轉型), `createServiceManager` 之服務物件鍵序維持 `{readyTimeoutMs,url,...s}`(先建物件再指定 `url`/`port`), 自訂 probe 收到之物件與 1.0.10 逐位元相同.
+
+## 注意事項: 分組多開(2026-11-04 se302; 規則見 `sgud/rule/rulebook_shard.md`)
+
+- **父行程被硬殺時只連帶殺直屬子行程**(2026-11-04 實測: 工具被 TerminateProcess 後 mocha 已不存在; `shell:true` 之服務存活, `[S-I15]`.成因應為 libuv 把非 detached 之子行程放進 KILL_ON_JOB_CLOSE 且 SILENT_BREAKAWAY 之 job, 此點依對 libuv 之理解, 未於本機原始碼查證): mocha 不會繼續跑, 服務若為 mocha 之直屬子行程也跟著死; **`shell:true` 者(`npm run serve`)之 cmd 死、其下之服務存活成孤兒且 ppid 指向已死之 cmd**, BFS 走不到. 因此: ①孤兒要趁存活時取樣 PID 寫入鎖檔才認得(`treeSampleMs`); ②同一次執行內再以「監聽本次埠且起始晚於開跑」為最後防線; ③殘留清除不以埠殺(第 0 組即正式埠, 可能已是他人之服務). 測試要造孤兒須走 `shell:true`, 直屬子行程造不出來(原測試以為 mocha 會存活, 實測不成立).
+- **Ctrl-C 在代理環境被停用且會繼承**: 測試環境常以 CREATE_NEW_PROCESS_GROUP 起動, 其「忽略 Ctrl-C」屬性由子行程繼承, `GenerateConsoleCtrlEvent(CTRL_C)` 回成功但目標收不到(本輪實測 mocha 空等閘門 150 秒才發現). 要驗真實 SIGINT 須由啟動器先 `SetConsoleCtrlHandler(NULL, FALSE)` 再起行程(`[S-I14b]`); Ctrl-Break 不受此限(`[S-I14]`), 但送出者自身也會被結束(離開碼 0xC000013A), 不代表失敗. 舊記「SIGINT 於 Windows 無法由外部送 console 事件」不正確: `AttachConsole`＋`GenerateConsoleCtrlEvent` 可以.
+- **mocha 會蓋掉 `process.exit` 之離開碼**: `after` 內 `setImmediate(() => process.exit(3))` 時 run end 先發生, mocha 之 exit 處理器把 `exitCode` 設回失敗數, 實際離開碼 0; 同步 `process.exit(3)` 才會保留. 同步 `process.exit` 時 run end 不會發生, 故報告器每個事件都寫檔, 工具以 `total` 判定是否跑完(sso `e2e-tokens` 之 root after 以 `setImmediate` 結束, 會發生 run end).
+- **`fs.cp` 不能複製到自身之子目錄**: 實例預設在 `<專案根>/tmp/...`, `fs.cp(root, dst)` 直接 `ERR_FS_CP_EINVAL`(POC 之實例在專案外才沒遇到), 故自寫 `copyTree`(`copyFile` 由 OS 複製, 不把內容讀進 JS, `.env` 亦然).
+- **Windows 下特定位址與萬用位址可並存**: 只試綁 `0.0.0.0` 會漏掉只綁 `127.0.0.1` 之占用者, 預檢四個位址都試(`[S-I19]` 三種占用皆實測); 試綁比 `listenerPids` 快, 只有失敗才查占用者(每埠約 1 秒).
+- **mocha 之統計不解析 log**: 測試自身可印「3 failing」, spec 輸出也沒有檔名, 無法得各檔耗時; 改以繼承 Spec 之報告器寫 JSON. 報告器須 `.cjs`, mocha 以 `require` 載入; `require.resolve('mocha', { paths: [cwd] })` 經 junction 解析到實際路徑, 與執行中之 mocha 同一模組.
+- **log 直接寫 outDir, 不複製**: 工具被硬殺時 log 仍在, 且 mocha 持有之檔案把柄不在實例內, 不會擋實例之刪除.
 
 ## 注意事項: 套件維護與驗證(2026-09-29, 移入)
 

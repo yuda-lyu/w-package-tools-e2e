@@ -100,6 +100,10 @@ let browser2 = await wpte.launchBrowser()
 | `probeHttp(url, opt)` | 任何 HTTP 回應即 true；`accept` / `identify` 可收緊 | sso 實跑、單元 |
 | `createTempSettings(opt)` | 臨時設定檔（JSON5 基底淺合併、tmpDir 必填、forbiddenKeys） | sso 實跑、單元 |
 | `runIsolatedE2e(opt)` | 逐檔獨立 mocha 行程（殺 port 以回呼注入）；`targets` 逐檔指定檔案與 `--grep`（依差異範圍只重跑受影響案例，每檔仍換新後端，並自動加 `--fail-zero`，grep 對不到任何案例即失敗）；有 mocha 執行檔（`mochaBin`，預設 `node_modules/mocha/bin/mocha.js`，以 `projRoot` 解析）時以 node 直接執行、不經 shell，否則沿用 `npx`（Windows 下經 cmd.exe 重新解析參數：`\|` `&` 切出另一指令、`<` `>` 轉向、`^` `"` 被吃掉、空白拆開、`%名稱%` 展開；故此時參數含空白或 `"` `&` `\|` `<` `>` `^` `%` 即於執行前拋錯；括號與 `[ ]` 不受影響）；明確給定之 `mochaBin` 不存在即拋錯 | sso 實跑、單元（2026-09-30 加 `targets`、node 直接執行、npx 退路之參數守門） |
+| `runShardedE2e(opt)` | 把專案之 e2e 檔分組，各組放進以埠位移之臨時實例同時跑、彙整後移除實例，只跑比對（§2.11）；`tools/shardE2e.mjs` 為其 CLI | 單元、真實小專案整合（2026-11-04 新增） |
+| `planE2eShards(opt)` | 分組與記憶體守門之純函數：由大到小放入最輕之組、`officialOnly` 固定第 0 組、`together` 不拆開（§2.11） | 單元（2026-11-04 新增） |
+| `listDirLinks(root, opt)` | 以不跟進連結之方式列出目錄內之連結（symlink、junction）；枚舉失敗拋錯，不視為沒有連結 | 單元（2026-11-04 新增） |
+| `removeE2eInstance(opt)` | 移除一個臨時實例：搬回證據（不覆蓋）→ 拆連結 → 回驗清單為空且目標完好 → 遞迴刪除 → 確認不存在；任一步失敗拋錯（`err.step`）不做後續（§2.11） | 單元、真實小專案整合（2026-11-04 新增） |
 | 所有權原語 `killOwnTree` / `isChildAlive` / `waitChildExit` / `pidExists` / `sleepSync` | 只殺自建且仍存活之子行程樹（同步）與回驗 | killOwnTree sso 實跑；其餘單元（移植自 w-web-task 並帶其測試） |
 | port 政策原語 `killPortListeners(port, opt)` | 殺監聽某 port 之行程（含行程樹）——**只可用於專案專屬且已於映射表明文登錄之 port**；查詢固定傳 `useBoth: true`（殺行程須完整集合）；`opt.exec` 為 spawnSync 形，查詢與下殺共用（§5 Breaking changes）；查詢失敗回 `{ pids: null, killed: [] }` 不下殺 | sso 實跑（舊版）、單元、本機真實子程序（2026-10-30） |
 | `listenerPids(port, opt)` | 查監聽某 port 之 PID（字串陣列、去重排序）：委由 wsemi `execProcessPortPidsSync`，判定不依狀態欄；Windows 先 `netstat -ano`、查無或失敗再 `Get-NetTCPConnection -LocalPort` 確認（本機 Windows 11 26300 之 netstat 會漏列新起之監聽、並把對外連線之狀態錯置為 LISTENING），其他平台 `lsof`；`[]` 只代表已確認無人，查詢失敗回 `null`（不可當成無人）；透傳 `timeout`／`useBoth`／`onTrace`／`exec`／`platform`；本 OS 上新起之監聽與無人之 port 每次約 1 秒（走 PowerShell），在 exit／signal 處理器內呼叫請傳較短 `timeout`（如 5000）；**身分確認（「監聽者恰為我的子程序」）請傳 `useBoth: true`** | sso 實跑（舊版）、單元、本機真實監聽（2026-10-30） |
@@ -111,6 +115,7 @@ let browser2 = await wpte.launchBrowser()
 | `snapshotBaselines(dir)` / `diffBaselineSnapshots(a, b)` | 標準圖 sha256＋mtime 快照與比對；「內容相同但被重寫」亦列出 | sso 實跑、單元 |
 | `compareImageDirs(dirA, dirB, opt)` | 兩目錄同名 PNG 逐檔比對：位元組相同 ⊂ RGBA 相同 ⊂ 容差內；另報 `rgbaDiff`／`rgbaDiffBox`，`equivalent`＝RGBA 相同或相異像素全在 `opt.drift` 登錄漂移點內（**不以 pixelmatch 計數 0 為等價**：threshold 0.1 下均勻 ≤26 級之亮度差不計） | sso 實跑、單元 |
 | `reviewPendingShots(opt)` / `acceptPendingShots(opt)` | 收集模式單趟執行後之審查與採用（§2.8）：前者讀 `./testPending` 各標籤最新一組證據，分類 SAME／NOISE／CHANGED（附差異外框、可產並排裁圖）／SIZE／MISSING 並帶出所屬案例與結果，只讀；後者只把 `labels` 明列者之 capture 複製為正式標準圖，先全部驗證（無證據、所屬案例另因錯誤失敗、證據過期、無標準圖路徑皆拒收）才複製 | 單元（2026-10-28 新增，Gitea issue #19） |
+| `tools/shardE2e.mjs`（CLI） | `node node_modules/w-package-tools-e2e/tools/shardE2e.mjs [--plan] [--ports <埠,...>] [--instances <N>] …`：`runShardedE2e` 之命令列（§2.11）；離開碼 0 全部通過、1 有失敗／未跑完／收尾失敗／開跑前之問題、2 參數錯誤、128＋訊號值 收到終止訊號 | 真實小專案整合（spawn 實跑） |
 | `tools/reviewPending.mjs`（CLI） | `node node_modules/w-package-tools-e2e/tools/reviewPending.mjs [--pending <dir>] [--since <時間>] [--max-diff <N>] [--crops <dir>] [--json <out>] [--accept <標籤,...>] [--root <dir>] [--dry-run]`：未給 `--accept` 只審查、不改寫任何標準圖（裁圖排他建立、不覆蓋）；`--accept` 任一標籤不合格即全部不採用並以離開碼 1 結束；參數錯誤離開碼 2 | 單元（spawnSync 實跑） |
 | `tools/auditWaits.mjs`（CLI） | 固定等待盤點：`node node_modules/w-package-tools-e2e/tools/auditWaits.mjs [--only C,E,R] [--json <out>] <專案根目錄...>`；掃 `test/*.test.mjs` 與 `test/tools/*.mjs` 之每個 `waitForTimeout`，依前後語句分七類——A 偵測後之 settle、B 緩衝後接偵測、L 輪詢間隔、R 隨即離開函式（看呼叫端）、C 後接截圖／讀取／斷言（「固定秒數為唯一同步」候選）、D 後接操作、E 其他。旗標僅為候選：C／E／R 逐一判讀前一動作到預期狀態之間有無非同步來源（伺服器往返、轉址、計時器、廣播、防抖），有則改偵測（頁面內 `waitUntilExist`、瀏覽器外 `pollUntil`）；spec 規定之時間與負向斷言之觀察窗照留 | 單元（2026-09-28 自 w-web-sso 盤點腳本定稿；該日盤出 SSO 251／PERM 67／API 8／TASK 26 處） |
 | `tools/auditBoxes.mjs`（CLI） | 標準圖紅框盤點：`node node_modules/w-package-tools-e2e/tools/auditBoxes.mjs [--out <json>] <pics目錄...>`（遞迴、略過 `_` 參考片）；六類候選——`noBox` 無框（#f26 長段 < 20px，SKILL §7.6-3）、`fullFrame` 整張一框、`blank` 框內大片空白（底部 ≥ 120px 且 ≥ 30%，或右側 ≥ 200px 且 ≥ 30%，§7.3-2）、`black` 框內遮黑方塊（§8.2）、`touch` 紅框壓字（§7.3-8）、`cut` 框線外緣緊貼框外字形（框線壓到相鄰內容，§7.3-9）。旗標僅為候選，缺陷與否逐類裁框目視（彈窗／抽屜面板內留白、整列框、元素邊界貼框、有遮罩彈窗之框外背景屬合規） | 2026-09-28 自 w-web-sso 五支掃描器合併；四專案 1024 張與五支舊掃描器逐類計數相同（6/12/105/12/189）；同日加 `cut` |
@@ -208,7 +213,8 @@ prepare(ctx) → launch() → openPage(browser) → beforeRun(ctx) → run(page,
 | `E2E_COLLECT=1` | `runBaselineCase`（`collect` 之預設）、`createBaselineCollector`（`enabled` 之預設）、`getE2eMode`（互斥閘門） | 比對端收集模式（§2.8）；未設時不變；與產製模式互斥（`--baseline`／`E2E_REGEN=1` 併用即拋錯）。`assertBaselineMatch` 本身不讀它（範圍外照常拋錯） |
 | `E2E_BASELINE_KEEP_SAME=1` | `writeBaselineIfChanged`、`runBaselineCase`（產製端） | 有變更才改寫（§2.9）；未設時不變 |
 | `E2E_BASELINE_KEEP_MAXDIFF` | 同上（僅 `KEEP_SAME=1` 時讀取並驗格式） | 保留之差異上限（非負整數；未設＝比對端容差 `maxDiffPixels`，預設 100；`0`＝只保留 RGBA 逐像素相同者） |
-| `E2E_PORT_OFFSET` | `resolveE2ePort`、`createServiceManager` | 加到各基準埠（非負整數；未設、空或 `0` 不變），§2.10 |
+| `E2E_PORT_OFFSET` | `resolveE2ePort`、`createServiceManager` | 加到各基準埠（非負整數；未設、空或 `0` 不變），§2.10；`runShardedE2e` 依組序設定 |
+| `E2E_SHARD_RESULT` | `tools/shardE2eReporter.cjs` | 各組統計 JSON 之路徑（`runShardedE2e` 設定，使用端不必理會） |
 
 ### 2.7 `itemsUnionBox` 之圖形內容（`graphics`、`graphicAreas`；Gitea issue #6）
 
@@ -324,6 +330,52 @@ let baseUrl = `http://127.0.0.1:${resolveE2ePort(8080)}` //前端網址、後端
 - 實例仍須各自一份資料庫、上傳檔與 `test/_tmp/`（多開臨時實例時整樹複製或另指資料目錄），但不必改任何原始碼。
 - 位移後之埠須仍 ≥ 8000 且與他專案錯開（全域技能 role-coder-for-test §5）；位移值由多開之調度方指定（例：100、200）。
 
+### 2.11 分組多開（`runShardedE2e`、`tools/shardE2e.mjs`；2026-11-04）
+
+把一個專案之 e2e 檔分組，各組放進臨時實例同時跑，彙整結果後移除實例。**只跑比對，不寫標準圖**（`E2E_REGEN=1`、`mochaArgs` 含 `--baseline` 即拋錯；`test/pics` 為指回正式專案之 junction）。**專案不使用本工具時一切照舊**；未設 `E2E_PORT_OFFSET` 時既有 API 行為不變。
+
+**前提**：專案已依 §2.10 宣告基準埠（否則多於 1 組即拋錯：未接線時各組都用基準埠，依沿用政策互打而不報錯）。
+
+**設定** `test/tools/e2eShard.json`（可不存在，CLI 參數或 `opt` 覆寫同名欄位；未知之鍵即拋錯）：
+
+| 欄位 | 意思 | 預設 |
+|---|---|---|
+| `ports` | 基準埠陣列，預檢用。**實跑時必給**；專案確實無服務者明寫 `[]` | — |
+| `instances` | 實例數 | 5 |
+| `officialOnly` | 只能跑在位移 0 之檔名（畫面或期望值含主機、埠者）；含不存在之檔名即拋錯 | `[]` |
+| `together` | 必須同組之檔名陣列之陣列；有交集者合併 | `[]` |
+| `durations` | 各檔耗時（分），只用於分組；缺者以已知檔之平均值估算 | `{}` |
+| `exclude` | 額外不複製之路徑（相對專案根） | `[]` |
+| `portStep` | 各組埠位移間距，第 i 組位移＝i×portStep | 100 |
+
+```json
+{
+    "ports": [11006, 8090],
+    "instances": 5,
+    "officialOnly": ["e2e-apitest.test.mjs"],
+    "exclude": ["user_data"],
+    "durations": { "e2e-users.test.mjs": 12.5 }
+}
+```
+
+**CLI**（於專案根）：`node node_modules/w-package-tools-e2e/tools/shardE2e.mjs [選項]`；選項 `--root`、`--config`、`--plan`、`--ports a,b`、`--instances N`、`--official-only a,b`、`--together "a,b;c,d"`、`--durations <JSON>`、`--exclude a,b`、`--port-step N`、`--mem-per-instance GB`、`--work-dir`、`--out-dir`、`--mocha-args "--timeout 300000"`、`--group-timeout-min`、`--progress-min`、`--tree-sample-ms`、`--update-durations`、`--debug`。`--plan` 只印分組與預估，不取鎖、不建立任何東西、不執行。
+
+**流程與保證**：
+
+1. **分組**（`planE2eShards`）：以 `/^e2e-.*\.test\.mjs$/` 列舉，不靠寫死清單；由大到小放入目前最輕之組；`officialOnly` 固定第 0 組；`together` 不拆開；實例數不超過可分開之單元數。
+2. **記憶體守門**：依可用記憶體（`os.freemem()`，每實例預設 1.5 GB）調降並印原因；連 1 個都不夠時仍跑 1 個並警告。
+3. **鎖**：`<workDir>/shard.lock` 擋第二個同時執行者；行程已死（或 PID 回收）之鎖可接手。
+4. **清殘留**：接手死鎖時先殺鎖檔所記之子孫，再依第 8 點移除上次留下之 `inst<N>`。
+5. **預檢**：每個實例之每個埠（基準埠＋位移）於 `127.0.0.1`、`0.0.0.0`、`::`、`::1` 試綁定；未過於建立實例前拋錯並列出占用者（PID 與映像名稱），**不沿用**。
+6. **建立實例**：`<專案根>/tmp/e2e-shards/inst<N>/<專案名>`（可改 `workDir`；`workDir`、`outDir` 之相對路徑以專案根解析）。排除 `node_modules`、`.git`、`docs`、`tmp`、`testPending`、`logs`、`sgud`、`test/pics`、`test/_tmp` 與 `exclude`（皆相對專案根）；`node_modules`、`test/pics` 以 junction 指回；來源樹（不含排除項）內另有連結即拋錯列出；實例內建空 `logs`。**`.env` 等只由 OS 複製，工具不讀內容、不印出，隨實例刪除**——`workDir` 請留在 gitignore 範圍內。
+7. **執行**：各實例 `E2E_PORT_OFFSET=<第 i 組×portStep>`，`cwd` 為實例根，`node node_modules/mocha/bin/mocha.js --no-parallel <該組檔案> --timeout 180000 --reporter <本套件報告器>`（`mochaArgs` 可調，不可含 `--reporter`、`--parallel`）；隱藏視窗；輸出分寫 `<outDir>/group<i>.log`（執行中直接寫，行程被硬殺仍在）；報告器之輸出同內建 spec，另寫統計 `group<i>.result.json`；每 5 分印一行進度；每組逾 4 小時（`groupTimeoutMs`）終止。
+8. **收尾**（成功、失敗、例外、SIGINT、SIGTERM、SIGBREAK、SIGHUP 皆執行）：樹狀終止子行程與孤兒 → 回驗本次各埠已釋放 → 各實例 `testPending` 搬回正式專案（不覆蓋，撞名加 `-N`）→ 以不跟進連結之方式列出連結、逐一拆除、回驗清單為空且目標完好 → 遞迴刪除並確認已不存在。任一步失敗大聲報錯、不繼續刪除該實例、離開碼非 0。**Windows 之 `taskkill /F`、`child.kill()` 為 TerminateProcess，處理器來不及執行，由下次開跑清除**；真實訊號只有主控台事件。
+9. **彙整**：逐組印耗時、通過、失敗、pending 與檔案；最後印 mocha 同格式之 `N passing`、`M failing`、`P pending` 與失敗案例標題。有失敗、未跑完、某組沒有統計、0 案例、mocha 離開碼與統計不符或收尾失敗，`exitCode` 即非 0；收到訊號為 128＋訊號值。回傳值含各組結果與實際耗時。另印可貼回之 `durations`；`--update-durations` 才寫回，預設不改檔。
+
+**不得多開之流程**（SKILL §1.5）：畫面或期望值含主機與埠者列 `officialOnly`；共用同一真實收件匣者不要在兩個實例同時跑（放在同一組）；未通過首次等價驗證之專案不得以實例結果當標準圖依據（本工具本來就不寫標準圖）。
+
+**切勿**直接遞迴刪除或以 robocopy 鏡像清除 `workDir`：實例內尚有 junction 時會穿過連結刪到正式專案；工具留下之殘留一律重跑工具清除。
+
 ## 3. 採用步驟（以 w-web-sso 為例）
 
 1. **單一橋接檔**（`test/tools/e2eLib.mjs`）轉出本套件模組；共用層與測試檔一律自橋接檔 import，套件路徑只寫在這一檔（原經 w-web-sso 之 `srcPack/` 橋接者，只需把前綴改為 `'w-package-tools-e2e/src/'`；切換時只升本套件、不連帶升 playwright，Chromium 改版可能使標準圖全面變動，見 §5）：
@@ -410,6 +462,7 @@ let captureStableWithBox = (page, target, opts = {}) => pkgCaptureStableWithBox(
 - `test/e2e-captureEquivalence.test.mjs` 含 w-web-sso／w-web-perm 當時實作之凍結複本（逐位元等價之對照組）與框幾何之專測，屬行為契約，勿因「看起來重複」刪除；凍結複本區段以 `eslint-disable` 註明保持逐字。
 - `test/e2e-itemsUnionBoxGraphics.test.mjs`：`itemsUnionBox` 圖形內容（svg 圖形、2d canvas、`graphicAreas`）之真 Chromium 語意/幾何測試，標題前綴 `[ID]` 對應 `CLAUDE_rulebook.md` 表 C；斷言以「無圖形內容時之量框」與「框線外緣不越過內容」為準，無標準圖。
 - `test/unit-baselineCollect.test.mjs`（`[C*]`）、`test/unit-keepSame.test.mjs`（`[K*]`）、`test/unit-portOffset.test.mjs`（`[P*]`，含以真實子行程服務於 18930＋100 之實跑）、`test/unit-reviewPending.test.mjs`（`[R*]`，含 CLI 實跑）：Gitea issue #19 三項之開關行為、預設不變、彙整錯誤格式、mtime 不變、位移後之 baseUrl；標題前綴對應 `sgud/rule/rulebook_baselineRun.md` §8.4。
+- `test/unit-planE2eShards.test.mjs`（`[S-G*]`、`[S-M*]`，注入值）、`test/unit-removeE2eInstance.test.mjs`（`[S-R*]`、`[S-L*]`、`[S-T*]`，連結目標內放哨兵檔、以會跟進連結之刪除注入）、`test/api-shardE2e.test.mjs`（`[S-I*]`、`[S-P*]`，`test/_tmp/shardE2e/` 下建小專案：真 mocha、真 HTTP 服務、真 junction、真殺行程與主控台事件；固定埠 19200、19210、19300、19310、19400 須空閒）：分組多開，標題前綴對應 `sgud/rule/rulebook_shard.md`。
 - `test/unit-procPrimitives.test.mjs`：行程原語。`listenerPids`／`killPortListeners` 之案以 spawnSync 形替身（`test/tools/portPidsFake.mjs`）驗判定（對外連線錯置為 LISTENING 不得誤判、netstat 漏列由 `Get-NetTCPConnection` 補、查詢失敗回 null 非 `[]`、`useBoth`／`timeout`／`onTrace` 透傳），標題前綴 `[LP*]`（`listenerPids`）／`[KP*]`（`killPortListeners`）；`[RP*]` 為本機真實案：起真實監聽（固定埠 19050）查得到自己、真實子程序監聽（固定埠 19051）被 `killPortListeners` 殺掉並回驗；兩埠須空閒，否則該條失敗並註明。
 - lint：`npx eslint --ext .mjs src tools test`。
 

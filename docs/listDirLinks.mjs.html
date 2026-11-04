@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    
+    <meta charset="utf-8">
+    <title>listDirLinks.mjs - Documentation</title>
+    
+    
+    <script src="scripts/prettify/prettify.js"></script>
+    <script src="scripts/prettify/lang-css.js"></script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc.css">
+    <script src="scripts/nav.js" defer></script>
+    
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+
+<input type="checkbox" id="nav-trigger" class="nav-trigger" />
+<label for="nav-trigger" class="navicon-button x">
+  <div class="navicon"></div>
+</label>
+
+<label for="nav-trigger" class="overlay"></label>
+
+<nav >
+    
+    
+    <h2><a href="index.html">Home</a></h2><h3>Global</h3><ul><li><a href="global.html#BOX_PAD">BOX_PAD</a></li><li><a href="global.html#INK_PAD">INK_PAD</a></li><li><a href="global.html#WPackageToolsE2e">WPackageToolsE2e</a></li><li><a href="global.html#acceptPendingShots">acceptPendingShots</a></li><li><a href="global.html#activeBaselineCollector">activeBaselineCollector</a></li><li><a href="global.html#assertBaselineMatch">assertBaselineMatch</a></li><li><a href="global.html#assertTextSpec">assertTextSpec</a></li><li><a href="global.html#canvasInkRects">canvasInkRects</a></li><li><a href="global.html#captureStable">captureStable</a></li><li><a href="global.html#captureStableWithBox">captureStableWithBox</a></li><li><a href="global.html#chromiumLaunchArgs">chromiumLaunchArgs</a></li><li><a href="global.html#collectDomText">collectDomText</a></li><li><a href="global.html#compareImageDirs">compareImageDirs</a></li><li><a href="global.html#createBaselineCollector">createBaselineCollector</a></li><li><a href="global.html#createBaselineGate">createBaselineGate</a></li><li><a href="global.html#createKnownDefect">createKnownDefect</a></li><li><a href="global.html#createServiceManager">createServiceManager</a></li><li><a href="global.html#createTempSettings">createTempSettings</a></li><li><a href="global.html#cropRegion">cropRegion</a></li><li><a href="global.html#diffBaselineSnapshots">diffBaselineSnapshots</a></li><li><a href="global.html#diffLinkTarget">diffLinkTarget</a></li><li><a href="global.html#findOrphanBaselines">findOrphanBaselines</a></li><li><a href="global.html#findProcessDescendants">findProcessDescendants</a></li><li><a href="global.html#getE2eMode">getE2eMode</a></li><li><a href="global.html#gridContentBox">gridContentBox</a></li><li><a href="global.html#insideEnabledCollect">insideEnabledCollect</a></li><li><a href="global.html#isChildAlive">isChildAlive</a></li><li><a href="global.html#itemsUnionBox">itemsUnionBox</a></li><li><a href="global.html#killOwnTree">killOwnTree</a></li><li><a href="global.html#killPortListeners">killPortListeners</a></li><li><a href="global.html#launchBrowser">launchBrowser</a></li><li><a href="global.html#launchChromium">launchChromium</a></li><li><a href="global.html#launchChromiumCore">launchChromiumCore</a></li><li><a href="global.html#listDirLinks">listDirLinks</a></li><li><a href="global.html#listenerPids">listenerPids</a></li><li><a href="global.html#maskRegions">maskRegions</a></li><li><a href="global.html#normalizeShots">normalizeShots</a></li><li><a href="global.html#openCasePage">openCasePage</a></li><li><a href="global.html#overlayImageAt">overlayImageAt</a></li><li><a href="global.html#overlayRegions">overlayRegions</a></li><li><a href="global.html#pageHasText">pageHasText</a></li><li><a href="global.html#pidExists">pidExists</a></li><li><a href="global.html#planE2eShards">planE2eShards</a></li><li><a href="global.html#pollUntil">pollUntil</a></li><li><a href="global.html#probeHttp">probeHttp</a></li><li><a href="global.html#probeStuckTooltip">probeStuckTooltip</a></li><li><a href="global.html#registerCleanupHooks">registerCleanupHooks</a></li><li><a href="global.html#removeE2eInstance">removeE2eInstance</a></li><li><a href="global.html#resetAgGridScroll">resetAgGridScroll</a></li><li><a href="global.html#resolveE2ePort">resolveE2ePort</a></li><li><a href="global.html#resolveKeepSame">resolveKeepSame</a></li><li><a href="global.html#reviewPendingShots">reviewPendingShots</a></li><li><a href="global.html#rowBoxSel">rowBoxSel</a></li><li><a href="global.html#runBaselineCase">runBaselineCase</a></li><li><a href="global.html#runIsolatedE2e">runIsolatedE2e</a></li><li><a href="global.html#runOutsideCollector">runOutsideCollector</a></li><li><a href="global.html#runShardedE2e">runShardedE2e</a></li><li><a href="global.html#runTaggedCall">runTaggedCall</a></li><li><a href="global.html#sleepSync">sleepSync</a></li><li><a href="global.html#snapshotBaselines">snapshotBaselines</a></li><li><a href="global.html#snapshotLinkTarget">snapshotLinkTarget</a></li><li><a href="global.html#stepShots">stepShots</a></li><li><a href="global.html#typeIntoInput">typeIntoInput</a></li><li><a href="global.html#typeIntoNthInput">typeIntoNthInput</a></li><li><a href="global.html#waitAlertGone">waitAlertGone</a></li><li><a href="global.html#waitChildExit">waitChildExit</a></li><li><a href="global.html#waitColResizeOverlay">waitColResizeOverlay</a></li><li><a href="global.html#waitDrawerReady">waitDrawerReady</a></li><li><a href="global.html#waitGridIdle">waitGridIdle</a></li><li><a href="global.html#waitUntilExist">waitUntilExist</a></li><li><a href="global.html#writeBaselineIfChanged">writeBaselineIfChanged</a></li></ul>
+    
+</nav>
+
+<div id="main">
+    
+    <h1 class="page-title">listDirLinks.mjs</h1>
+    
+
+    
+
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>import fs from 'fs'
+import path from 'path'
+
+
+/**
+ * 以不跟進連結之方式遞迴列出目錄內之全部連結(符號連結與Windows目錄連結junction)
+ *
+ * 逐項以fs.lstatSync判定，是連結即記錄且不往下走，故不會列到連結目標內部之連結(dir /AL /S會穿過junction，依其清單拆除會拆到目標內之連結)。
+ * 枚舉失敗(權限、路徑過長、目錄不存在)一律拋錯，不得視為沒有連結。root本身為連結時只回傳該連結(rel為空字串)，不往下走
+ *
+ * @param {String} root 輸入根目錄字串，相對路徑以當下工作目錄解析
+ * @param {Object} [opt={}] 輸入設定物件，預設{}
+ * @param {Function} [opt.skip=null] 輸入略過判斷函數(rel, abs)=>Boolean，rel為相對root之路徑(以/分隔)，回傳true者不記錄也不往下走(供略過不複製之路徑)，預設null
+ * @returns {Array} 回傳連結陣列，依rel排序，元素為{path,rel,target}，path為絕對路徑，target為連結內容字串(讀取失敗為null)
+ * @example
+ *
+ * import listDirLinks from 'w-package-tools-e2e/src/listDirLinks.mjs'
+ *
+ * let links = listDirLinks('./tmp/e2e-shards/inst0')
+ * console.log(links.map((v) => v.rel))
+ * // => ['w-web-perm/node_modules', 'w-web-perm/test/pics']
+ *
+ */
+function listDirLinks(root, opt = {}) {
+    if (typeof root !== 'string' || root === '') {
+        throw new Error('listDirLinks: root 須為非空字串')
+    }
+    let skip = opt &amp;&amp; typeof opt.skip === 'function' ? opt.skip : null
+    let abs = path.resolve(root)
+    let readTarget = (p) => {
+        try {
+            return fs.readlinkSync(p)
+        }
+        catch (err) {
+            return null
+        }
+    }
+    let out = []
+    if (fs.lstatSync(abs).isSymbolicLink()) {
+        return [{ path: abs, rel: '', target: readTarget(abs) }]
+    }
+    let walk = (dir) => {
+        for (let name of fs.readdirSync(dir)) {
+            let p = path.join(dir, name)
+            let rel = path.relative(abs, p).replace(/\\/g, '/')
+            if (skip &amp;&amp; skip(rel, p)) {
+                continue
+            }
+            let st = fs.lstatSync(p)
+            if (st.isSymbolicLink()) {
+                out.push({ path: p, rel, target: readTarget(p) })
+            }
+            else if (st.isDirectory()) {
+                walk(p)
+            }
+        }
+    }
+    walk(abs)
+    return out.sort((a, b) => (a.rel &lt; b.rel ? -1 : (a.rel > b.rel ? 1 : 0)))
+}
+
+
+export default listDirLinks
+</code></pre>
+        </article>
+    </section>
+
+
+
+
+    
+    
+</div>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 4.0.5</a> on Wed Nov 04 2026 09:42:58 GMT+0800 (台北標準時間) using the <a href="https://github.com/clenemt/docdash">docdash</a> theme.
+</footer>
+
+<script>prettyPrint();</script>
+<script src="scripts/polyfill.js"></script>
+<script src="scripts/linenumber.js"></script>
+
+
+
+</body>
+</html>

@@ -48,6 +48,10 @@ import registerCleanupHooks from '../src/registerCleanupHooks.mjs'
 import probeHttp from '../src/probeHttp.mjs'
 import createTempSettings from '../src/createTempSettings.mjs'
 import runIsolatedE2e from '../src/runIsolatedE2e.mjs'
+import runShardedE2e from '../src/runShardedE2e.mjs'
+import planE2eShards from '../src/planE2eShards.mjs'
+import listDirLinks from '../src/listDirLinks.mjs'
+import removeE2eInstance from '../src/removeE2eInstance.mjs'
 import killOwnTree from '../src/killOwnTree.mjs'
 import isChildAlive from '../src/isChildAlive.mjs'
 import waitChildExit from '../src/waitChildExit.mjs'
@@ -123,6 +127,10 @@ describe('WPackageToolsE2e', function() {
             'probeHttp',
             'createTempSettings',
             'runIsolatedE2e',
+            'runShardedE2e',
+            'planE2eShards',
+            'listDirLinks',
+            'removeE2eInstance',
             'killOwnTree',
             'isChildAlive',
             'waitChildExit',
@@ -206,6 +214,10 @@ describe('WPackageToolsE2e', function() {
             probeHttp,
             createTempSettings,
             runIsolatedE2e,
+            runShardedE2e,
+            planE2eShards,
+            listDirLinks,
+            removeE2eInstance,
             killOwnTree,
             isChildAlive,
             waitChildExit,
