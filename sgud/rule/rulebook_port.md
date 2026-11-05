@@ -57,6 +57,8 @@
 
 - 2026-10-30(e2e01): 初編; 對應 README §5 Breaking changes.
 - 2026-11-05(pe309): 新增 §6 自動換埠(`reserveE2ePorts`); 對應 README §2.12、§5.
+- 2026-11-05(pe312): §6 新增 R-15～R-24(就緒核對、`restart` 查不到不續行、`reselect` 用盡之訊息、查埠逾時、行程表改 OS API、查無監聽者之訊息); 對應 README §2.4、§2.12、§5.
+- 2026-11-05(pe316): §6 新增 R-26(試綁定第 5 種, `ipv6Only` 之 `::`)、R-27(殺殘留後等待釋放時偵測失敗不當成可用)及其兩張輸入空間表; 移除「`ipv6Only` 之 `::` 偵測不到」之限制; 新增首次偵測失敗仍 fail-open 之限制; 對應 README §2.12、§5.
 
 ## 6. 自動換埠(`reserveE2ePorts`; 2026-11-05 pe309)
 
@@ -90,6 +92,19 @@
 | R-12 | 已導入時管理器: restart 只殺身分已確認之監聽者, 其餘拋錯; 服務就緒前結束立即拋錯; 就緒後記入預約. 未導入者完全不變 | `createServiceManager` | `[PR82]`～`[PR84]`、`unit-serviceManager`(不動) |
 | R-13 | `noteOwn` 背景取樣不阻塞測試、不重疊, 只記存活者與其子孫之真實起始時間; `killOwnListeners` 只殺該埠之監聽者 | `makeHandle` | `[PR70]`～`[PR74]`、`[PR73b]` |
 | R-14 | 選項非預期值用預設(K3); 登錄目錄不可建立時警告並只靠實際綁定; 偵測子行程失敗時警告並照預約繼續 | `reserveE2ePorts`、`createE2ePortClaimer` | `[PR62]`、`[PR19]`、`[PR20]` |
+| R-15 | 就緒核對: 自建之服務(`ensure` 之 spawn 與 `restart`)於就緒探測通過後, 該埠之**每個**監聽者須為 spawn 回傳之行程或其存活子孫才放行, 之後才 `noteOwn`; 不分是否導入 `reserveE2ePorts` | `verifyDef`、`verifyReady`(`src/createServiceManager.mjs`)、`judgePortOwner`(`src/reapShardProcesses.mjs`) | `[SU01]`～`[SU13]`、`[SU20]`、`[SU29]`、`[SA4]`～`[SA7]` |
+| R-16 | 核對不符(他人、查無監聽者): 重試共 3 次仍不符即拋 `E2E_PORT_NOT_OWN`, 寫明埠與占用者, 只收自建, **不下殺占用者**; 涵蓋「偵測與綁定之間被搶走」與靜默改埠 | 同上 | `[SU21]`、`[SU22]`、`[SU22b]`、`[SU25]`～`[SU27]`、`[SU30]`、`[SU31]`、`[SA1]` ×4 位址、`[SA2]`、`[SA10]`; 真實 vue-cli 見 pe312 報告 |
+| R-17 | 核對查詢失敗(`null`): 重試共 3 次仍查不到拋 `E2E_PORT_OWNER_UNKNOWN`, 不當成無人或自己人, 只收自建 | 同上 | `[SU10]`、`[SU11]`、`[SU23]`、`[SU24]`、`[SU24b]`、`[SA11]`、`[SA12]` |
+| R-18 | 沿用既有服務(未 spawn)不核對: `pinned`、`inherited`、未導入者之語意照舊 | `ensure` | `[SU28]`、`[SA9]` |
+| R-19 | `restart` 查不到監聽者(`pids:null`、`tableOk:false`)時重試共 3 次, 仍查不到即拋錯不續行, 不 spawn; 查得到且為他人則立即拋錯不重試; `tableOk:false` 不得說成他人占用 | `killForeign`(`src/createServiceManager.mjs`)、`killOwnListeners`(`src/reserveE2ePorts.mjs`) | `[SU40]`～`[SU45]`、`[SU54]`、`[SA20]`、`[SA21]` ×4 位址 |
+| R-20 | `reselect` 用盡: 訊息與 `err.trigger` 含觸發本次重選之埠(組內全部)與占用者、原因; 重選成功不多查一次 | `s.reselect` | `[SU50]`～`[SU53]`、`[SA30]` ×4 位址 |
+| R-21 | 查埠逾時: 查埠一律用 `PORT_QUERY_TIMEOUT_MS`(`src/listenerPids.mjs`), 不寫死字面值 | `describePortOwners`、`judgePortOwner`、`killOwnListeners`、`runShardedE2e` | `[SU12]`、`[SU14]`、`[SU15]`、`[SU54]` |
+| R-22 | 就緒逾時: 已導入者之訊息寫明該埠占用者(非 HTTP 占用者使探測一直不通時查得到是誰) | `waitReady` | `[SU33]`、`[SA3]` |
+| R-23 | 行程表: Windows 優先 `NtQuerySystemInformation`(Reflection.Emit, 不編譯 C#), 不可用或自我核對(本行程之映像名與起始時間)不符退回 `Get-CimInstance`; 輸出欄位與語意不變; PID、父 PID、起始時間(毫秒)、映像名與舊法逐筆相同; 下殺判準不變 | `PS_TABLE`(`src/reapShardProcesses.mjs`) | `[PT1]`～`[PT8]`(真實行程表, 含真實下殺; 退回路徑有受限語言模式與配置錯誤) |
+| R-24 | 「查無監聽者」之訊息寫實際成因(僅綁定未監聽之 socket、保留埠), 不寫 TIME_WAIT 為成因; 判定不放寬 | `MSG_NO_LISTENER` | `[SU09]`、`[SA31]` |
+| R-25 | 新選項依 K3: `verifyOwner`、`exec` 非函數、`ownerRetryMs` 非有效非負數視為未給; 重試迴圈提供 `onTrace`(`owner-check`、`restart-query`; 同步、凍結、拋錯忽略; 規格〈計時器相關函數之觀察回調與測試〉) | `createServiceManager` | `[SU37]`、`[SU38]`、`[SU41b]` |
+| R-26 | 試綁定五種, 依序 `127.0.0.1`、`0.0.0.0`、`::`(雙棧)、`::1`、`{ host:'::', ipv6Only:true }`: 每種占用形式只和同形式之試綁定衝突(雙棧 `::` 與 `ipv6Only` 之 `::` 互不衝突, pe316 實測), 少一種就有占用者偵測不到; 前四種不帶 `ipv6Only` 選項(與舊版同形); 失敗時 `host` 為 `'::(ipv6Only)'`; 本機無 IPv6(`EAFNOSUPPORT`、`EADDRNOTAVAIL`)之含 `:` 位址(含第 5 種)不算占用; 被占用即換埠、不動占用者 | `BIND_TRIES`、`checkPortFree`(`src/checkPortFree.mjs`) | `[CU1]`～`[CU7]`、`[CF1]`～`[CF5]`(×5 種占用形式; 占用者 PID 不變且仍回應) |
+| R-27 | 殺殘留後等待釋放時偵測失敗(`probe` 回 `null`)不是「全部可用」: 視為仍忙, 保留最後一次成功偵測之結果, 等滿 25 次仍失敗即不可用並換下一個位移, `blocked` 之 `code` 為 `PROBE_FAILED`、`owners` 寫明偵測子行程失敗與最後一次成功偵測之結果; 等待中途失敗後恢復則繼續等到偵測回報可用。**每個位移之第一次偵測失敗**(殺殘留前, 或沒有殘留可殺; 如偵測工具壞掉)不在此列: 警告後照預約結果繼續(`[PR20]` 既定, 見 §6.4) | `tryOffset`(`src/reserveE2ePorts.mjs`) | `[PR15d]`、`[PR15e]`、`[PR15f]`、`[PR15g]`、`[PR20]` |
 
 ### 6.3 輸入空間表
 
@@ -105,9 +120,59 @@
 | 他人預約已死、他專案 | 只回收預約; 占用者在即換埠 `[PR14]`、`[RA4b]` | 同左 | 不處理 | 等待 |
 | 保留後才被占走 | 管理器拋錯 `[PR80]`、`[RA8]`; 自行監聽者 `reselect` `[PR40]` | 沿用政策(不變) | 沿用政策(不變) | 同未設 |
 
+試綁定(R-26)之輸入空間表: 軸為占用形式(5) × 試綁定(5) = 25 格; 對角線 5 格為 `EADDRINUSE`(偵測到), 其餘 20 格為可綁(互不衝突; 實測 `bind-matrix-five.log`); 另「無占用」1 列。每格之應然: 對角線被偵測並回該形式之 `host`、其餘不誤報; 無占用全可綁.
+
+| 占用形式 \ 試綁定 | `127.0.0.1` | `0.0.0.0` | `::`(雙棧) | `::1` | `::`(ipv6Only) |
+|---|---|---|---|---|---|
+| `127.0.0.1` | 衝突 `[CF1]` | 可綁 | 可綁 | 可綁 | 可綁 |
+| `0.0.0.0` | 可綁 | 衝突 `[CF1]` | 可綁 | 可綁 | 可綁 |
+| `::`(雙棧) | 可綁 | 可綁 | 衝突 `[CF1]` | 可綁 | 可綁 |
+| `::1` | 可綁 | 可綁 | 可綁 | 衝突 `[CF1]` | 可綁 |
+| `::`(ipv6Only) | 可綁 | 可綁 | 可綁 | 可綁 | 衝突 `[CF1]`(pe316 新增) |
+| 無占用 | 可綁 `[CF3]` | 可綁 | 可綁 | 可綁 | 可綁 |
+
+「可綁」之 20 格由實測矩陣(`bind-matrix-five.log`)證明, 測試以「只有同形式衝突、host 為自身形式」間接涵蓋(`[CF1]` 五種各回自己之 `host`, 不得回其他形式; `[CF5]` 兩種同時存在回第一個). 注入層: `[CU1]`～`[CU7]`.
+
+殺殘留後等待釋放(R-27)之輸入空間表: 軸為偵測結果序列(殺前一次, 殺後至多 25 次); 每格之應然與測試.
+
+| 殺前偵測 | 殺後偵測序列 | 應然 | 測試 |
+|---|---|---|---|
+| 占用 | 立即可用 | 取得基準埠, 只偵測 1 次(殺殘留後之偵測即為第 1 次, 不進等待) | `[PR15f]`、`[PR15]` |
+| 占用 | 占用, 占用, 可用 | 取得基準埠(等待釋放) | `[PR15b]` |
+| 占用 | `null`, `null`, 占用, 可用 | 取得基準埠; `null` 不提早放行, 繼續等 | `[PR15e]` |
+| 占用 | 一直 `null` | 換下一個位移; `code` 為 `PROBE_FAILED`; 訊息寫明偵測失敗與最後一次成功偵測之結果; 撤回預約 | `[PR15d]` |
+| 占用 | `null`, 其後一直占用 | 換下一個位移; 以最後一次成功偵測為準: `code` 為偵測所回(非 `PROBE_FAILED`), 訊息不寫偵測失敗 | `[PR15g]` |
+| 占用 | 一直占用 | 換下一個位移(原行為, `code` 為偵測所回) | `[PR15c]`(無 known)、`[PR02]` |
+| 占用(無殘留可殺) | — | 不等待, 直接換埠 | `[PR15f]` |
+| `null`(首次) | — | 警告後照預約結果繼續(既定) | `[PR20]` |
+
+就緒核對(R-15～R-18)之輸入空間表: 軸為監聽者查詢 × 行程表查詢 × 自建行程狀態 × 占用者位址; 每格之應然與測試(占用者位址 `127.0.0.1`、`0.0.0.0`、`::`、`::1` 皆跑 `[SA1]`、`[SA20]`、`[SA21]`、`[SA30]`; `ipv6Only` 之 `::` 於 pe316 起由試綁定偵測而換埠, 不再走到核對).
+
+| 監聽者查詢 | 行程表 | 自建行程 | 應然 | 測試 |
+|---|---|---|---|---|
+| 全屬本服務(本身、子孫) | 正常 | 存活 | 放行 | `[SU01]`、`[SU02]`、`[SA4]`～`[SA7]` |
+| 有他人(單獨或並存) | 正常 | 存活 | 重試後拋 `E2E_PORT_NOT_OWN`, 只列他人 | `[SU03]`、`[SU04]`、`[SU21]`、`[SA1]`(`0.0.0.0`、`::`、`::1`) |
+| 有他人 | 正常 | 已結束(`EADDRINUSE`) | 同上, 訊息含離開碼 | `[SU26]`、`[SA1]`(`127.0.0.1`) |
+| 他人片刻即離開 | 正常 | 存活 | 重試後放行 | `[SU22]`、`[SU22b]`、`[SA10]` |
+| 監聽者為已斷鏈之孫行程 | 正常 | 已結束或中間行程已結束 | `E2E_PORT_NOT_OWN`(已知限制) | `[SU06]`、`[SA8]` |
+| 監聽者不在行程表 | 正常 | 存活 | `E2E_PORT_NOT_OWN`, 訊息寫明 | `[SU13]` |
+| `[]` | — | 存活 | 重試後 `E2E_PORT_NOT_OWN`(查無監聽者) | `[SU09]`、`[SU25]` |
+| `null`(一直) | — | 存活 | `E2E_PORT_OWNER_UNKNOWN` | `[SU10]`、`[SU24]`、`[SA11]` |
+| 有 | `null`(一直) | 存活 | `E2E_PORT_OWNER_UNKNOWN` | `[SU11]`、`[SU24b]` |
+| `null` 後恢復 | 正常 | 存活 | 重試後放行 | `[SU23]`、`[SA12]` |
+| 不查(未 spawn, 沿用) | — | — | 不核對 | `[SU28]`、`[SA9]` |
+| 不查(`opt.verifyOwner`) | — | — | 由呼叫端確認; 拋錯走同一收尾 | `[SU32]` |
+
 ### 6.4 已知限制
 
 - 只防已導入者互撞與偵測當下之占用者; 未導入者於保留後才綁定, 由管理器大聲報錯, 不自動處理; 非 e2e 測試之撞埠(E8)另案.
+- 就緒核對: launcher 先結束、服務由孫行程接手者無法判定(`E2E_PORT_NOT_OWN`; 使用端現無此寫法, 2026-11-05 盤點 4 套件); 容器等無法以行程鏈判定者用 `opt.verifyOwner`.
+- 就緒核對於探測通過後做一次: 放行之後才被占走者不再偵測(服務已綁定者, 他人只能並存於別的位址).
+- 偵測子行程於選埠時失敗(回 `null`; 指每個位移之第一次偵測, 即殺殘留前或沒有殘留可殺時)警告後照預約結果繼續(`[PR20]` 既定: 不因偵測工具壞掉而換埠或中止): 該埠是否被占用未經確認. pe316 實跑曾走到此分支一次(位移 100 之偵測失敗, 證據 `demo-v6only-first-run-slow.log`; 成因未查明, 同腳本重跑 1 秒內正常), 與 R-27 同族但取捨不同(fail-open 以免偵測工具壞掉時所有 e2e 無法開跑), 未改, 列需裁示.
+- 試綁定只涵蓋上列五種形式(實測矩陣為此五種占用形式 × 五種試綁定); 綁定在其他位址(如本機網卡位址)之占用者未實測, 不保證偵測到.
+- 占用者綁 `::1`、vue-cli `--host 127.0.0.1` 時 portfinder 改埠, 而 `127.0.0.1` 之探測一直不通: 由就緒逾時擋下(等滿 `readyTimeoutMs`), 訊息寫明占用者; 不提早判定(占用者與服務本可並存, 無法分辨服務是尚未就緒或已改埠).
+- `reselect` 用盡後預約已釋放而 `h.ports`、`h.offset` 仍為舊值(既有語意: 不留預約、不改環境變數); 呼叫端應中止, 不再使用該 handle.
+- `killOwnListeners` 之 `skipped` 含下殺未成者(`gone`、`pending`、`exec-failed`; 既有), 此時 `restart` 之訊息仍說「非本實例」: 失敗方向安全(拋錯不續行), 訊息偶爾不準.
 - 登錄目錄在使用者家目錄(刻意不用 `os.tmpdir()`: `TEMP` 可能依工作階段不同, 看不到彼此之預約就失去互斥); 跨使用者帳號不互斥(各帳號仍受實際綁定檢查).
 - 預約之持有者判定用近似起始時間(容差 60 秒), 只用於回收預約; 下殺一律依行程表之真實起始時間(容差 0).
 - `applyEnv:true` 之位移被常數取用後不可重選(常數已過期), 管理器因此只報錯、不重選.
@@ -116,4 +181,4 @@
 
 ### 6.5 改動範圍 → e2e 檔
 
-改 `reserveE2ePorts`、`checkPortFree`、`resolveE2ePort`: 跑 `unit-reserveE2ePorts`、`api-reserveE2ePorts`、`unit-portOffset`、`api-shardE2e`(`[S-A*]`); 改畫面含埠之指引: `e2e-portInImage`. 固定埠: 19620、19630(`api-reserveE2ePorts`, 位移 100 起)、19640(`e2e-portInImage`, 不監聽). 測試一律以 `E2E_PORT_REG_DIR` 或 `regDir` 另指登錄目錄.
+改 `reserveE2ePorts`、`checkPortFree`、`resolveE2ePort`: 跑 `unit-reserveE2ePorts`、`api-reserveE2ePorts`、`unit-portOffset`、`api-shardE2e`(`[S-A*]`);改 `checkPortFree`(試綁定)另跑 `unit-checkPortFree`、`api-checkPortFree`; 改 `createServiceManager`、`judgePortOwner`: 另跑 `unit-serviceOwner`、`api-serviceOwner`、`unit-serviceManager`; 改 `PS_TABLE`、`listProcessTable`: 另跑 `api-procTable`、`unit-shardProcIdentity`、`api-shardKillIdentity`、`api-shardE2e`; 改畫面含埠之指引: `e2e-portInImage`. 固定埠: 19620、19630(`api-reserveE2ePorts`, 位移 100 起)、19640(`e2e-portInImage`, 不監聽)、19650 起(`api-serviceOwner`, 每案遞增)、19800、19801(`unit-serviceOwner`, 注入, 不監聽)、19960 起(`api-checkPortFree`, 每案遞增, 位移 100 後為 20060 起)、19961～19967(`unit-checkPortFree`, 替身, 不監聽). 測試一律以 `E2E_PORT_REG_DIR` 或 `regDir` 另指登錄目錄.

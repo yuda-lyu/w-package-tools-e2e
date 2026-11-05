@@ -94,11 +94,11 @@ let browser2 = await wpte.launchBrowser()
 
 | 檔 | 用途 | 狀態 |
 |---|---|---|
-| `createServiceManager(opt)` | 沿用政策（reuse）之啟動 / 重啟 / 收尾（C2 / C3，§2.4）；`services[].port` 為基準埠，探測、url、spawn 收到之 `port`、殺監聽者皆用 `E2E_PORT_OFFSET` 位移後之實際埠（§2.10），`portOf(name)` 回實際埠 | sso 實跑、單元 |
+| `createServiceManager(opt)` | 沿用政策（reuse）之啟動 / 重啟 / 收尾（C2 / C3，§2.4）；`services[].port` 為基準埠，探測、url、spawn 收到之 `port`、殺監聽者皆用 `E2E_PORT_OFFSET` 位移後之實際埠（§2.10），`portOf(name)` 回實際埠；自建之服務就緒後核對監聽者身分（`E2E_PORT_NOT_OWN`、`E2E_PORT_OWNER_UNKNOWN`），`restart` 查不到監聽者即拋錯 | sso 實跑、單元、`api-serviceOwner`（真實行程，2026-11-05） |
 | `resolveE2ePort(basePort, opt)` | 基準埠＋`E2E_PORT_OFFSET`（未設、空或 0 原樣回傳）；專案組 baseUrl、設定檔之埠、`killPortListeners` 之對象皆經此（§2.10） | 單元、子行程實跑（2026-10-28 新增，Gitea issue #19） |
 | `reserveE2ePorts(basePorts, opt)` | 自動換埠：沒有占用時即基準埠；被占用時整組移位並寫入 `E2E_PORT_OFFSET`；跨行程預約，同時開跑不會選到同一組（§2.12）；具名匯出 `assertE2eBasePort`（畫面含埠之流程確認跑在基準埠）、`createE2ePortClaimer`、`getActiveE2ePortReservation` | 單元、真實監聽行程（2026-11-05 新增） |
-| `checkPortFree(port)` | 以實際綁定檢查埠（`127.0.0.1`、`0.0.0.0`、`::`、`::1`）；具名匯出 `waitPortsFree` | `runShardedE2e`、`reserveE2ePorts` 共用（2026-11-05 自 `runShardedE2e` 抽出） |
-| `reapShardProcesses(opt)` | 只殺身分已正面確認之行程並留紀錄（§2.11〈行程身分〉）；具名匯出 `listProcessTable`、`sampleShardKnown`、`findProcessDescendants`、`describePortOwners`（`runShardedE2e` 亦轉出前四者） | `api-shardKillIdentity`、`unit-shardProcIdentity`（2026-11-05 自 `runShardedE2e` 抽出） |
+| `checkPortFree(port)` | 以實際綁定檢查埠（五種試綁定：`127.0.0.1`、`0.0.0.0`、`::`〔雙棧〕、`::1`、`::`〔`ipv6Only`；失敗時 `host` 記為 `'::(ipv6Only)'`〕）；具名匯出 `waitPortsFree` | `runShardedE2e`、`reserveE2ePorts` 共用（2026-11-05 自 `runShardedE2e` 抽出） |
+| `reapShardProcesses(opt)` | 只殺身分已正面確認之行程並留紀錄（§2.11〈行程身分〉）；具名匯出 `listProcessTable`（Windows 優先作業系統 API，退回 `Get-CimInstance`，§5）、`sampleShardKnown`、`findProcessDescendants`、`describePortOwners`、`judgePortOwner`（埠之監聽者是否全屬某行程或其存活子孫，只查詢不下殺；`runShardedE2e` 亦轉出 `reapShardProcesses`、`listProcessTable`、`sampleShardKnown`、`findProcessDescendants`） | `api-shardKillIdentity`、`unit-shardProcIdentity`、`api-procTable`、`unit-serviceOwner`（2026-11-05 自 `runShardedE2e` 抽出） |
 | `registerCleanupHooks(cleanup, opt)` | root after＋exit / SIGINT / SIGTERM；**須於模組頂層呼叫** | sso 實跑、單元 |
 | `probeHttp(url, opt)` | 任何 HTTP 回應即 true；`accept` / `identify` 可收緊 | sso 實跑、單元 |
 | `createTempSettings(opt)` | 臨時設定檔（JSON5 基底淺合併、tmpDir 必填、forbiddenKeys） | sso 實跑、單元 |
@@ -109,7 +109,7 @@ let browser2 = await wpte.launchBrowser()
 | `removeE2eInstance(opt)` | 移除一個臨時實例：搬回證據（不覆蓋）→ 拆連結 → 回驗清單為空且目標完好 → 遞迴刪除 → 確認不存在；任一步失敗拋錯（`err.step`）不做後續（§2.11） | 單元、真實小專案整合（2026-11-04 新增） |
 | 所有權原語 `killOwnTree` / `isChildAlive` / `waitChildExit` / `pidExists` / `sleepSync` | 只殺自建且仍存活之子行程樹（同步）與回驗 | killOwnTree sso 實跑；其餘單元（移植自 w-web-task 並帶其測試） |
 | port 政策原語 `killPortListeners(port, opt)` | 殺監聽某 port 之行程（含行程樹）——**只可用於專案專屬且已於映射表明文登錄之 port**；查詢固定傳 `useBoth: true`（殺行程須完整集合）；`opt.exec` 為 spawnSync 形，查詢與下殺共用（§5 Breaking changes）；查詢失敗回 `{ pids: null, killed: [] }` 不下殺 | sso 實跑（舊版）、單元、本機真實子程序（2026-10-30） |
-| `listenerPids(port, opt)` | 查監聽某 port 之 PID（字串陣列、去重排序）：委由 wsemi `execProcessPortPidsSync`，判定不依狀態欄；Windows 先 `netstat -ano`、查無或失敗再 `Get-NetTCPConnection -LocalPort` 確認（本機 Windows 11 26300 之 netstat 會漏列新起之監聽、並把對外連線之狀態錯置為 LISTENING），其他平台 `lsof`；`[]` 只代表已確認無人，查詢失敗回 `null`（不可當成無人）；透傳 `timeout`／`useBoth`／`onTrace`／`exec`／`platform`；本 OS 上新起之監聽與無人之 port 每次約 1 秒（走 PowerShell），在 exit／signal 處理器內呼叫請傳較短 `timeout`（如 5000）；**身分確認（「監聽者恰為我的子程序」）請傳 `useBoth: true`** | sso 實跑（舊版）、單元、本機真實監聽（2026-10-30） |
+| `listenerPids(port, opt)` | 查監聽某 port 之 PID（字串陣列、去重排序）：委由 wsemi `execProcessPortPidsSync`，判定不依狀態欄；Windows 先 `netstat -ano`、查無或失敗再 `Get-NetTCPConnection -LocalPort` 確認（本機 Windows 11 26300 之 netstat 會漏列新起之監聽、並把對外連線之狀態錯置為 LISTENING），其他平台 `lsof`；`[]` 只代表已確認無人，查詢失敗回 `null`（不可當成無人）；透傳 `timeout`／`useBoth`／`onTrace`／`exec`／`platform`；**耗時**（`useBoth:true`，wsemi ≥ 1.9.50 之作業系統 API 路徑，實測）：無負載約 0.4 秒；1.2 萬條 TCP 連線約 0.8～1 秒（不隨連線數增加）；CPU 2 倍超載約 12.5 秒；CPU 4 倍超載加 2000 條連線約 20 秒、最長 25.5 秒；退回 `Get-NetTCPConnection`（受限語言模式）時隨連線數增加，1.2 萬條約 13 秒；本套件自身之查詢一律用 `PORT_QUERY_TIMEOUT_MS`（60 秒，具名匯出；太短會把系統忙碌當成查詢失敗），只有 exit／signal 處理器內（行程要儘快結束）才傳較短 `timeout`；**身分確認（「監聽者恰為我的子程序」）請傳 `useBoth: true`** | sso 實跑（舊版）、單元、本機真實監聽（2026-10-30） |
 
 ### 1.4 驗證工具
 
@@ -192,7 +192,17 @@ prepare(ctx) → launch() → openPage(browser) → beforeRun(ctx) → run(page,
 
 - **沿用政策（reuse，v1 唯一支援）**：port 有回應即沿用（不 spawn、不負責關），否則 spawn 並等就緒；只殺自建。前提：該 port 專屬本專案（沿用時無法確認對方跑的是哪份設定與版本，SKILL §9.1 規定 health 回專案識別才沿用——`probeHttp` 之 `identify` 可用，四專案皆尚未提供識別端點）。
 - 每服務一個一次性狀態，進行中之呼叫共用同一 promise；`failureMode:'once'`（預設：首次拋錯、之後不重試不拋錯）或 `'sticky'`（之後持續拋同一錯誤至 cleanup）。
-- `restart(name, { args, env, hookArg })`：有自建 → 同步殺樹並等 port 釋放（上限 `portReleaseTimeoutMs`）；殺後仍被佔（另有同專案實例，例如手動啟動者）或無自建而 port 被佔 → `killForeignOnRestart:true` 才殺監聽者（無自建時預設 false 拋錯；殺自建後仍被佔且未允許者只記錄並繼續）；env 與 process.env 淺合併且只作用於本次；**restart 不改一次性狀態**。
+- `restart(name, { args, env, hookArg })`：有自建 → 同步殺樹並等 port 釋放（上限 `portReleaseTimeoutMs`）；殺後仍被佔（另有同專案實例，例如手動啟動者）或無自建而 port 被佔 → `killForeignOnRestart:true` 才殺監聽者（無自建時預設 false 拋錯；殺自建後仍被佔且未允許者只記錄並繼續，由其後之就緒核對把關）；**監聽者查不到（`null`、行程表查不到）時重試，共 3 次仍查不到即拋錯，不續行**——續行的話新服務因埠被占而結束，就緒探測卻由占用者回應；env 與 process.env 淺合併且只作用於本次；**restart 不改一次性狀態**。
+- **就緒核對**（自建之服務：`startServersOnce` 確定要 spawn 者與 `restart`）：就緒探測只知道埠有回應，不知道是誰回應。探測通過後確認該埠之**每個**監聽者都是 spawn 回傳之行程或其存活子孫（Windows 允許不同位址同時監聽同一埠，有他人在場連線就可能落到對方）：
+
+  | 結果 | 處置 | `err.code` |
+  |---|---|---|
+  | 全屬本服務 | 放行，之後才 `noteOwn` | — |
+  | 其中有他人（偵測與綁定之間被占走、服務靜默改埠） | 重試共 3 次（他人之 portfinder 試綁定、舊實例結束中皆片刻即離開），仍有他人即拋錯，寫明埠與占用者；**不下殺占用者**，只收掉自建之服務 | `E2E_PORT_NOT_OWN` |
+  | 探測有回應而查無監聽者 | 同上 | `E2E_PORT_NOT_OWN` |
+  | 查詢失敗（監聽者或行程表回 `null`） | 重試共 3 次，仍查不到**不當成自己人**：拋錯，收掉自建之服務，不下殺；多因系統負載過高，可重跑 | `E2E_PORT_OWNER_UNKNOWN` |
+
+  沿用既有服務（port 已有回應而未 spawn；含 `E2E_PORT_OFFSET=0` 手動鎖埠）**不核對**，語意照舊。**launcher 先結束、真正服務由孫行程接手之寫法無法判定**（中間行程已死即斷鏈，`E2E_PORT_NOT_OWN`）：請直接 spawn 服務；`shell:true`、`npm run serve` 這類 launcher 全程存活者可以判定。確實無法以行程鏈判定之服務（例如容器）以 `opt.verifyOwner(svc, child)` 自行確認身分。測試之假 child 同樣以 `verifyOwner` 略過。重試間隔 `opt.ownerRetryMs`（預設 1000）；查詢之執行函數 `opt.exec`；觀察回調 `opt.onTrace`（事件 `owner-check`：`service`、`port`、`attempt`、`result`、`owners`；`restart-query`：`service`、`port`、`attempt`、`ok`）。
 - 服務之 `beforeSpawn({ phase, args, env, hookArg })`：每次 spawn 前呼叫並等待，`phase` 為 `'start'`（startServersOnce 確定要 spawn 時；沿用時不呼叫）或 `'restart'`（`hookArg` 取自 restart 之 opt）——供「服務啟動前必須完成」之前置：w-web-api 首次啟動前 `npm run build`、w-web-perm 首次啟動前重建資料庫與 `restart(…, { hookArg:{ reseed:true } })` 之重新播種。
 - `cleanup()`：同步（exit / 訊號處理器內非同步不會被等待）、依 services 反序殺自建、重置一次性狀態、呼叫 `onCleanup`。觸發來源兩條：`registerCleanupHooks`（root after＋exit / 訊號備援）與直跑主函式末尾顯式呼叫。
 - **own 政策 v1 不支援**（只用自建、port 被佔即報錯、綁定失敗字樣偵測、監聽者回驗、跨行程互斥）；參考實作為 w-web-task `test/tools/harnessLifecycle.mjs`。
@@ -373,7 +383,7 @@ let baseUrl = `http://127.0.0.1:${resolveE2ePort(8080)}` //前端網址、後端
 2. **記憶體守門**：依可用記憶體（`os.freemem()`，每實例預設 1.5 GB）調降並印原因；連 1 個都不夠時仍跑 1 個並警告。
 3. **鎖**：`<workDir>/shard.lock` 擋第二個同時執行者；持有者 PID 已死、或 PID 存在而起始時間與鎖檔不完全相同（PID 回收）之鎖可接手；鎖檔沒有真實起始時間（舊格式、或當時取不到行程表）而 PID 存在者視為仍在。
 4. **清殘留**：接手死鎖時只殺身分已確認之殘留（見下方〈行程身分〉；舊格式鎖檔一律不殺並記警告），再依第 8 點移除上次留下之 `inst<N>`。
-5. **配發埠**：每組之每個埠先預約（§2.12，跨行程排他，持有至收尾）再於 `127.0.0.1`、`0.0.0.0`、`::`、`::1` 試綁定，**不沿用**。沒有占用時第 i 組位移＝i×portStep（同未支援換埠前）；該組之埠被占用或被他人預約時**不殺占用者**，改用下一個空的位移槽（至多 `portTries` 個）並印原因；含 `officialOnly` 之第 0 組畫面含埠，只用位移 0，被占用時等待（至多 `portWaitMs`）。皆未過於建立實例前拋錯並列出占用者（PID 與映像名稱）。
+5. **配發埠**：每組之每個埠先預約（§2.12，跨行程排他，持有至收尾）再以五種試綁定（`127.0.0.1`、`0.0.0.0`、`::`〔雙棧〕、`::1`、`::`〔`ipv6Only`〕，§2.12）檢查，**不沿用**。沒有占用時第 i 組位移＝i×portStep（同未支援換埠前）；該組之埠被占用或被他人預約時**不殺占用者**，改用下一個空的位移槽（至多 `portTries` 個）並印原因；含 `officialOnly` 之第 0 組畫面含埠，只用位移 0，被占用時等待（至多 `portWaitMs`）。皆未過於建立實例前拋錯並列出占用者（PID 與映像名稱）。
 6. **建立實例**：`<專案根>/tmp/e2e-shards/inst<N>/<專案名>`（可改 `workDir`；`workDir`、`outDir` 之相對路徑以專案根解析）。排除 `node_modules`、`.git`、`docs`、`tmp`、`testPending`、`logs`、`sgud`、`test/pics`、`test/_tmp` 與 `exclude`（皆相對專案根）；`node_modules`、`test/pics` 以 junction 指回；來源樹（不含排除項）內另有連結即拋錯列出；實例內建空 `logs`。**`.env` 等只由 OS 複製，工具不讀內容、不印出，隨實例刪除**——`workDir` 請留在 gitignore 範圍內。
 7. **執行**：各實例 `E2E_PORT_OFFSET=<配發之位移>`（並帶 `E2E_PORT_HOLD`，組內呼叫 `reserveE2ePorts` 時沿用、不再換埠），`cwd` 為實例根，`node node_modules/mocha/bin/mocha.js --no-parallel <該組檔案> --timeout 180000 --reporter <本套件報告器>`（`mochaArgs` 可調，不可含 `--reporter`、`--parallel`）；隱藏視窗；輸出分寫 `<outDir>/group<i>.log`（執行中直接寫，行程被硬殺仍在）；報告器之輸出同內建 spec，另寫統計 `group<i>.result.json`；每 5 分印一行進度；每組逾 4 小時（`groupTimeoutMs`）終止。
 8. **收尾**（成功、失敗、例外、SIGINT、SIGTERM、SIGBREAK、SIGHUP 皆執行）：樹狀終止存活之子行程、下殺身分已確認之孤兒（〈行程身分〉） → 回驗本次各埠已釋放 → 各實例 `testPending` 搬回正式專案（不覆蓋，撞名加 `-N`）→ 以不跟進連結之方式列出連結、逐一拆除、回驗清單為空且目標完好 → 遞迴刪除並確認已不存在。任一步失敗大聲報錯、不繼續刪除該實例、離開碼非 0。**Windows 之 `taskkill /F`、`child.kill()` 為 TerminateProcess，處理器來不及執行，由下次開跑清除**；真實訊號只有主控台事件。
@@ -411,7 +421,9 @@ reserveE2ePorts([11007, 8080]) //被占用時印 [e2e-port] 基準埠 [11007, 80
 let baseUrl = `http://127.0.0.1:${resolveE2ePort(8080)}`
 ```
 
-**選定流程**：位移 0、`portStep`、2×`portStep`…逐一試（至多 `maxTries`，預設 20）：①預約該位移之每個埠（登錄目錄內每埠一檔，排他建立，由小到大取）→ ②實際綁定驗證（`127.0.0.1`、`0.0.0.0`、`::`、`::1`）→ 全部通過才採用，預約持有至行程結束；任一埠被占用或被他人預約即撤回已取得者、換下一個位移。用盡即拋錯（`err.code` 為 `E2E_PORT_EXHAUSTED`，訊息與 `err.blocked` 列出每個埠之占用者）。`opt.avoid` 列專案其他測試寫死之埠（如 `api-` 測試之固定埠），落在其上之位移直接跳過、不計次數。
+**選定流程**：位移 0、`portStep`、2×`portStep`…逐一試（至多 `maxTries`，預設 20）：①預約該位移之每個埠（登錄目錄內每埠一檔，排他建立，由小到大取）→ ②實際綁定驗證（五種試綁定：`127.0.0.1`、`0.0.0.0`、`::`〔雙棧〕、`::1`、`::`〔`ipv6Only`〕）→ 全部通過才採用，預約持有至行程結束；任一埠被占用或被他人預約即撤回已取得者、換下一個位移。用盡即拋錯（`err.code` 為 `E2E_PORT_EXHAUSTED`，訊息與 `err.blocked` 列出每個埠之占用者）。`opt.avoid` 列專案其他測試寫死之埠（如 `api-` 測試之固定埠），落在其上之位移直接跳過、不計次數。
+
+**試綁定之判讀**（Windows 11 實測，真實行程）：每種占用形式只和**同一形式**之試綁定衝突（占用者綁 `::` 時只有 `::` 失敗，其餘可綁；Node 之 `listen(port)` 未指定位址即綁雙棧 `::`）；雙棧 `::` 與 `ipv6Only` 之 `::`（`listen({ port, host: '::', ipv6Only: true })`）是**兩種形式，互不衝突**（2026-11-05 pe316 實測：占用者各綁一種，五種試綁定中恰好只有同形式者 `EADDRINUSE`，其餘四種可綁，另一形式亦然），故須**五種**都試：`127.0.0.1`、`0.0.0.0`、`::`（雙棧）、`::1`、`::`（`ipv6Only`）。因此「某一種失敗而其餘可綁」代表確有 socket 占著該形式，不是假占用；`ipv6Only` 之 `::` 失敗時 `err.blocked` 與訊息之位址記為 `::(ipv6Only)`。僅綁定未 `listen` 之 socket 同樣衝突，但查不到監聽者（訊息為「查無監聽者」）。**連線殘留 TIME_WAIT 不影響綁定**：服務結束後留下 1500 條 TIME_WAIT（服務綁 `127.0.0.1`、`::`，客端 IPv4、IPv6）各種位址皆立即可綁，不需等待。本機無 IPv6（`EAFNOSUPPORT`、`EADDRNOTAVAIL`）者，`::`、`::1`、`ipv6Only` 之 `::` 三種不算占用。**殺殘留後等待釋放時偵測失敗**（偵測子行程回傳 `null`）視為**仍忙**，不當成全部可用：保留最後一次成功偵測之結果，等滿 5 秒仍失敗即換下一個位移，訊息寫明「偵測子行程失敗」（`err.blocked` 之 `code` 為 `PROBE_FAILED`）。每個位移之第一次偵測即失敗（殺殘留前，或沒有殘留可殺；如偵測工具壞掉）則照舊警告後照預約結果繼續。
 
 **競爭**：同時開跑者以預約檔排他，不會選到同一組；被預約之埠不做實際綁定（不干擾持有者）。**預約殘留**：持有者已死（PID 不存在，或 PID 存在而起始時間差逾 60 秒＝PID 回收；行程表取不到時視為仍在）即回收；不可讀之預約檔 60 秒內視為仍在。正常結束與 `process.exit` 時自動釋放；`taskkill /F` 者由下次開跑回收。
 
@@ -427,7 +439,11 @@ let baseUrl = `http://127.0.0.1:${resolveE2ePort(8080)}`
 
 多開由工具指定位移，工具配發時走同一套預約（§2.11 第 5 點），故單開選不到多開之埠，多開也避開單開已保留之埠；多開未持有之 `ports` 外之埠不受此保護（§2.11〈ports 須列全〉）。
 
-**綁定被搶走**（偵測與綁定之間被未導入者占走）：`createServiceManager` 發現保留後埠已有回應且尚未啟動過，拋錯寫明占用者，**不沿用、不下殺**（重跑即重選）；服務於就緒前結束立即拋錯，不等到逾時。在行程內自行監聽者（靜態站）可以 `applyEnv:false` 取獨立保留，綁定遇 `EADDRINUSE` 呼叫 `reselect()` 換下一個位移：
+**綁定被搶走**（偵測與綁定之間被未導入者占走）：`createServiceManager` 發現保留後埠已有回應且尚未啟動過，拋錯寫明占用者，**不沿用、不下殺**（重跑即重選）；spawn 之後才被占走者由就緒核對擋下（§2.4）；服務於就緒前結束立即拋錯，不等到逾時。
+
+**vue-cli 靜默改埠**：`vue-cli-service serve --port N` 之 `--port` 只是 portfinder 之起點，埠被占走會靜默改用下一個，不報錯；帶 `--port` 擋不住，修前管理器還會把占用者之回應當成已就緒。現由就緒核對擋下（`E2E_PORT_NOT_OWN`），使用端不必再自行以輸出核對實際埠。
+
+**行程內自行監聽者**（靜態站、假伺服器）：**優先 `listen(0)`**，由作業系統配發，不必保留也不會撞；只有埠不能任意（畫面或設定含埠、對外約定之埠）才用 `applyEnv:false` 取獨立保留，綁定遇 `EADDRINUSE` 呼叫 `reselect()` 換下一個位移：
 
 ```js
 let r = reserveE2ePorts([8136], { applyEnv: false })
@@ -438,14 +454,14 @@ while (true) {
     }
     catch (err) {
         if (err.code !== 'EADDRINUSE') throw err
-        r.reselect('EADDRINUSE') //次數與選定共用上限, 用盡即拋錯寫明占用者
+        r.reselect('EADDRINUSE') //次數與選定共用上限, 用盡即拋錯(訊息與 err.trigger 含觸發本次重選之埠與占用者, 不必自行補)
     }
 }
 ```
 
 `applyEnv:true`（預設）之位移已被常數取用後不可重選（常數已過期）；管理器因此不自動重選。
 
-**已導入時 `createServiceManager` 之差異**（未導入者完全不變）：①保留後被占用不沿用；②`restart` 要殺非自建之監聽者時（`killForeignOnRestart`），改走 `reservation.killOwnListeners(port)`，只殺身分已確認屬本實例者，其餘拋錯寫明占用者；③服務就緒前結束即拋錯。
+**已導入時 `createServiceManager` 之差異**：①保留後被占用不沿用；②`restart` 要殺非自建之監聽者時（`killForeignOnRestart`），改走 `reservation.killOwnListeners(port)`，只殺身分已確認屬本實例者，其餘拋錯寫明占用者；③服務就緒前結束即拋錯；④就緒逾時之訊息寫明該埠之占用者（非 HTTP 之占用者使探測一直不通時查得到是誰）。就緒核對與 `restart` 查不到即拋錯不分是否導入（§2.4）。
 
 **畫面含埠之流程**（規格 E7；全綠不能證明畫面不含埠：差異可能低於容差，實測見 `test/e2e-portInImage.test.mjs` `[PI1]`）。使用端依下表擇一：
 
@@ -469,13 +485,13 @@ assert.strictEqual(await page.textContent('#url'), `http://127.0.0.1:${resolveE2
 **各套件要改哪裡**：
 
 1. `test/tools/e2e-setup.mjs` 最上層呼叫 `reserveE2ePorts(本實例全部基準埠)`；`opt.avoid` 列同套件 `api-`、`unit-` 測試寫死之埠。
-2. 前端、後端、redirect、CORS、種子內網址、設定檔之埠一律由 `resolveE2ePort` 衍生；`Grep "localhost:|127\.0\.0\.1:" test/` 逐筆確認（§2.10）。`vue-cli-service serve` 要帶 `--port <實際埠>`（否則其 portfinder 會靜默改埠）。
+2. 前端、後端、redirect、CORS、種子內網址、設定檔之埠一律由 `resolveE2ePort` 衍生；`Grep "localhost:|127\.0\.0\.1:" test/` 逐筆確認（§2.10）。`vue-cli-service serve` 要帶 `--port <實際埠>`（只是起點，被占走時之靜默改埠由就緒核對擋下，§2.4）。
 3. 逐檔 runner（`run-e2e-isolated.mjs`）於最上層先呼叫一次，子行程之 mocha 繼承保留；其 `killPortListeners(埠)` 改為 `reservation.killOwnListeners(埠)`（回傳形狀相容 `{pids,killed}`，多 `skipped`）。
 4. 不用 `createServiceManager` 者：自建之服務就緒後呼叫 `reservation.noteOwn(child)`；被占用即拋錯之檢查可移除。
 5. 畫面含埠者依上表處理；`test/tools/e2eShard.json` 之 `officialOnly` 改為覆蓋者可移出。
 6. 實測（規格 §3）：①人為占用基準埠，e2e 全綠且占用者無恙；②兩個套件同時跑全綠；③沒有占用時，標準圖比對結果與導入前相同。
 
-**限制**：只防已導入者之間互撞與偵測當下之占用者；未導入者（含非 e2e 測試寫死之埠）在保留之後才綁定者，由管理器大聲報錯，不自動處理（規格 E8 另案）。登錄目錄在使用者家目錄（不是暫存目錄：`TEMP` 可能因工作階段不同而不同，就看不到彼此之預約）；持有者 PID 判定只用於回收預約，不用於下殺。同一行程內多個管理器管同一埠時，第二個會把第一個啟動之服務當成他人（一個實例一個管理器）。POSIX 只有注入測試。
+**限制**：只防已導入者之間互撞與偵測當下之占用者；未導入者（含非 e2e 測試寫死之埠）在保留之後才綁定者，由管理器大聲報錯（§2.4 就緒核對），不自動處理（規格 E8 另案）。登錄目錄在使用者家目錄（不是暫存目錄：`TEMP` 可能因工作階段不同而不同，就看不到彼此之預約）；持有者 PID 判定只用於回收預約，不用於下殺。同一行程內多個管理器管同一埠時，第二個會把第一個啟動之服務當成他人（一個實例一個管理器）。POSIX 只有注入測試。
 
 ## 3. 採用步驟（以 w-web-sso 為例）
 
@@ -526,6 +542,25 @@ let captureStableWithBox = (page, target, opts = {}) => pkgCaptureStableWithBox(
 
 ## 5. 改版須知：哪些變更會動到使用端之標準圖
 
+### 行為變更（2026-11-05，試綁定增第 5 種；殺殘留後偵測失敗不當成可用）
+
+不影響標準圖像素；**沒有占用時埠與行為不變**，只在占用或偵測失敗時才走到：
+
+- **`checkPortFree` 增第 5 種試綁定 `{ host: '::', ipv6Only: true }`**（§2.12）：`ipv6Only` 之 `::` 占用者原本四種皆偵測不到，不會換埠，服務與之並存時就緒核對拋 `E2E_PORT_NOT_OWN` 而重跑仍選同一埠；現在被占用就換埠（`reserveE2ePorts`、`runShardedE2e` 皆然），訊息之位址記為 `::(ipv6Only)`。前四種之選項與順序不變。直接使用 `checkPortFree` 的回傳值者：不可用時 `host` 可能為 `'::(ipv6Only)'`（原只有四個位址字串）。
+- **殺殘留後等待釋放時偵測失敗（`null`）視為仍忙**（原被當成全部可用而取得該埠）：等滿 5 秒仍失敗即換下一個位移，`err.blocked` 之 `code` 為 `PROBE_FAILED`，訊息寫明偵測子行程失敗。只在同專案殘留預約被回收、殺殘留行程後、偵測子行程又失敗時才遇到。
+
+### 行為變更（2026-11-05，就緒核對監聽者身分；`restart` 查不到不續行）
+
+不影響標準圖像素；沒有占用時埠與行為不變。**使用端之正常服務不必改**（`shell:true`、`npm run serve` 皆可判定）；收嚴之處（本套件不做舊版相容）：
+
+- **`createServiceManager` 就緒後核對監聽者身分**（§2.4）：探測通過而監聽者不是自建行程或其存活子孫即拋 `E2E_PORT_NOT_OWN`，查不到拋 `E2E_PORT_OWNER_UNKNOWN`。不分是否導入 `reserveE2ePorts`。**會受影響者**：launcher 先結束、服務由孫行程接手者（改為直接 spawn，或給 `opt.verifyOwner`）；單元測試以假 child（`{ pid: 1 }`）與假 probe 使用管理器者（給 `verifyOwner: async () => {}`）。
+- **`restart` 查不到監聽者即拋錯**（原為只記錄就續行）；無論是否導入。
+- **`reselect` 用盡**：訊息多一段觸發本次重選之埠與占用者，`err.trigger` 為 `[{ port, owners }]`；行程內監聽者自行補占用者之程式可移除。
+- **`killOwnListeners` 回傳多 `tableOk`**：`false` 表示身分未知（監聽者或行程表查不到），此時 `skipped` 不代表他人占用。
+- **`describePortOwners`「查無監聽者」改字**：寫明可能為僅綁定未監聽之 socket 或保留埠；比對該字串者須調整。
+- **查埠逾時 5 秒改 60 秒**（`PORT_QUERY_TIMEOUT_MS`；`describePortOwners`、`killOwnListeners`、`runShardedE2e` 收尾；`listProcessTable` 由 30 秒改同值）：只影響查詢真的失敗時多久才回報。
+- **`listProcessTable` 改走作業系統 API**（`NtQuerySystemInformation`，不編譯 C#，無暫存檔；輸出欄位與語意不變；不可用或自我核對不符時退回 `Get-CimInstance`）：實測與舊法 PID、父 PID、起始時間（毫秒）、映像名逐筆相同；約 300 行程時無負載 0.33 秒對 0.43 秒、CPU 2 倍超載 5.5 秒對 33 秒。下殺之身分判準不變。
+
 ### 行為變更（2026-11-05，自動換埠；拿掉讀其他行程環境區塊之證據）
 
 不影響標準圖像素；沒有占用時埠與行為不變。新增 `reserveE2ePorts`（opt-in，§2.12），未呼叫者行為不變。
@@ -560,7 +595,7 @@ let captureStableWithBox = (page, target, opts = {}) => pkgCaptureStableWithBox(
 - **移除 `parseListenerPids`**（模組 `src/parseListenerPids.mjs`、`WPackageToolsE2e` 入口之鍵一併移除）：該解析器含「狀態為 LISTENING」之或條件，在本機類（Windows 11 26300＋KB5127936）系統上，對外連線被錯置為 LISTENING 時會誤判為監聽、`killPortListeners` 因而誤殺不相干之行程；且 netstat 在該類系統上會整列漏列，單靠解析 netstat 文字本就無法回答「誰在監聽」。使用端不應再自行解析 netstat，一律改用 `listenerPids`；引用 `parseListenerPids` 之測試須刪除或改測 `listenerPids`（以 `opt.exec` 注入固定輸出）。
 - **回傳語意收緊（契約形狀不變）**：`listenerPids` 仍回 PID **字串**陣列／`[]`／`null`，但 `[]` 現只代表「已確認無人」（Windows 為 netstat 與 `Get-NetTCPConnection` 皆查無），`null` 涵蓋更多失敗（指令不存在、逾時、非預期離開碼、輸出無法解析、port 不合法）；`killPortListeners` 查詢失敗仍回 `{ pids: null, killed: [] }` 且不下殺。
 - **新增選項**：`listenerPids` 透傳 `timeout`（每個子指令之逾時毫秒，預設 10000）、`useBoth`（Windows 下 netstat 有查到仍再查 `Get-NetTCPConnection` 取聯集，身分確認用，預設 false）、`onTrace`（觀察回調；失敗訊息為 `settle` 事件之 `msg`）；`killPortListeners` 新增 `timeout`（查詢與下殺共用），其查詢固定傳 `useBoth: true`，不可關。
-- **耗時**：在 netstat 漏列之系統上，新起之監聽與無人之 port 一律走 `Get-NetTCPConnection`，每次約 0.8～1 秒（原 netstat 約 25 ms），Windows 最久約 2 倍 `timeout`；輪詢迴圈之單輪因而變長，exit／signal 處理器內請傳 `timeout: 5000` 左右。
+- **耗時**：在 netstat 漏列之系統上，新起之監聽與無人之 port 一律走 PowerShell，Windows 最久約 2 倍 `timeout`；輪詢迴圈之單輪因而變長。實測數字見 §1 `listenerPids`（wsemi 1.9.50 起改走作業系統 API，不再隨連線數增加）。
 - **新增依賴**：`wsemi`（`dependencies`）。
 
 ### 標準圖相關

@@ -130,7 +130,17 @@
 - `registerCleanupHooks` 須於共用層模組頂層呼叫: 使 root after 排在 api 測試層強制退出之前.
 - SIGINT 於 Windows 由外部送須 `AttachConsole`＋`GenerateConsoleCtrlEvent`, 且目標之 Ctrl-C 不得被繼承停用(見「注意事項: 分組多開」); 一般單元測試以注入假 process 覆蓋.
 - 沿用政策之前提: 該 port 專屬本專案.沿用時無法確認對方跑的是哪份設定與版本(與開發服務共用 port 時尤其); `probeHttp` 之 `identify` 可驗專案識別, 但四專案皆尚未提供識別端點.
-- 就緒判定只看 HTTP 回應; 服務遇 EADDRINUSE 不一定退出(w-web-task 實測), 沿用政策察覺不到綁定失敗(own 政策才偵測).
+- 就緒判定只看 HTTP 回應; 服務遇 EADDRINUSE 不一定退出(w-web-task 實測), 沿用政策察覺不到綁定失敗(own 政策才偵測). **2026-11-05 pe312 起自建之服務於就緒後核對監聽者身分**(`judgePortOwner`): 修前真實重現 4 種位址之占用者與 portfinder 改埠, 全部被當成已就緒.
+- **試綁定矩陣(2026-11-05 pe312 實測, Windows 11 26300, 證據 `bind-matrix.json`)**: 每種位址只和**同一位址**衝突: 占用者綁 `127.0.0.1` 只有 `127.0.0.1` 失敗, 綁 `0.0.0.0` 只有 `0.0.0.0` 失敗, 綁 `::`(Node 之 `listen(port)` 未指定位址即此, 雙棧)只有 `::` 失敗, 綁 `::1` 只有 `::1` 失敗. **`ipv6Only` 之 `::` 四種皆偵測不到**(pe316 起於 `checkPortFree` 加第 5 種試綁定 `{ host:'::', ipv6Only:true }`). 僅綁定未 listen 之 socket 同樣衝突, 但 wsemi 1.9.50 之查詢不列(`[]`).
+- **五種占用形式 × 五種試綁定矩陣(2026-11-05 pe316 實測, Windows 11 26300, Node 24.22.1, 證據 `bind-matrix-five.log`、`probe-v6only.mjs`)**: 對角線 5 格 `EADDRINUSE`, 其餘 20 格皆可綁——**雙棧 `::` 與 `ipv6Only` 之 `::` 互不衝突**(雙棧占用者在場時 ipv6Only 試綁定可綁, 反之亦然), 所以第 3 種(雙棧)與第 5 種(ipv6Only)缺一不可; 每種試綁定只回報同形式之占用者, 沒有誤報. 前四種試綁定的選項要與舊版同形(不帶 `ipv6Only`): 帶了 `ipv6Only:false` 與不帶在 Node 等價, 但單元測試以「不帶」為判準釘住, 免日後被誤改.
+- **測試替身取代 `net.createServer`**(pe316 `unit-checkPortFree`): `import net from 'net'` 之預設匯出是可寫物件, 於 `afterEach` 還原即可攔截 `checkPortFree` 內之 `net.createServer()`, 不必為測試加注入口; 必須還原(同一 mocha 行程內其他測試用真實 `net`).
+- **fail-open 站點的真實暴露(2026-11-05 pe316 偶發)**: 第一次跑 demo 時(其他套件的負載試驗剛結束, 本次耗時 3 分 43 秒, 第二次同樣腳本 1 秒)出現「偵測子行程失敗, 照預約結果繼續」(位移 100 之偵測)與「占用者查詢失敗」——每個位移第一次偵測失敗之 fail-open 分支(`[PR20]`)在實務上走得到; 成因未查明(未重現; 推測為機器負載, 未證實). 見 `rulebook_port.md` §6.4.
+- **TIME_WAIT 不會造成綁定失敗(2026-11-05 pe312 查實, 原回報為推測)**: 服務綁 `127.0.0.1`／`0.0.0.0`／`::`／`::1`、客端 IPv4／IPv6、伺服端先關(本地埠留 TIME_WAIT, 5 條與 500 條×3 共 1500 條)、硬殺、半關閉、真實 vue-cli＋真實 Chromium、真實 w-flow-vue e2e 跑完緊接再跑(11 條 TIME_WAIT 下第二輪仍得基準埠), 四種位址皆立即可綁. 回報之「`::` 失敗而其餘可綁」正是有 socket 占著 `::` 之簽章; 當時「占用者查詢失敗」是 1.2 萬條連線下舊查法超過 5 秒逾時, 故看不出是誰. **教訓: 查詢失敗時之推測不要當成因寫進使用端文件**; 判讀綁定結果先對矩陣.
+- **`DefinePInvokeMethod` 預設把負回傳值轉為例外**(2026-11-05 pe312 測試抓到): 不設 `PreserveSig`, NTSTATUS 0xC0000004 直接拋例外, 放大重取永遠走不到, 靜默退回舊查法(結果正確只是慢, 只比對結果看不出來; 要斷言走的是哪條路徑, 故輸出帶 VIA 標記).
+- **Windows 取行程表各法實測(2026-11-05 pe312, 約 300 行程, 證據 `load-bench/`)**: 無負載 Get-CimInstance 433 ms、Add-Type＋Toolhelp 410 ms(少 40% 行程: 非提權 OpenProcess 開不了系統行程)、Add-Type＋NtQuerySystemInformation 416 ms、Reflection.Emit＋NtQuerySystemInformation 331 ms; CPU 2 倍超載 33.2 秒、—、33.6 秒、5.5 秒(csc 與 WMI 都慢); CPU 4 倍超載加 2000 條連線 16.9 秒、—、8.8 秒、6.7 秒(負載高不一定較慢, 排程影響大, 看量級不看單次). 起始時間毫秒、父 PID、映像名與舊法 0 差異(PID 0 之映像名要自補 `System Idle Process`).
+- **netstat 之 `127.0.0.1:P  127.0.0.1:0  LISTENING  0` 不是監聽者**(2026-11-05 pe312 實測, 證據 `ghost-listen.json`): 服務結束後常見, PID 0、遠端 `127.0.0.1:0`, 四種位址照樣可綁、查埠回 `[]`; 同機之狀態欄錯置, 不是占用.
+- **覆蓋使用端 `node_modules` 實跑時**(2026-11-05 pe312): 跑前記 `git status`, 跑後再比: w-web-perm 之非 e2e 測試會改寫受版控之 `db/wperm/*.mdb`(與本套件無關, 開跑前乾淨、跑後 8 檔異動); 以 `git cat-file blob` 取內容寫回並以 `git hash-object --no-filters` 回驗, 不用 restore/checkout. `git status` 空白才算還原完成; `node_modules` 則以雜湊清單回驗.
+- **`spawn` 之主控台程式帶一個 `conhost.exe` 子行程**(`windowsHide` 亦然): 依身分走樹時會以 `chain` 帶到; 寫測試不要斷言「只殺一個」.
 - `restart` 殺自建後等 port 釋放(上限 `portReleaseTimeoutMs`)再 spawn; 殺後仍被佔或無自建而被佔時, `killForeignOnRestart:true` 才殺監聽者——**只可用於專案專屬且於映射表明文登錄之 port**.
 - 所有權原語與 port 政策原語分區: 所有權規則「絕不以 port 監聽者比對殺行程」, 只殺自建且仍存活者(已結束者之 PID 可能已被回收給無關行程); port 政策原語才殺監聽者.
 - `netstat -ano` 不可加 `-p TCP`(只列 IPv4, 漏掉以 `::` 雙堆疊監聽者); 部分語系之 Windows 在地化狀態字, 故判監聽不依狀態欄(以外部位址為萬用位址判); POSIX `lsof` 以 exit 1 表示無人; 查詢工具不可用回 null, 呼叫端不得當成無人.**(2026-10-30 起此判定與解析全部委由 wsemi `execProcessPortPidsSync`, 見下條.)**
@@ -156,7 +166,7 @@
 - **Ctrl-C 在代理環境被停用且會繼承**: 測試環境常以 CREATE_NEW_PROCESS_GROUP 起動, 其「忽略 Ctrl-C」屬性由子行程繼承, `GenerateConsoleCtrlEvent(CTRL_C)` 回成功但目標收不到(本輪實測 mocha 空等閘門 150 秒才發現). 要驗真實 SIGINT 須由啟動器先 `SetConsoleCtrlHandler(NULL, FALSE)` 再起行程(`[S-I14b]`); Ctrl-Break 不受此限(`[S-I14]`), 但送出者自身也會被結束(離開碼 0xC000013A), 不代表失敗. 舊記「SIGINT 於 Windows 無法由外部送 console 事件」不正確: `AttachConsole`＋`GenerateConsoleCtrlEvent` 可以.
 - **mocha 會蓋掉 `process.exit` 之離開碼**: `after` 內 `setImmediate(() => process.exit(3))` 時 run end 先發生, mocha 之 exit 處理器把 `exitCode` 設回失敗數, 實際離開碼 0; 同步 `process.exit(3)` 才會保留. 同步 `process.exit` 時 run end 不會發生, 故報告器每個事件都寫檔, 工具以 `total` 判定是否跑完(sso `e2e-tokens` 之 root after 以 `setImmediate` 結束, 會發生 run end).
 - **`fs.cp` 不能複製到自身之子目錄**: 實例預設在 `<專案根>/tmp/...`, `fs.cp(root, dst)` 直接 `ERR_FS_CP_EINVAL`(POC 之實例在專案外才沒遇到), 故自寫 `copyTree`(`copyFile` 由 OS 複製, 不把內容讀進 JS, `.env` 亦然).
-- **Windows 下特定位址與萬用位址可並存**: 只試綁 `0.0.0.0` 會漏掉只綁 `127.0.0.1` 之占用者, 預檢四個位址都試(`[S-I19]` 三種占用皆實測); 試綁比 `listenerPids` 快, 只有失敗才查占用者(每埠約 1 秒).
+- **Windows 下特定位址與萬用位址可並存**: 只試綁 `0.0.0.0` 會漏掉只綁 `127.0.0.1` 之占用者, 預檢五種試綁定都試(原四個位址, pe316 增 `ipv6Only` 之 `::`; `[S-I19]` 三種占用皆實測); 試綁比 `listenerPids` 快, 只有失敗才查占用者(每埠約 1 秒).
 - **mocha 之統計不解析 log**: 測試自身可印「3 failing」, spec 輸出也沒有檔名, 無法得各檔耗時; 改以繼承 Spec 之報告器寫 JSON. 報告器須 `.cjs`, mocha 以 `require` 載入; `require.resolve('mocha', { paths: [cwd] })` 經 junction 解析到實際路徑, 與執行中之 mocha 同一模組.
 - **log 直接寫 outDir, 不複製**: 工具被硬殺時 log 仍在, 且 mocha 持有之檔案把柄不在實例內, 不會擋實例之刪除.
 

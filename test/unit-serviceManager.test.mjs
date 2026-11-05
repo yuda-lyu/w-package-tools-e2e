@@ -56,6 +56,8 @@ function mkSm(env, over = {}) {
         portReleasePollMs: 1,
         killTree: env.killTree,
         killListeners: env.killListeners,
+        //假 child 沒有真實行程; 就緒核對另見 unit-serviceOwner、api-serviceOwner
+        verifyOwner: async () => {},
         log: () => {},
         ...over,
     })

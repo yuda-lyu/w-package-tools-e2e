@@ -1,15 +1,20 @@
 import execProcessPortPidsSync from 'wsemi/src/execProcessPortPidsSync.mjs'
 
 
+//本套件查埠與取行程表之逾時(每個子指令): 太短會把忙碌當成查詢失敗(null); 只影響查詢真的失敗時多久才回報(查埠最久約 2 倍, 同步阻塞)
+//2026-11-05 實測 useBoth 之查埠: 無負載 0.4 秒; CPU 2 倍超載 12.5 秒(最長 13.2); CPU 4 倍超載加 2000 條連線 20.4 秒(最長 25.5); 取行程表退回 Get-CimInstance 時 CPU 2 倍超載 33 秒
+export let PORT_QUERY_TIMEOUT_MS = 60000
+
+
 /**
  * 查詢監聽指定port之PID(同步)
  *
  * 實際查詢委由wsemi之execProcessPortPidsSync：判定不依狀態欄，只看「本地埠相符、遠端為萬用位址且遠端埠0」之TCP列。
- * Windows先`netstat -ano`，查無或失敗時再以`Get-NetTCPConnection -LocalPort`確認(部分系統之netstat會漏列新起之監聽、並把對外連線之狀態錯置為LISTENING，故不單靠netstat判無人)，
- * 其查無才判無人；其他平台以`lsof -nP -iTCP:<port> -sTCP:LISTEN -t`。無人監聽回傳[]，查詢失敗回傳null(呼叫端不得把null當成無人)。
+ * Windows先`netstat -ano`，查無或失敗時再以PowerShell確認(部分系統之netstat會漏列新起之監聽、並把對外連線之狀態錯置為LISTENING，故不單靠netstat判無人)，
+ * PowerShell優先呼叫作業系統API(GetExtendedTcpTable)，不可用時退回`Get-NetTCPConnection -LocalPort`，其查無才判無人；其他平台以`lsof -nP -iTCP:<port> -sTCP:LISTEN -t`。無人監聽回傳[]，查詢失敗回傳null(呼叫端不得把null當成無人)。
  *
- * 耗時：在netstat漏列之系統上，新起之監聽與無人之port一律走PowerShell，每次約1秒；子指令阻塞事件迴圈，最久約2倍timeout(Windows)。
- * 於exit/signal處理器內呼叫時宜傳較短之timeout(例如5000)，免行程遲遲無法結束。
+ * 耗時(useBoth:true，2026-11-05實測)：無負載約0.4秒；1.2萬條TCP連線約0.8～1秒；CPU 2倍超載約12.5秒；CPU 4倍超載加2000條連線約20秒、最長25.5秒。退回`Get-NetTCPConnection`(受限語言模式)時隨連線數增加，1.2萬條約13秒。
+ * 子指令阻塞事件迴圈，最久約2倍timeout(Windows)。本套件自身之查詢一律用PORT_QUERY_TIMEOUT_MS；太短會把系統忙碌當成查詢失敗，只有於exit/signal處理器內呼叫(行程要儘快結束)才傳較短之timeout。
  *
  * 要確認「監聽者恰為某行程」(身分確認)或依監聽者殺行程時請傳useBoth:true：netstat有列出時預設不再查PowerShell，可能只得部分監聽者。
  *

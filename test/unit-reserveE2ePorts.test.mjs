@@ -306,6 +306,84 @@ describe('reserveE2ePorts', function() {
             assert.strict.deepEqual(h.ports, [8080])
         })
 
+        //pe316 第 2 項: 殺殘留後等待釋放時, 偵測失敗(null)不是「全部可用」。8080 之偵測: 第 1 次(殺殘留前)占用, 其後 seq 依序回應
+        function probeSeq(seq) {
+            let n = 0
+            let calls = []
+            let probe = (ports) => {
+                calls.push([...ports])
+                if (ports[0] !== 8080) {
+                    return ports.map((port) => ({ port, free: true, host: '', code: '' }))
+                }
+                let v = n < seq.length ? seq[n] : seq[seq.length - 1]
+                n++
+                return v === null ? null : ports.map((port) => (v === 'busy' ? { port, free: false, host: '127.0.0.1', code: 'EADDRINUSE' } : { port, free: true, host: '', code: '' }))
+            }
+            return { probe, calls8080: () => calls.filter((c) => c[0] === 8080).length }
+        }
+
+        //對應 pe316 第 2 項「null 視為仍忙, 換下一個位移; 訊息寫明查詢失敗」
+        it('[PR15d] 殺殘留後等待釋放時偵測一直失敗(null): 視為仍忙, 換下一個位移, 訊息寫明偵測失敗; 不當成全部可用', function() {
+            let root = path.resolve('C:\\proj')
+            let fx = mk([], { exists: () => false, listeners: [8080], table: [{ pid: 7777, ppid: 1, startMs: 1000, image: 'srv.exe' }] })
+            writeHolder(fx, 8080, { root, known: [{ pid: 7777, startMs: 1000 }] })
+            let ps = probeSeq(['busy', null])
+            let evs = []
+            let h = reserve(fx, [8080], { root, probe: ps.probe, onTrace: (e) => evs.push(e) })
+            assert.strict.deepEqual(h.ports, [8180], '偵測失敗不得當成 8080 可用')
+            assert.strict.deepEqual(fx.kills, [{ pid: 7777, startMs: 1000 }], '殘留仍依身分下殺(判準不變)')
+            assert.strict.equal(ps.calls8080(), 26, '殺後等待上限 25 次, 每次皆失敗')
+            let text = fx.logs.join('\n')
+            assert.strict.ok(text.includes('略過 埠 8080') && text.includes('偵測子行程失敗') && text.includes('無法確認'), text)
+            assert.strict.ok(text.includes('EADDRINUSE@127.0.0.1'), `訊息保留最後一次成功偵測之結果: ${text}`)
+            assert.strict.ok(text.includes('PID 4321'), `訊息仍列出查得之占用者: ${text}`)
+            assert.strict.deepEqual(evs.filter((e) => e.type === 'blocked').map((e) => e.codes), [['PROBE_FAILED']])
+            assert.strict.deepEqual(regFiles(fx), ['p8180.json'], '撤回 8080 之預約')
+        })
+
+        it('[PR15e] 殺殘留後等待釋放時偵測一度失敗(null)再恢復: 不因 null 提早放行, 繼續等到偵測回報可用才取得基準埠', function() {
+            let root = path.resolve('C:\\proj')
+            let fx = mk([], { exists: () => false, table: [{ pid: 7777, ppid: 1, startMs: 1000 }] })
+            writeHolder(fx, 8080, { root, known: [{ pid: 7777, startMs: 1000 }] })
+            //殺前占用 → null → null → 仍占用 → 可用
+            let seq = ['busy', null, null, 'busy', 'free']
+            let ps = probeSeq(seq)
+            let h = reserve(fx, [8080], { root, probe: ps.probe })
+            assert.strict.deepEqual(h.ports, [8080])
+            assert.strict.equal(ps.calls8080(), seq.length, '兩次失敗與其後之占用皆須繼續等, 不得在 null 時提早放行')
+            assert.strict.deepEqual(fx.kills, [{ pid: 7777, startMs: 1000 }])
+        })
+
+        //偵測失敗只在「最後一次偵測」仍失敗時才算: 中途失敗、其後成功偵測到仍占用者, 以最後一次成功偵測為準
+        it('[PR15g] 殺殘留後偵測中途失敗一次、其後成功偵測且一直占用: 照一般占用換埠, code 為偵測所回(非 PROBE_FAILED), 訊息不寫偵測失敗', function() {
+            let root = path.resolve('C:\\proj')
+            let fx = mk([], { exists: () => false, listeners: [8080], table: [{ pid: 7777, ppid: 1, startMs: 1000 }] })
+            writeHolder(fx, 8080, { root, known: [{ pid: 7777, startMs: 1000 }] })
+            let ps = probeSeq(['busy', null, 'busy'])
+            let evs = []
+            let h = reserve(fx, [8080], { root, probe: ps.probe, onTrace: (e) => evs.push(e) })
+            assert.strict.deepEqual(h.ports, [8180])
+            assert.strict.equal(ps.calls8080(), 26)
+            assert.strict.deepEqual(evs.filter((e) => e.type === 'blocked').map((e) => e.codes), [['EADDRINUSE']])
+            let text = fx.logs.join('\n')
+            assert.strict.ok(text.includes('略過 埠 8080') && text.includes('EADDRINUSE@127.0.0.1'), text)
+            assert.strict.ok(!text.includes('偵測子行程失敗'), text)
+        })
+
+        it('[PR15f] 殺殘留後第一次偵測即回報可用、或沒有殘留可殺: 不進入等待迴圈(沒有占用時之行為不變)', function() {
+            let root = path.resolve('C:\\proj')
+            let fx = mk([], { exists: () => false, table: [{ pid: 7777, ppid: 1, startMs: 1000 }] })
+            writeHolder(fx, 8080, { root, known: [{ pid: 7777, startMs: 1000 }] })
+            let ps = probeSeq(['free'])
+            assert.strict.deepEqual(reserve(fx, [8080], { root, probe: ps.probe }).ports, [8080])
+            assert.strict.equal(ps.calls8080(), 1)
+            //沒有殘留可殺(kills 為空), 占用者仍在: 不等待, 直接換埠
+            let fx2 = mk([8080])
+            let ps2 = probeSeq(['busy'])
+            assert.strict.deepEqual(reserve(fx2, [8080], { probe: ps2.probe }).ports, [8180])
+            assert.strict.equal(ps2.calls8080(), 1)
+        })
+
         it('[PR15c] 同一專案之殘留無 known: 只回收預約, 不下殺; 占用者仍在即換埠', function() {
             let root = path.resolve('C:\\proj')
             let fx = mk([8080], { exists: () => false })
@@ -679,7 +757,7 @@ describe('reserveE2ePorts', function() {
             assert.strict.ok(fx.logs.some((l) => l.includes('階段 own-listener') && l.includes('依據 identity')), fx.logs.join('\n'))
             //查詢失敗
             let h2 = reserve(mk(), [8081], { exec: () => ({ status: 1, stdout: '', error: new Error('x') }) })
-            assert.strict.deepEqual(h2.killOwnListeners(8081), { pids: null, killed: [], skipped: [] })
+            assert.strict.deepEqual(h2.killOwnListeners(8081), { pids: null, killed: [], skipped: [], tableOk: false })
         })
 
         it('[PR73b] killOwnListeners: 只殺該埠之監聽者, 本實例之其他服務不動', function() {
@@ -722,7 +800,8 @@ describe('reserveE2ePorts', function() {
             }
         }
         let mkChild = (pid = 0) => (pid ? { pid, exitCode: null, signalCode: null } : {})
-        let baseOpt = { pollMs: 1, portReleaseTimeoutMs: 5, portReleasePollMs: 1, sleep: async () => {}, killTree: () => {}, log: () => {} }
+        //假 child 沒有真實行程; 就緒核對另見 unit-serviceOwner、api-serviceOwner
+        let baseOpt = { pollMs: 1, portReleaseTimeoutMs: 5, portReleasePollMs: 1, sleep: async () => {}, killTree: () => {}, verifyOwner: async () => {}, log: () => {} }
 
         //E5: 偵測與綁定之間被搶走
         it('[PR80] 本行程保留後埠有回應(尚未啟動過): 拋錯不沿用、不 spawn; 未導入與上層保留者照舊沿用', async function() {

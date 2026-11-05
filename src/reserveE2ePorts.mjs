@@ -9,7 +9,7 @@ import resolveE2ePort, { resolvedBasePorts } from './resolveE2ePort.mjs'
 import pidExists from './pidExists.mjs'
 import sleepSync from './sleepSync.mjs'
 import isChildAlive from './isChildAlive.mjs'
-import listenerPids from './listenerPids.mjs'
+import listenerPids, { PORT_QUERY_TIMEOUT_MS } from './listenerPids.mjs'
 import reapShardProcesses, { describePortOwners, keyOf, listProcessTable, parseProcessTable, processTableCommand, sampleShardKnown } from './reapShardProcesses.mjs'
 
 
@@ -227,7 +227,7 @@ function probeDef(ports) {
  * @param {Function} [opt.exec] 輸入同步執行子指令函數(與child_process.spawnSync同形)，預設為不經shell、隱藏視窗之spawnSync
  * @param {Function} [opt.exists=pidExists] 輸入判斷PID存在之函數，預設pidExists
  * @param {Function} [opt.log=console.log] 輸入輸出函數，預設console.log
- * @returns {Object} 回傳物件{token,root,regDir,tryOffset(bases,offset),release(ports),releaseAll(),held()}，tryOffset回傳{ok,ports,kills,blocked}，blocked元素為{base,offset,port,code,host,owners}
+ * @returns {Object} 回傳物件{token,root,regDir,tryOffset(bases,offset),release(ports),releaseAll(),held()}，tryOffset回傳{ok,ports,kills,blocked}，blocked元素為{base,offset,port,code,host,owners}；殺殘留後等待釋放時偵測失敗(probe回傳null)視為仍忙(無法確認已釋放)，用盡仍失敗即不可用，該元素code為'PROBE_FAILED'、owners寫明偵測失敗
  * @example
  *
  * import { createE2ePortClaimer } from 'w-package-tools-e2e/src/reserveE2ePorts.mjs'
@@ -315,11 +315,17 @@ export function createE2ePortClaimer(opt = {}) {
             return { ok: true, ports, kills, blocked: [] }
         }
         let busy = res.filter((r) => !r.free)
+        //等待釋放時偵測失敗(null)不是「全部可用」: 無法確認已釋放, 視為仍忙(保留上次成功偵測之結果), 用盡仍失敗即換下一個位移
+        let probeLost = false
         //剛殺掉殘留時埠可能還要片刻才釋放
         if (busy.length > 0 && kills.length > 0) {
             for (let i = 0; i < 25 && busy.length > 0; i++) {
                 sleepSync(200)
-                busy = (probe(ports) || []).filter((r) => !r.free)
+                let again = probe(ports)
+                probeLost = again === null
+                if (!probeLost) {
+                    busy = again.filter((r) => !r.free)
+                }
             }
         }
         if (busy.length > 0) {
@@ -328,9 +334,9 @@ export function createE2ePortClaimer(opt = {}) {
                 base: bases[ports.indexOf(b.port)],
                 offset,
                 port: b.port,
-                code: b.code,
+                code: probeLost ? 'PROBE_FAILED' : b.code,
                 host: b.host,
-                owners: describePortOwners(b.port, { exec }),
+                owners: `${probeLost ? `偵測子行程失敗, 無法確認殺殘留後已釋放(最後一次成功偵測: ${b.code}@${b.host}); ` : ''}${describePortOwners(b.port, { exec })}`,
             }))
             return { ok: false, ports, kills, blocked }
         }
@@ -465,11 +471,11 @@ function makeHandle(s) {
             children.add(child)
             sample()
         },
-        //只殺身分已確認屬本實例之監聽者(identity、chain); 其餘占用者留在skipped; 回傳形狀相容killPortListeners之{pids,killed}
+        //只殺身分已確認屬本實例之監聽者(identity、chain); 其餘占用者留在skipped; 回傳形狀相容killPortListeners之{pids,killed}; pids為null或tableOk為false即查詢失敗, 身分未知
         killOwnListeners: (port) => {
-            let pids = listenerPids(port, { useBoth: true, timeout: 5000, exec })
+            let pids = listenerPids(port, { useBoth: true, timeout: PORT_QUERY_TIMEOUT_MS, exec })
             if (pids === null || pids.length === 0) {
-                return { pids, killed: [], skipped: [] }
+                return { pids, killed: [], skipped: [], tableOk: pids !== null }
             }
             let map = new Map(known.map((k) => [keyOf(k), k]))
             if (s.regDir) {
@@ -480,7 +486,7 @@ function makeHandle(s) {
             }
             let r = reapShardProcesses({ known: [...map.values()], only: pids.map(Number), phase: 'own-listener', exec, log: (t) => s.log(t.replace(/^\[shard\]/, '[e2e-port]')) })
             let killed = r.kills.filter((v) => v.result === 'killed').map((v) => String(v.pid))
-            return { pids, killed, skipped: pids.filter((p) => !killed.includes(p)), kills: r.kills }
+            return { pids, killed, skipped: pids.filter((p) => !killed.includes(p)), kills: r.kills, tableOk: r.tableOk }
         },
         reselect: (reason = '') => s.reselect(h, reason),
         release: () => s.release(h),
@@ -771,8 +777,20 @@ function reserveE2ePorts(basePorts, opt = {}) {
     printOutcome(picked.offset, picked.blocked)
     s.reselect = (h, reason) => {
         let prev = h.offset
+        let prevPorts = [...h.ports]
         claimer.release(h.ports)
-        let r = select(prev + portStep, triesUsed)
+        let r
+        try {
+            r = select(prev + portStep, triesUsed)
+        }
+        catch (err) {
+            //用盡: 補上觸發本次重選之埠與占用者(不知是組內哪一埠觸發, 全部列出; blocked 只含其後試過之位移)
+            if (err.code === 'E2E_PORT_EXHAUSTED') {
+                err.trigger = prevPorts.map((port) => ({ port, owners: describePortOwners(port, { exec }) }))
+                err.message = `${err.message.trimEnd()}\n觸發本次重選(${reason || '綁定失敗'}):\n${err.trigger.map((t) => `  埠 ${t.port}: ${t.owners}`).join('\n')}`
+            }
+            throw err
+        }
         triesUsed = r.tries
         h.offset = r.offset
         h.shifted = r.offset !== 0

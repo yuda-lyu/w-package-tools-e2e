@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url'
 import planE2eShards from './planE2eShards.mjs'
 import listDirLinks from './listDirLinks.mjs'
 import removeE2eInstance, { snapshotLinkTarget } from './removeE2eInstance.mjs'
-import listenerPids from './listenerPids.mjs'
+import listenerPids, { PORT_QUERY_TIMEOUT_MS } from './listenerPids.mjs'
 import killOwnTree from './killOwnTree.mjs'
 import isChildAlive from './isChildAlive.mjs'
 import pidExists from './pidExists.mjs'
@@ -857,7 +857,7 @@ async function runShardedE2e(opt = {}) {
         let busy = await waitPortsFree(portsOfRun, 15000)
         if (busy.length > 0) {
             //仍占埠之監聽者: 開跑後才起之行程不一定是本次的(可能是他人接手該埠), 身分未確認者不下殺, 由下方大聲報錯
-            let extra = busy.flatMap((b) => (listenerPids(b.port, { useBoth: true, timeout: 5000, exec: ctx.exec }) || []).map((pid) => ({ pid: Number(pid), port: b.port })))
+            let extra = busy.flatMap((b) => (listenerPids(b.port, { useBoth: true, timeout: PORT_QUERY_TIMEOUT_MS, exec: ctx.exec }) || []).map((pid) => ({ pid: Number(pid), port: b.port })))
             reap({ known: knownNow(), since: t0, extra, phase: 'teardown-port' })
             busy = await waitPortsFree(busy.map((b) => b.port), 15000)
         }

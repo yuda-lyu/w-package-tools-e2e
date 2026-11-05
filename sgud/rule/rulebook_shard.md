@@ -33,7 +33,7 @@
 | S-C4 | 多於 1 組且有 `ports` 時, 專案 `test/`、`test/tools/` 之 `.mjs` 須提及 `resolveE2ePort`、`reserveE2ePorts` 或 `E2E_PORT_OFFSET`, 否則拋錯(未接線時各組都用基準埠, 依沿用政策互打而不報錯) | `isPortOffsetAdopted` | `[S-I6]` |
 | S-K1 | `workDir` 內之鎖檔以排他建立擋第二個同時執行者; 持有者 PID 已死或起始時間與鎖檔不完全相同(PID 回收)之鎖可接手; 鎖檔無 `procCreateMs`(舊格式、當時取不到行程表)而 PID 存在者視為仍在; 接手在 `.takeover` 守衛內; 內容不可讀者 60 秒內視為仍在 | `acquireLock`、`lockHolderAlive` | `[S-I15]`、`[S-I17]`、`[S-I18]`、`[S-W7]`、`[S-W12]` |
 | S-S1 | 開跑前先清殘留: 接手死鎖時先依 S-V1 殺鎖檔之殘留(階段 `stale-lock`; 鎖檔可能已存放數日, 同樣逐筆比對), 舊格式鎖檔不下殺並記警告, 再依 S-R 程序移除 `inst<N>` | `runShardedE2e` | `[S-I15]`、`[S-I16]`、`[S-W5]`、`[S-W6]`、`[S-W7]`、`[S-W9]` |
-| S-P1 | 配發埠: 每組每埠先預約再於 `127.0.0.1`、`0.0.0.0`、`::`、`::1` 試綁定(Windows 下特定位址與萬用位址可並存, 只試一種會漏); 不沿用; 皆未過即拋錯、列出占用者(PID 與映像名稱, 不取命令列)、未建立任何實例 | `createE2ePortClaimer`、`checkPortFree`、`describePortOwners` | `[S-I19]`、`[S-I24]`(`portTries:1`) |
+| S-P1 | 配發埠: 每組每埠先預約再以五種試綁定(`127.0.0.1`、`0.0.0.0`、`::`〔雙棧〕、`::1`、`::`〔`ipv6Only`〕; Windows 下特定位址與萬用位址可並存、雙棧與 `ipv6Only` 之 `::` 亦可並存, 只試一種會漏; 見 `rulebook_port.md` R-26) 檢查; 不沿用; 皆未過即拋錯、列出占用者(PID 與映像名稱, 不取命令列)、未建立任何實例 | `createE2ePortClaimer`、`checkPortFree`、`describePortOwners` | `[S-I19]`、`[S-I24]`(`portTries:1`) |
 | S-P2 | 沒有占用時第 i 組位移＝i×portStep(同 se302); 被占用或被他人預約時不殺占用者, 改用下一個空槽(至多 `portTries`), 跨組不重疊, 印原因 | `runShardedE2e` | `[S-I1]`、`[S-A1]`、`[S-A2]` |
 | S-P3 | 含 `officialOnly` 之第 0 組只用位移 0, 被占用時等待(至多 `portWaitMs`), 收到訊號即停; 逾時同 S-P1 拋錯 | 同上 | `[S-A3]`、`[S-A3b]` |
 | S-P4 | 預約持有至收尾(含例外路徑)後釋放; 各組以 `E2E_PORT_HOLD` 繼承, 組內 `reserveE2ePorts` 沿用不換埠; 工具被硬殺時預約由下次回收 | 同上 | `[S-A1]`、`[S-A3b]`、`[S-A4]`、`[S-A5]`、`[S-A6]`、`[S-A7]` |

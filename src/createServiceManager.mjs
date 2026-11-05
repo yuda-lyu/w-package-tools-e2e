@@ -1,10 +1,15 @@
+import getTrace from 'wsemi/src/getTrace.mjs'
 import probeHttp from './probeHttp.mjs'
 import killOwnTree from './killOwnTree.mjs'
 import killPortListeners from './killPortListeners.mjs'
 import resolveE2ePort from './resolveE2ePort.mjs'
 import isChildAlive from './isChildAlive.mjs'
 import { getActiveE2ePortReservation } from './reserveE2ePorts.mjs'
-import { describePortOwners } from './reapShardProcesses.mjs'
+import { describePortOwners, judgePortOwner } from './reapShardProcesses.mjs'
+
+
+//就緒後核對與 restart 查監聽者: 查詢失敗或對方片刻後就離開(他人之 portfinder 試綁定、舊實例結束中)時先重試
+let OWNER_TRIES = 3
 
 
 //加不可列舉屬性(以 o.x 或解構取用; Object.keys、JSON、展開皆不含, 物件形狀同 1.0.10)
@@ -26,7 +31,9 @@ function withPort(o, port) {
  * startServersOnce：依services順序逐一處理；每個服務各自一個一次性狀態(進行中之呼叫共用同一個promise)。
  * 失敗語意failureMode：'once'(預設，首次呼叫拋錯，之後之呼叫不再重試也不再拋錯；沿用w-web-sso現行語意)或'sticky'(之後之呼叫持續拋出同一錯誤，直到cleanup)。
  * restart：有自建行程者先同步殺整棵樹並等port釋放(有上限)；等不到釋放、或無自建行程而port被佔用者，killForeignOnRestart為true才以killPortListeners殺監聽者
- * (只可用於該port專屬本專案且已於專案映射表明文登錄之情形)，否則拋錯(自建殺後仍被佔者只記錄並繼續，沿用前版語意)；之後以args與env(與process.env淺合併，只作用於本次)spawn並等就緒。restart不改變一次性狀態。
+ * (只可用於該port專屬本專案且已於專案映射表明文登錄之情形)，否則拋錯(自建殺後仍被佔者只記錄並繼續，由其後之就緒核對把關)；監聽者查詢失敗時先重試，仍查不到即拋錯，不續行；之後以args與env(與process.env淺合併，只作用於本次)spawn並等就緒。restart不改變一次性狀態。
+ * 就緒核對：自建之服務(startServersOnce確定要spawn者與restart)於就緒探測通過後，確認該埠之監聽者全為spawn回傳之行程或其存活子孫；就緒探測只知道埠有回應，不知道是誰回應(偵測與綁定之間被占走、vue-cli之--port只是起點而靜默改埠，都會把占用者當成已就緒)。
+ * 不符即終止自建之服務並拋錯(err.code為'E2E_PORT_NOT_OWN')，寫明埠與占用者，不下殺占用者；查詢失敗先重試，仍查不到同樣拋錯(err.code為'E2E_PORT_OWNER_UNKNOWN')，不當成自己人。沿用既有服務(port已有回應而未spawn)不核對。launcher先結束、真正服務由孫行程接手之寫法無法判定，須改為直接spawn服務，或以opt.verifyOwner自行確認。
  * 服務可給beforeSpawn掛鉤(async({phase,args,env,hookArg}))：每次spawn之前呼叫並等待，phase為'start'(startServersOnce確定要spawn時)或'restart'，
  * hookArg為restart之opt.hookArg(例如{reseed:true})；用於須在服務啟動前完成之前置(例如資料庫須在後端開啟前重建)。
  * cleanup：同步(exit與訊號處理器內非同步不會被等待)；依services反序殺自建行程、重置所有一次性狀態(使之後之startServersOnce重新偵測)、呼叫onCleanup。
@@ -34,7 +41,7 @@ function withPort(o, port) {
  * 埠位移(多開臨時實例)：services[].port為基準埠，實際埠＝resolveE2ePort(基準埠)(環境變數E2E_PORT_OFFSET，未設為0即原值)；
  * 探測、就緒逾時與日誌、killListeners皆用實際埠；spawn與beforeSpawn之參數物件另帶port(實際埠；不可列舉屬性，以解構或o.port取用，物件之鍵集合同前版)，專案以之啟動服務(命令列參數或環境變數)；
  * url給字串者其埠(含協定預設埠80/443)須等於基準埠(位移時改為實際埠，不等即拋錯，免探測到他實例)，給函數(port)=>網址者以實際埠呼叫；portOf(name)回傳實際埠(不可列舉屬性)
- * 已導入reserveE2ePorts(本行程有保留)時：未導入者之行為完全不變，導入者只改三處：①埠於保留後被他人占用不沿用，拋錯寫明占用者；②restart要殺非自建之監聽者時，只殺身分已確認屬本實例者(reservation.killOwnListeners)，其餘拋錯寫明占用者；③服務於就緒前結束即拋錯，不等到逾時。就緒後把服務行程記入預約(noteOwn)，供下次開跑依身分清除殘留
+ * 已導入reserveE2ePorts(本行程有保留)時另有：①埠於保留後被他人占用不沿用，拋錯寫明占用者；②restart要殺非自建之監聽者時，只殺身分已確認屬本實例者(reservation.killOwnListeners)，其餘拋錯寫明占用者；③服務於就緒前結束即拋錯，不等到逾時；④就緒逾時之訊息寫明該埠之占用者。就緒後把服務行程記入預約(noteOwn)，供下次開跑依身分清除殘留
  *
  * @param {Object} opt 輸入設定物件
  * @param {Array} opt.services 輸入服務陣列，每個為{name,port,spawn({args,env,port})=>ChildProcess,readyTimeoutMs,url,startNote,beforeSpawn}，port為基準埠，readyTimeoutMs預設30000，url預設http://<host>:<實際埠>/(可為字串或函數(port)=>網址)，beforeSpawn可省略
@@ -50,6 +57,10 @@ function withPort(o, port) {
  * @param {Function} [opt.killListeners=killPortListeners] 輸入同步殺port監聽者函數(port)=>{pids,killed}，預設killPortListeners
  * @param {Function} [opt.sleep] 輸入等待函數async(ms)，預設setTimeout
  * @param {Object} [opt.reservation] 輸入reserveE2ePorts之回傳物件，預設本行程寫入環境變數之保留(沒有即視同未導入)
+ * @param {Function} [opt.exec] 輸入同步執行子指令函數(與child_process.spawnSync同形)，用於就緒核對與查占用者，預設為不經shell、隱藏視窗之spawnSync
+ * @param {Number} [opt.ownerRetryMs=1000] 輸入就緒核對與restart查監聽者之重試間隔毫秒數，預設1000(共試3次)
+ * @param {Function} [opt.verifyOwner] 輸入就緒核對函數async(svc,child)，確認不符時自行拋錯，預設為核對監聽者行程鏈；只用於單元測試之假行程，或確實無法以行程鏈判定之服務(須自行確認身分)
+ * @param {Function} [opt.onTrace=null] 輸入觀察回調函數，傳入凍結之事件物件{ type, ... }，type為'owner-check'(就緒核對一次；service、port、attempt、result、owners)、'restart-query'(restart查監聽者一次；service、port、attempt、ok)，預設null
  * @param {Function} [opt.onCleanup=null] 輸入cleanup末尾之同步回呼(例如刪臨時設定檔)，預設null
  * @param {Function} [opt.log=console.log] 輸入輸出函數，預設console.log
  * @returns {Object} 回傳物件{startServersOnce({only}),restart(name,{args,env,hookArg}),cleanup(),state(name),portOf(name)}
@@ -87,8 +98,17 @@ function createServiceManager(opt = {}) {
         onCleanup = null,
         log = console.log,
         reservation = null,
+        exec = undefined,
+        ownerRetryMs = 1000,
+        verifyOwner = null,
     } = opt
+    //非預期之輸入視為未給, 改用預設(輸入參數之檢測機制 K3)
+    exec = typeof exec === 'function' ? exec : undefined
+    verifyOwner = typeof verifyOwner === 'function' ? verifyOwner : null
+    ownerRetryMs = Number.isFinite(ownerRetryMs) && ownerRetryMs >= 0 ? ownerRetryMs : 1000
+    let trace = getTrace(opt)
     let resOf = () => reservation || getActiveE2ePortReservation()
+    let ownersOf = (port) => describePortOwners(port, { exec })
     if (!Array.isArray(services) || services.length === 0) {
         throw new Error('createServiceManager: services 為必填陣列')
     }
@@ -156,11 +176,60 @@ function createServiceManager(opt = {}) {
             }
             //已導入自動換埠: 服務就緒前結束多半是綁定失敗(偵測與綁定之間被未導入者占走), 不等到逾時
             if (resOf() && child && child.pid && !isChildAlive(child)) {
-                throw new Error(`服務 ${svc.name} 於就緒前結束(離開碼 ${child.exitCode}); 埠 ${svc.port}: ${describePortOwners(svc.port)}`)
+                throw new Error(`服務 ${svc.name} 於就緒前結束(離開碼 ${child.exitCode}); 埠 ${svc.port}: ${ownersOf(svc.port)}`)
             }
             await sleep(pollMs)
         }
-        throw new Error(`server not ready on port ${svc.port} after ${svc.readyTimeoutMs / 1000}s`)
+        //已導入自動換埠: 非 HTTP 之占用者使探測一直不通時(服務可能已靜默改埠), 訊息要查得到是誰
+        throw new Error(`server not ready on port ${svc.port} after ${svc.readyTimeoutMs / 1000}s${resOf() ? `; 埠 ${svc.port}: ${ownersOf(svc.port)}` : ''}`)
+    }
+
+    //就緒後核對: 就緒探測只知道埠有回應, 不知道是誰回應. 不符或查不到都不放行; 只終止自建之服務, 不動占用者
+    async function verifyDef(svc, child) {
+        let r = null
+        for (let i = 0; i < OWNER_TRIES; i++) {
+            if (i > 0) {
+                await sleep(ownerRetryMs)
+            }
+            let alive = !!child && !!child.pid && isChildAlive(child)
+            r = judgePortOwner(svc.port, alive ? child.pid : null, { exec })
+            if (trace) {
+                trace('owner-check', { service: svc.name, port: svc.port, attempt: i + 1, result: r.result, owners: r.owners })
+            }
+            if (r.result === 'own') {
+                return
+            }
+        }
+        let self = child && child.pid ? `自建 PID ${child.pid}${isChildAlive(child) ? '' : `, 已結束(離開碼 ${child.exitCode})`}` : '自建行程未啟動'
+        let err
+        if (r.result === 'query-failed') {
+            err = new Error(`服務 ${svc.name} 之埠 ${svc.port} 就緒探測有回應, 但無法確認監聽者身分(${r.owners}; 試了 ${OWNER_TRIES} 次; ${self}), 不視為就緒、不下殺; 查詢失敗多因系統負載過高, 可重跑`)
+            err.code = 'E2E_PORT_OWNER_UNKNOWN'
+        }
+        else {
+            let what = r.result === 'none' ? r.owners : `占用者 ${r.owners}`
+            err = new Error(`服務 ${svc.name} 之埠 ${svc.port} 就緒探測有回應, 但監聽者不是本服務(${what}; ${self}), 不沿用、不下殺; 可能於綁定前被占走、或服務已靜默改用其他埠(例如 vue-cli 之 --port 只是起點); 重跑即重選埠`)
+            err.code = 'E2E_PORT_NOT_OWN'
+        }
+        err.port = svc.port
+        throw err
+    }
+
+    //核對不符時收掉自建之服務(占用者不動), 免留下無人使用之行程
+    async function verifyReady(svc, st) {
+        try {
+            await (verifyOwner || verifyDef)(svc, st.proc)
+        }
+        catch (err) {
+            if (st.proc) {
+                try {
+                    killTree(st.proc)
+                }
+                catch (e2) {}
+                st.proc = null
+            }
+            throw err
+        }
     }
 
     async function waitReleased(svc) {
@@ -181,7 +250,7 @@ function createServiceManager(opt = {}) {
             //本行程保留時已驗證此埠可綁定且尚未啟動過服務: 有回應者必為他人, 沿用就是打到別人的服務
             let res = resOf()
             if (res && res.source === 'auto' && !st.spawned) {
-                throw new Error(`服務 ${svc.name} 之埠 ${svc.port} 於保留後被他人占用(${describePortOwners(svc.port)}), 不沿用、不下殺; 重跑即重選埠`)
+                throw new Error(`服務 ${svc.name} 之埠 ${svc.port} 於保留後被他人占用(${ownersOf(svc.port)}), 不沿用、不下殺; 重跑即重選埠`)
             }
             log(`[e2e-setup] ${svc.name} already running on ${svc.port}, reusing`)
             return
@@ -193,6 +262,7 @@ function createServiceManager(opt = {}) {
         st.proc = svc.spawn(withPort({ args: [], env: process.env }, svc.port))
         st.spawned = true
         await waitReady(svc)
+        await verifyReady(svc, st)
         noteOwn(st)
         log(`[e2e-setup] ${svc.name} ready`)
     }
@@ -224,23 +294,27 @@ function createServiceManager(opt = {}) {
         }
     }
 
-    function killForeign(svc) {
+    //restart 要清掉非自建之監聽者. 查不到監聽者不得續行: 新服務會因埠被占而結束, 其後之就緒探測卻由占用者回應
+    async function killForeign(svc) {
         //已導入自動換埠: 只殺身分已確認屬本實例者; 其餘占用者可能是別的套件正在跑之測試
         let res = resOf()
-        if (res) {
-            let own = res.killOwnListeners(svc.port)
-            if (own.pids === null) {
-                log(`[e2e-setup] 查詢 port ${svc.port} 監聽者之工具不可用, 未殺`)
+        for (let i = 0; i < OWNER_TRIES; i++) {
+            if (i > 0) {
+                await sleep(ownerRetryMs)
             }
-            else if (own.skipped.length > 0) {
-                throw new Error(`restart ${svc.name}: port ${svc.port} 被非本實例之行程占用(${describePortOwners(svc.port)}), 不下殺`)
+            let r = res ? res.killOwnListeners(svc.port) : killListeners(svc.port)
+            let ok = !!r && r.pids !== null && r.tableOk !== false
+            if (trace) {
+                trace('restart-query', { service: svc.name, port: svc.port, attempt: i + 1, ok })
             }
-            return
+            if (ok) {
+                if (r.skipped && r.skipped.length > 0) {
+                    throw new Error(`restart ${svc.name}: port ${svc.port} 被非本實例之行程占用(${ownersOf(svc.port)}), 不下殺`)
+                }
+                return
+            }
         }
-        let r = killListeners(svc.port)
-        if (r && r.pids === null) {
-            log(`[e2e-setup] 查詢 port ${svc.port} 監聽者之工具不可用, 未殺`)
-        }
+        throw new Error(`restart ${svc.name}: 查不到 port ${svc.port} 之監聽者(查詢失敗, 試了 ${OWNER_TRIES} 次), 未下殺、不續行; 查詢失敗多因系統負載過高, 可重跑`)
     }
 
     async function restart(name, o = {}) {
@@ -252,7 +326,7 @@ function createServiceManager(opt = {}) {
             let released = await waitReleased(svc)
             //自建已殺而 port 仍有回應: 另有同專案實例佔用 (例如手動啟動者); 允許時殺其監聽者, 否則沿前版只記錄並繼續
             if (!released && killForeignOnRestart) {
-                killForeign(svc)
+                await killForeign(svc)
                 await waitReleased(svc)
             }
         }
@@ -260,7 +334,7 @@ function createServiceManager(opt = {}) {
             if (!killForeignOnRestart) {
                 throw new Error(`restart ${name}: port ${svc.port} 被非本行程建立之服務佔用, 且未允許殺外部行程 (killForeignOnRestart=false)`)
             }
-            killForeign(svc)
+            await killForeign(svc)
             await waitReleased(svc)
         }
         st.proc = null
@@ -271,6 +345,7 @@ function createServiceManager(opt = {}) {
         st.proc = svc.spawn(withPort({ args, env: spawnEnv }, svc.port))
         st.spawned = true
         await waitReady(svc)
+        await verifyReady(svc, st)
         noteOwn(st)
     }
 

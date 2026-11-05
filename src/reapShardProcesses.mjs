@@ -1,9 +1,72 @@
 import { spawnSync } from 'child_process'
-import listenerPids from './listenerPids.mjs'
+import listenerPids, { PORT_QUERY_TIMEOUT_MS } from './listenerPids.mjs'
 
 
 let BASIS_IDENTITY = 'identity'
-let PS_TABLE = 'Get-CimInstance Win32_Process | ForEach-Object { if ($_.CreationDate) { \'{0} {1} {2} {3}\' -f $_.ProcessId, $_.ParentProcessId, $_.CreationDate.ToUniversalTime().ToString(\'o\'), $_.Name } }'
+//綁定失敗而查無監聽者: 僅綁定未 listen 之 socket 占著埠但不列入監聽(2026-11-05 實測 EADDRINUSE 而查詢為 0); TIME_WAIT 連線殘留實測不影響綁定(1500 條, 四種位址皆立即可綁), 不是成因
+let MSG_NO_LISTENER = '查無監聽者(可能為僅綁定未監聽之 socket 或保留埠; 連線殘留 TIME_WAIT 實測不影響綁定)'
+//行程表標記: 開頭一行標示資料來源為作業系統 API 或退回之 Get-CimInstance(解析時略過, 供診斷與測試)
+let PS_TABLE_VIA = 'WE2E-PROCTABLE-VIA'
+//Windows 取行程表: 優先 NtQuerySystemInformation(SystemProcessInformation), 一次取得全部行程之 PID、父 PID、起始時間、映像名, 不需逐一開啟行程, 故權限不足之系統行程也有(Toolhelp＋GetProcessTimes 實測缺 40% 之行程, 不採用)。
+//  以 Reflection.Emit 定義 P/Invoke, 不編譯 C#: 免 csc(高負載下編譯比查詢本身慢)、無暫存檔。2026-11-05 實測(約 300 行程): 無負載 331 ms 對舊法 433 ms; CPU 2 倍超載 5.5 秒對舊法 33 秒(編譯 C# 之版本亦 33 秒); 與舊法比對 PID、父 PID、起始時間、映像名全同。
+//  列之位元組配置(SYSTEM_PROCESS_INFORMATION): NextEntryOffset@0, CreateTime@0x20(FILETIME), ImageName@0x38(UNICODE_STRING: Length@0, Buffer 於 x64 為 @0x40、x86 為 @0x3C), UniqueProcessId 於 x64 為 @0x50、x86 為 @0x44, InheritedFromUniqueProcessId 於 x64 為 @0x58、x86 為 @0x48。回 0xC0000004(緩衝不足)即放大重取
+//  自我核對: 本行程之列須存在、映像名與起始時間須與 .NET 取得者相同, 否則視為配置不符, 整體退回(身分判定不得建立在讀錯之欄位上)。受限語言模式或 API 失敗同樣退回 Get-CimInstance(輸出同一格式), 其耗時隨負載增加
+let PS_TABLE = [
+    '$ErrorActionPreference = \'Stop\'',
+    '$ProgressPreference = \'SilentlyContinue\'',
+    '$rows = $null',
+    '$via = \'cim\'',
+    'try {',
+    '    $M = [Runtime.InteropServices.Marshal]',
+    '    $ab = [AppDomain]::CurrentDomain.DefineDynamicAssembly((New-Object Reflection.AssemblyName \'WE2eProcTable\'), \'Run\')',
+    '    $tb = $ab.DefineDynamicModule(\'WE2eProcTable\').DefineType(\'WE2eProcTableNt\', \'Public,Class\')',
+    '    $mi = $tb.DefinePInvokeMethod(\'NtQuerySystemInformation\', \'ntdll.dll\', \'Public,Static,PinvokeImpl\', \'Standard\', [int], [Type[]]@([int], [IntPtr], [int], [int].MakeByRefType()), \'Winapi\', \'Auto\')',
+    //PreserveSig: 回傳值照原樣給呼叫端(否則 0xC0000004 被轉為例外, 走不到放大重取)
+    '    $mi.SetImplementationFlags($mi.GetMethodImplementationFlags() -bor [Reflection.MethodImplAttributes]::PreserveSig)',
+    '    $t = $tb.CreateType()',
+    '    $size = 1048576; $buf = [IntPtr]::Zero; $st = 0; $need = 0',
+    '    for ($i = 0; $i -lt 16; $i++) {',
+    '        $buf = $M::AllocHGlobal($size)',
+    '        $st = $t::NtQuerySystemInformation(5, $buf, $size, [ref]$need)',
+    '        if ($st -ne -1073741820) { break }',
+    '        $M::FreeHGlobal($buf); $buf = [IntPtr]::Zero; $size = [int][Math]::Max($size * 2, $need + 65536)',
+    '    }',
+    '    if ($st -ne 0) { throw "query $st" }',
+    '    $x64 = [IntPtr]::Size -eq 8',
+    '    $oBuf = if ($x64) { 0x40 } else { 0x3C }; $oPid = if ($x64) { 0x50 } else { 0x44 }; $oPpid = if ($x64) { 0x58 } else { 0x48 }',
+    '    $self = [Diagnostics.Process]::GetCurrentProcess()',
+    '    $selfOk = $false',
+    '    $off = [long]0; $base = $buf.ToInt64()',
+    '    $sb = New-Object Text.StringBuilder',
+    '    while ($true) {',
+    '        $p = [IntPtr]($base + $off)',
+    '        $c = $M::ReadInt64($p, 0x20)',
+    '        $id = $M::ReadIntPtr($p, $oPid).ToInt64()',
+    '        if ($c -gt 0) {',
+    '            $len = [int]($M::ReadInt16($p, 0x38) -band 0xFFFF)',
+    '            $np = $M::ReadIntPtr($p, $oBuf)',
+    '            $name = if ($id -eq 0) { \'System Idle Process\' } elseif ($np -eq [IntPtr]::Zero -or $len -eq 0) { \'\' } else { $M::PtrToStringUni($np, [int]($len / 2)) }',
+    '            $at = [DateTime]::FromFileTimeUtc($c)',
+    '            if ($id -eq $self.Id -and $name -eq ($self.ProcessName + \'.exe\') -and $at.ToString(\'yyyyMMddHHmmssfff\') -eq $self.StartTime.ToUniversalTime().ToString(\'yyyyMMddHHmmssfff\')) { $selfOk = $true }',
+    '            $null = $sb.AppendLine((\'{0} {1} {2} {3}\' -f $id, $M::ReadIntPtr($p, $oPpid).ToInt64(), $at.ToString(\'o\'), $name))',
+    '        }',
+    '        $next = $M::ReadInt32($p, 0)',
+    '        if ($next -eq 0) { break }',
+    '        $off += $next',
+    '    }',
+    '    if (-not $selfOk) { throw \'layout\' }',
+    '    $rows = $sb.ToString()',
+    '    $via = \'api\'',
+    '}',
+    'catch {',
+    '    $rows = $null',
+    '}',
+    'if ($via -ne \'api\') {',
+    '    $rows = Get-CimInstance Win32_Process | ForEach-Object { if ($_.CreationDate) { \'{0} {1} {2} {3}\' -f $_.ProcessId, $_.ParentProcessId, $_.CreationDate.ToUniversalTime().ToString(\'o\'), $_.Name } }',
+    '}',
+    `Write-Output ('${PS_TABLE_VIA} ' + $via)`,
+    'Write-Output $rows',
+].join('\n')
 
 
 //預設執行函數(spawnSync形, 同 killPortListeners 之 opt.exec): 不經 shell、隱藏視窗、帶逾時
@@ -46,12 +109,12 @@ function procName(pid, ctx = {}) {
  *
  */
 export function describePortOwners(port, ctx = {}) {
-    let pids = listenerPids(port, { useBoth: true, timeout: 5000, exec: ctx.exec })
+    let pids = listenerPids(port, { useBoth: true, timeout: PORT_QUERY_TIMEOUT_MS, exec: ctx.exec })
     if (pids === null) {
         return '占用者查詢失敗'
     }
     if (pids.length === 0) {
-        return '查無監聽者(可能為保留埠或非監聽之占用)'
+        return MSG_NO_LISTENER
     }
     return pids.map((pid) => {
         let name = procName(pid, ctx)
@@ -69,7 +132,7 @@ function psArgs(script) {
 //取行程表之指令
 export function processTableCommand(platform = process.platform) {
     return platform === 'win32'
-        ? { prog: 'powershell', args: ['-NoProfile', '-NonInteractive', '-Command', PS_TABLE] }
+        ? { prog: 'powershell', args: psArgs(PS_TABLE) }
         : { prog: 'ps', args: ['-A', '-o', 'pid=,ppid=,lstart=,comm='] }
 }
 
@@ -89,7 +152,8 @@ export function parseProcessTable(stdout, platform = process.platform) {
 /**
  * 取行程表：PID、父PID、起始時間與映像名，不取命令列(命令列可能含憑證)
  *
- * Windows之CreationDate同一行程每次相同(2026-11-04實測全部行程5次查詢1256筆比對0差異)，故可作身分比對；其他平台之lstart為秒級
+ * Windows之起始時間同一行程每次相同(2026-11-04實測全部行程5次查詢1256筆比對0差異)，故可作身分比對；其他平台之lstart為秒級
+ * Windows優先以作業系統API(NtQuerySystemInformation)取得，不編譯C#，約300行程時無負載約0.33秒、CPU 2倍超載約5.5秒(Get-CimInstance分別約0.43秒與33秒)；API不可用或自我核對不符時退回Get-CimInstance，欄位與語意相同
  *
  * @param {Object} [opt={}] 輸入設定物件，預設{}
  * @param {Function} [opt.exec] 輸入同步執行子指令函數，格式為(prog, args, { src, timeout, maxBuffer })=>{ status, stdout, error }(與child_process.spawnSync同形)，src為'table'，預設為不經shell、隱藏視窗之spawnSync
@@ -107,7 +171,7 @@ export function parseProcessTable(stdout, platform = process.platform) {
 export function listProcessTable(opt = {}) {
     let { exec, platform = process.platform } = opt
     let run = exec || execDef
-    let o = { src: 'table', timeout: 30000, maxBuffer: 16 * 1024 * 1024 }
+    let o = { src: 'table', timeout: PORT_QUERY_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024 }
     let { prog, args } = processTableCommand(platform)
     let r
     try {
@@ -120,6 +184,52 @@ export function listProcessTable(opt = {}) {
         return null
     }
     return parseProcessTable(r.stdout, platform)
+}
+
+
+/**
+ * 判定埠之監聽者是否全為指定行程或其存活子孫，只查詢、不下殺
+ *
+ * 先查監聽者再取行程表：查得之監聽者若仍存活必在其後之行程表內。Windows允許不同位址同時監聽同一埠，故須每個監聽者都屬本服務才算，其中有他人即為foreign(連線可能落到對方)。
+ * 子孫之判定同walkLiveTree：沿存活父子鏈走，父已結束者之子不算(launcher先結束、真正服務由孫行程接手之寫法無法判定，須改為直接spawn服務)。
+ *
+ * @param {Number} port 輸入埠
+ * @param {Number} [rootPid] 輸入根行程PID(自建之服務行程)，未給或已結束時傳null，此時任何監聽者皆為foreign
+ * @param {Object} [ctx={}] 輸入設定物件，預設{}
+ * @param {Function} [ctx.exec] 輸入同步執行子指令函數(與child_process.spawnSync同形)，預設為不經shell、隱藏視窗之spawnSync
+ * @param {String} [ctx.platform=process.platform] 輸入作業系統字串，預設process.platform
+ * @returns {Object} 回傳物件{result,listeners,foreign,owners}，result為'own'(監聽者全屬本服務)、'foreign'(其中有他人)、'none'(查無監聽者)、'query-failed'(監聽者或行程表查詢失敗，呼叫端不得當成無人或自己人)；owners為說明字串(有他人時只列他人)
+ * @example
+ *
+ * import { judgePortOwner } from 'w-package-tools-e2e/src/reapShardProcesses.mjs'
+ *
+ * console.log(judgePortOwner(8080, child.pid).result)
+ * // => 'own'
+ *
+ */
+export function judgePortOwner(port, rootPid, ctx = {}) {
+    let { exec, platform } = ctx
+    let listeners = listenerPids(port, { useBoth: true, timeout: PORT_QUERY_TIMEOUT_MS, exec, platform })
+    if (listeners === null) {
+        return { result: 'query-failed', listeners: null, foreign: [], owners: '監聽者查詢失敗' }
+    }
+    if (listeners.length === 0) {
+        return { result: 'none', listeners, foreign: [], owners: MSG_NO_LISTENER }
+    }
+    let table = listProcessTable({ exec, platform })
+    if (table === null) {
+        return { result: 'query-failed', listeners, foreign: [], owners: `PID ${listeners.join(', ')}(行程表查詢失敗, 身分未知)` }
+    }
+    let byPid = new Map(table.map((p) => [p.pid, p]))
+    let root = Number.isInteger(rootPid) ? byPid.get(rootPid) : null
+    let own = new Set(root ? walkLiveTree(table, [{ row: root, basis: BASIS_IDENTITY }]).map((v) => v.row.pid) : [])
+    let foreign = listeners.filter((pid) => !own.has(Number(pid)))
+    //他人在場時只列他人: 訊息要回答「是誰占用」
+    let owners = (foreign.length > 0 ? foreign : listeners).map((pid) => {
+        let row = byPid.get(Number(pid))
+        return `PID ${pid} ${row ? (row.image || '(映像名未知)') : '(已不在行程表)'}`
+    }).join(', ')
+    return { result: foreign.length > 0 ? 'foreign' : 'own', listeners, foreign, owners }
 }
 
 

@@ -118,7 +118,8 @@
 - **關聯**: `src/createBaselineCollector.mjs`、`src/assertBaselineMatch.mjs`(`opt.collect`)、`src/runBaselineCase.mjs`(`collect`／`keepSame`／`transient`／`compareBuf`)、`src/getE2eMode.mjs`(互斥閘門)、`src/writeBaselineIfChanged.mjs`、`src/resolveE2ePort.mjs`、`src/createServiceManager.mjs`、`src/reviewPendingShots.mjs`、`src/acceptPendingShots.mjs`、`tools/reviewPending.mjs`; `README.md` §2.8～§2.10; 帳本 `sgud/rule/rulebook_baselineRun.md`; 測試 `test/unit-{baselineCollect,keepSame,portOffset,reviewPending}.test.mjs`.
 - **判斷**: 三項皆預設關閉, 預設路徑須與 1.0.10 逐位元一致(改這些檔前後皆以差分腳本證明); 彙整錯誤首行為使用端判讀程式之解析對象, 改格式屬破壞性變更; `tools/reviewPending.mjs` 是本套件唯一會寫標準圖之 CLI(只在 `--accept` 明列標籤時).
 - **處理**:
-  - 改 `assertBaselineMatch`／`runBaselineCase`／`createServiceManager` 之預設路徑: 以 `git archive HEAD` 解出前版 src 至 `./tmp/`, 與現行模組同一組輸入差分(回傳、錯誤訊息、日誌、寫檔、證據檔名與位元組、參數與回傳物件之可列舉鍵、`runBaselineCase` 回傳 Promise 自呼叫至 settle 之微工作數; 凍結 `Date`), 須全同; 新增屬性一律不可列舉(例: spawn 參數之 `port`、管理器之 `portOf`).
+  - 改 `assertBaselineMatch`／`runBaselineCase`／`createServiceManager` 之預設路徑: 以 `git archive HEAD` 解出前版 src 至 `./tmp/`, 與現行模組同一組輸入差分(回傳、錯誤訊息、日誌、寫檔、證據檔名與位元組、參數與回傳物件之可列舉鍵、`runBaselineCase` 回傳 Promise 自呼叫至 settle 之微工作數; 凍結 `Date`), 須全同; 新增屬性一律不可列舉(例: spawn 參數之 `port`、管理器之 `portOf`). 2026-11-05 pe312 起 `createServiceManager` 自建之服務多一步就緒核對(主控定不做舊版相容), 此差分只適用其餘路徑; 差分時以 `opt.verifyOwner` 略過核對.
+  - 改 `createServiceManager` 之就緒核對、`judgePortOwner`、`PS_TABLE`: 真實行程測試一定要跑(`api-serviceOwner`、`api-procTable`; 注入測試抓不到位移與 P/Invoke 之錯誤), 並以使用端實跑(`shell:true` 之前端、多開)確認無假陽性; 負載下之行為以 `--lock-exclusive` 連跑.
   - 採用無案例清單之證據須明示 `legacy:true`(API 限定, CLI 不提供); 測試之證據與案例清單一律導至 `test/_tmp`(全為比對錯誤之案例清單落 `pendingDir`, 未給即專案根 `./testPending`).
   - 改收集或採用之判定: 跑上列四檔並做變異驗證(每個變異於 `./tmp/` 全新副本套用); 新增分支須有對應變異被殺死.
   - `tools/reviewPending.mjs`: 未給 `--accept` 不得寫任何標準圖(`[R06]` 守門); 採用一律先全部驗證再複製; 使用端操作時一律給 `--since <本趟開始時間>`, 先 `--dry-run`.

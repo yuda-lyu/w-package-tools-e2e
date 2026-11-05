@@ -43,6 +43,8 @@ function mkSm(fe, env, over = {}) {
         portReleasePollMs: 1,
         killTree: fe.killTree,
         killListeners: fe.killListeners,
+        //假 child 沒有真實行程; 就緒核對另見 unit-serviceOwner、api-serviceOwner
+        verifyOwner: async () => {},
         log: () => {},
         ...over,
     })
@@ -185,6 +187,7 @@ describe('埠位移(E2E_PORT_OFFSET)', function() {
             env: {},
             probe: fe.probe,
             pollMs: 1,
+            verifyOwner: async () => {},
             log: () => {},
         })
         await sm.startServersOnce()

@@ -5,6 +5,7 @@ import assert from 'assert'
 import { spawn, spawnSync } from 'child_process'
 import { fileURLToPath } from 'url'
 import pidExists from '../src/pidExists.mjs'
+import { spawnOccupant as spawnOccupantOf, assertOccupantIntact, stopChild } from './tools/portOccupant.mjs'
 
 
 //自動換埠之實機測試(規格 C:/opensrcOper/dspec/e2e埠與多套件同跑.md §3): 真實監聽行程, 占用者由測試自建並回驗毫髮無傷。
@@ -14,7 +15,6 @@ import pidExists from '../src/pidExists.mjs'
 
 let fdPkg = path.resolve(fileURLToPath(new URL('..', import.meta.url)))
 let fpRun = path.join(fdPkg, 'test', 'tools', 'portFixtureRun.mjs')
-let fpSrv = path.join(fdPkg, 'test', 'tools', 'portFixtureSrv.mjs')
 let fdRoot = path.resolve('test/_tmp/apiReserveE2ePorts')
 let BACK = 19620
 let FRONT = 19630
@@ -78,43 +78,7 @@ async function until(fn, label, ms = 90000) {
 
 
 //占用者: 自建之獨立行程, 真實監聽
-async function spawnOccupant(port, host = '127.0.0.1') {
-    let child = spawn(process.execPath, [fpSrv, 'occupant', String(port), host], { stdio: 'ignore', windowsHide: true })
-    spawned.push(child)
-    let url = `http://${host.includes(':') ? `[${host === '::' ? '::1' : host}]` : (host === '0.0.0.0' ? '127.0.0.1' : host)}:${port}/`
-    await until(() => child.exitCode === null, '占用者存活')
-    let t0 = Date.now()
-    while (Date.now() - t0 < 30000) {
-        try {
-            let j = await (await fetch(url)).json()
-            if (j.pid === child.pid) {
-                return { child, port, url }
-            }
-        }
-        catch (err) {}
-        if (child.exitCode !== null) {
-            throw new Error(`占用者無法綁定 ${host}:${port}`)
-        }
-        await new Promise((resolve) => setTimeout(resolve, 50))
-    }
-    throw new Error('占用者未就緒')
-}
-
-
-//占用者毫髮無傷: 同一 PID 仍存活且仍在該埠回應
-async function assertOccupantIntact(o) {
-    assert.strict.equal(o.child.exitCode, null, '占用者不得結束')
-    assert.strict.equal(pidExists(o.child.pid), true)
-    let j = await (await fetch(o.url)).json()
-    assert.strict.deepEqual([j.role, j.pid, j.port], ['occupant', o.child.pid, o.port])
-}
-
-
-function stopChild(child) {
-    if (child && child.pid && child.exitCode === null && child.signalCode === null) {
-        spawnSync('taskkill', ['/F', '/T', '/PID', String(child.pid)], { stdio: 'ignore', windowsHide: true })
-    }
-}
+let spawnOccupant = (port, host = '127.0.0.1') => spawnOccupantOf(port, host, spawned)
 
 
 //只殺本測試自建之服務(紀錄內之 PID)
