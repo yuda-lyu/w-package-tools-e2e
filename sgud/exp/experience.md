@@ -209,5 +209,5 @@
 
 - 2026-09-27～28: 四專案 e2e 共用層各一份(sso 848 行、perm 1081、api 711、task 522＋harness 736), 同一契約之四個變體已漂移(啟動旗標、strict、紅框畫法、cleanup 同步性、篩選語意、產製端斷言各異), 抽提至 w-web-sso 之 `srcPack/`; 經三方審查定案, 四專案經各自橋接實跑全綠(srcPack 167/167、sso 276/276、perm 162/162、api 71/71、task 26/26), `./testPending/` 零新增.
 - 2026-09-29: 移入本套件——`src/` 51 模組(48 檔逐位元相同, 3 檔只改註解或同值字面)、`tools/` 2、`test/` 13(刪轉接檔 1 案); 移入後 `npm test` 184 passing, 使用端(tarball)驗收 14/14.同日三份設計文件抽提至本檔後刪除.
-- 2026-10-20: 依 Gitea issue #4／#5(cgsmdb 提出)增已知缺陷之部分截圖(`createKnownDefect` 之 `shots`、`runBaselineCase` 之 `defectStages`)與 gate 之 `noteKnownDefect`／`finalize` 摘要(細節見上與 `sgud/rule/rulebook.md`).
+- 2026-10-20: 依 Gitea issue #4／#5(使用端提出)增已知缺陷之部分截圖(`createKnownDefect` 之 `shots`、`runBaselineCase` 之 `defectStages`)與 gate 之 `noteKnownDefect`／`finalize` 摘要(細節見上與 `sgud/rule/rulebook.md`).
 - 2026-09-30: 依使用端建議文件(`建議w-package-tools-e2e調整.md`)增 `probeStuckTooltip`、`gridContentBox` 之 `noRowsPad`、`runBaselineCase` 之 `[write]` 日誌、`runIsolatedE2e` 之 `targets`／node 直接執行／`mochaBin`; 另補 `mochaBin` 路徑解析與拋錯、npx 退路之參數守門.`npm test` 201 passing、lint 0; `probeStuckTooltip` 真元件驗收 6/6; `runIsolatedE2e` 以相對 projRoot 與含 `|` 之 grep 實跑(命中 2 案 exit 0; 對不到任何案例時經 `--fail-zero` 判失敗).

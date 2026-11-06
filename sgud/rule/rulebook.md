@@ -124,7 +124,7 @@
 - gate 的缺陷紀錄僅 `mode:'regen'` 由 `runBaselineCase` 通知;compare 端不傳 gate(gate 為產製端用).
 - `defectStages` 必與 `stages` 併用;未宣告 `stages` 之案例不支援缺陷步豁免(整案缺陷不受影響).
 - `semantic`/`verify` 自身拋未帶 shots 之 knownDefect 維持整案(不使用 `ctx.shots`).
-- 提出方(cgsmdb)自寫包裝 `runCase` 未核對(審計時無法讀取);其遷移須改用套件並刪除包裝,掛鉤須以 `ctx.knownDefect` 分流.
+- 提出方(使用端)自寫包裝 `runCase` 未核對(審計時無法讀取);其遷移須改用套件並刪除包裝,掛鉤須以 `ctx.knownDefect` 分流.
 - `itemsUnionBox` 圖形內容之已知限制 L1–L12 見 §7.4(框線四角 6×6、shadow DOM、`<use>`/`<image>`/marker、mask/filter、漸層透明段、巢狀 svg 視埠、pointer-events:none 之遮蓋、含旋轉翻轉變換之 canvas、WebGL/跨域/img/video、均勻大色塊、absolute 浮層、iframe).
 
 ## 4b. 對標(同類工具對「部分失敗保留已通過步驟」之慣例)
@@ -151,7 +151,7 @@
 - 使用端視角:`npm pack` 後安裝至 `./tmp` 假專案深層引用實跑(見 `sgud/proc/process.md`「改動 src/ 之驗證範圍」).
 ## 7. itemsUnionBox 圖形內容(Gitea issue #6;2026-10-20 審計 run01、修正 run02)
 
-編列依據:issue #6(cgsmdb:浮層疊在 Highcharts svg 圖表上,框線蓋到資料波形)之審計(`agent-out/run01-審計回應.md`、主控複審 `review/run01-複審.md`)與修正.API 細節見 `README.md` §1.1 `itemsUnionBox` 列與 JSDoc;取捨緣由見 `sgud/exp/experience.md`「注意事項: 紅框」.
+編列依據:issue #6(使用端:浮層疊在 Highcharts svg 圖表上,框線蓋到資料波形)之審計(`agent-out/run01-審計回應.md`、主控複審 `review/run01-複審.md`)與修正.API 細節見 `README.md` §1.1 `itemsUnionBox` 列與 JSDoc;取捨緣由見 `sgud/exp/experience.md`「注意事項: 紅框」.
 
 ### 7.1 軸與縮減
 

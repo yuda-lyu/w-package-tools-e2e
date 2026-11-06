@@ -22,7 +22,7 @@
 | itemsUnionBox 圖形內容(issue #6) | 完成 | `rulebook.md` §7 | `e2e-itemsUnionBoxGraphics` | 限制 L1～L12(README §2.7) |
 | 產製與比對管線(runBaselineCase、createBaselineGate、孤兒檢查) | 完成 | `rulebook.md` §1～§6 | `unit-runBaselineCase`、`unit-baselineGate` | — |
 | 已知缺陷分流(整案／部分;issue #4、#5) | 完成 | `rulebook.md` 表 A、表 B | 同上 `[A..]`／`[B..]` | 限制 B15、B21、B22 |
-| 收集模式(issue #19-1;`E2E_COLLECT`、createBaselineCollector) | 完成,未發布 | `rulebook_baselineRun.md` §8 | `unit-baselineCollect` `[C..]` | 使用端(rddmanager)之報告判讀程式須依新格式調整(提出方自理) |
+| 收集模式(issue #19-1;`E2E_COLLECT`、createBaselineCollector) | 完成,未發布 | `rulebook_baselineRun.md` §8 | `unit-baselineCollect` `[C..]` | 使用端之報告判讀程式須依新格式調整(提出方自理) |
 | 審查與採用(issue #19-1-3;reviewPendingShots、acceptPendingShots、`tools/reviewPending.mjs`) | 完成,未發布 | 同上 | `unit-reviewPending` `[R..]` | 限制見 §8.6(since 同毫秒、孤立 diff 改寫、legacy 須明示) |
 | 有變更才改寫(issue #19-2;`E2E_BASELINE_KEEP_SAME`／`KEEP_MAXDIFF`、writeBaselineIfChanged、compareBuf、transient) | 完成,未發布 | 同上 | `unit-keepSame` `[K..]` | 使用端須把自訂 `match` 內之覆蓋移到 `compareBuf` 才能「同一覆蓋」 |
 | 埠位移(issue #19-3;`E2E_PORT_OFFSET`、resolveE2ePort、createServiceManager) | 完成,未發布 | 同上 | `unit-portOffset` `[P..]` | 使用端 setup 須改由 spawn 收到之 `port` 啟動服務、baseUrl 經 `resolveE2ePort` |

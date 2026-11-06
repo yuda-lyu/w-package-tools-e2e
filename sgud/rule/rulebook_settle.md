@@ -1,6 +1,6 @@
 # 規則帳本: settle 掛鉤之元件辨識(`waitDrawerReady`)
 
-本檔為規則帳本分檔(索引見 `rulebook.md`),記 `src/waitDrawerReady.mjs` 如何從頁面中認出 WDrawer,以及對應測試.編列依據: Gitea #35(cgsmdb 提出:`waitDrawerReady` 之裸 `[state]` 會比對到 w-component-vue 2.5.35 新增 `state` 屬性之元件;2026-11-01 修正,報告 `C:\opensrcOper\dnow\20261031234910\agent-out\pte35-修正報告.md`).
+本檔為規則帳本分檔(索引見 `rulebook.md`),記 `src/waitDrawerReady.mjs` 如何從頁面中認出 WDrawer,以及對應測試.編列依據: Gitea #35(使用端提出:`waitDrawerReady` 之裸 `[state]` 會比對到 w-component-vue 2.5.35 新增 `state` 屬性之元件;2026-11-01 修正,報告 `C:\opensrcOper\dnow\20261031234910\agent-out\pte35-修正報告.md`).
 
 ## 1. 帶 `state` 屬性之元件全表(w-component-vue 2.5.35)
 
@@ -22,7 +22,7 @@
 - **R1 只認 WDrawer 根節點**: 預設選擇器 `[state][changedrawerwidth]`.依據: 上表只有 WDrawer 之根節點帶 `changedrawerwidth`(`WDrawer.vue:5` 之 `:changeDrawerWidth`,`git log -S` 為 2022-04-28 起;`changeafloat` 為 2023-09-07 起,`state` 為 2026-06-18 起).WDrawer 根節點無固定 class,故無類別名可用.
 - **R2 頁面無 WDrawer 立即放行**;**逾時(預設 10000ms)不拋錯**;簽名不變(新增 `opt.selector`).
 - **R3 值域篩選維持**: 命中元素之 `state` 須為 `hidden|opening|opened|hiding` 才計入;全部為 `opened`/`hidden` 才放行(多個抽屜全部落定).
-- **R4 `opt.selector` 取代預設而非疊加**: 理由—①預設選擇器依元件內部屬性,失效時靜默放行,使用端須能立即改傳而不等套件升版;②使用端可能有非 w-component-vue 之自家元件以 `state` 表示過場(傳 `'[state]'` 即還原舊行為);③提出方(cgsmdb)建議二選一之一即呼叫端傳入選擇器.
+- **R4 `opt.selector` 取代預設而非疊加**: 理由—①預設選擇器依元件內部屬性,失效時靜默放行,使用端須能立即改傳而不等套件升版;②使用端可能有非 w-component-vue 之自家元件以 `state` 表示過場(傳 `'[state]'` 即還原舊行為);③提出方(使用端)建議二選一之一即呼叫端傳入選擇器.
 - **R4b `opt` 之非預期輸入一律視為未給、改用預設,不拋錯**(dspec〈輸入參數之檢測機制〉K3、V4、V5、V11;pte35b 2026-11-01 由「拋錯」改):①`selector` 非字串、空白字串、無法被瀏覽器解析 → 預設選擇器(解析以頁內 `document.querySelector` 試一次,頁面不可用時視為可解析);②`timeout` 須為大於 0 且不超過 2147483647 之有效數字(wsemi `isenum(v, { gt: 0, max: 2147483647 })`,數字或數字字串,轉換後才使用〔K4〕),否則 10000——0 不收(Playwright 的 0 是永不逾時,會永遠等);③`opt` 為 `undefined`、`null` 或非一般物件(陣列、類別實例、Date、數字、字串、函數)→ 整份視為 `{}`(此時讀不到 `debug`,不警告);④各鍵 `undefined`／`null` 視為未給;每鍵只讀一次,存取器拋錯視為該鍵無效;未宣告之鍵忽略;不改寫呼叫端之 opt.
 - **R4c `opt.debug`**(布林,非布林視為 false):為 true 時另輸出警告——固定詞彙、只含函數名／鍵名／種類描述／所採預設、**不含傳入之值**,鍵名僅短識別字才帶入;出口為 `opt.funLog`(函數,以 `(msg, { fn, reason, key })` 呼叫,出口拋錯忽略),未給則 `console.warn`;同鍵同因每個行程只警告一次(去重表上限 256);格式例 `[w-package-tools-e2e waitDrawerReady] invalid opt.timeout: must be a positive number up to 2147483647, using default 10000`.`reason` 為 `selector`(非字串／空白)、`selector-syntax`(無法解析)、`timeout`、`read`(存取器拋錯)、`unknown`(未宣告之鍵).本函數自帶最小實作(`parseOpt`／`emit`),因 wsemi 之 opt 解析模組(`_numOpt.mjs`)為內部檔不由入口匯出;待 wsemi 提供公開之 opt 解析函數後收編.
 - **R4d 必須參數不在本規則內**: `page` 未給或非 Page 仍由 Playwright 拋 TypeError(未改,屬 K2 之範圍外).

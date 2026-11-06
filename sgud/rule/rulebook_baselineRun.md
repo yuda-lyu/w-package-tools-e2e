@@ -1,6 +1,6 @@
 # 規則帳本:全量執行之共用層支援(收集模式、有變更才改寫、埠位移;§8)
 
-編列依據:Gitea issue #19(提出方 rddmanager,2026-10-28)之修正 pte2e-run01.API 細節見 `README.md` §2.8～§2.10 與各檔 JSDoc;取捨緣由見 `sgud/exp/experience.md`「注意事項: 產製與比對」「生命週期與行程」之 issue #19 各條.
+編列依據:Gitea issue #19(提出方使用端,2026-10-28)之修正 pte2e-run01.API 細節見 `README.md` §2.8～§2.10 與各檔 JSDoc;取捨緣由見 `sgud/exp/experience.md`「注意事項: 產製與比對」「生命週期與行程」之 issue #19 各條.
 
 ## 8.1 軸
 

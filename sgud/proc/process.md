@@ -145,7 +145,7 @@
   - 不變式不得破: ①舊規則(`legacyContentAt`)逐字不改、其回非 null 之點結果不變(只增不減); ②`graphics:false` 與改動前逐位元相同; ③無圖形頁面 `elementsFromPoint` 次數不因圖形規則增加(命中堆疊只在幾何上確有圖形時才取); ④圖形只在框線帶(矩形邊外 1 至 `BOX_PAD`,另含緊鄰矩形邊之守距列/行)內介入, 框矩形內(含 inkPad 區)不介入; ⑤對 canvas 來源不呼叫 `getContext`; ⑥小 svg/canvas(寬、高皆 ≤ 480×120)不由圖形規則判定。
   - 驗證: `npm test` 與 `npx eslint --ext .mjs src tools test`; 隨機差分 `node ./tmp/verify/differential.mjs <頁數> <種子> plain|graphics`(固定種子; plain = HTML 文字/晶片/大色塊/小 svg 圖示/小 canvas/遮罩/攔截層, `graphics:true` 對 `false` 及對上一版量框逐位元相同且舊規則確有介入(非空轉); graphics = 另加隨機大 svg/canvas 圖表, `graphics:false` 對 1.0.9 逐位元相同, `graphics:true` 之量框須為 `false` 之子集); 真圖表庫掃描(Highcharts 11、Plotly 2、ECharts 5,以 `npm --prefix ./tmp/libs install` 裝於暫存區,不入套件)之框線帶蓋墨跡數須為 0; 變異驗證(逐一拿掉可見性、底色、裁切、遮蓋、取樣足跡/間距、帶界、canvas 背景與變換防護、退入規則等,測試須轉紅;重複防線之等價變異體須逐一說明)。
   - 探測一律用 `tmp/libs` 之真庫與 `launchBrowser`; `inkUnderFrame`(框線帶內、浮層矩形外之指定色像素數)為「是否蓋到」之量度,不以元素矩形推論。
-  - 使用端視角: 發版前以 `E2E_BASELINE_OUT_DIR` + `compareImageDirs` 量使用端(perm stainfor、cgsmdb 等)受影響之圖,逐張審後才重產。
+  - 使用端視角: 發版前以 `E2E_BASELINE_OUT_DIR` + `compareImageDirs` 量使用端(perm stainfor、使用端等)受影響之圖,逐張審後才重產。
 
 ## 升級 w-component-vue 或 Playwright 時之複驗
 
