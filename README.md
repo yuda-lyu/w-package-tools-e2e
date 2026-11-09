@@ -65,7 +65,8 @@ let browser2 = await wpte.launchBrowser()
 | `stepShots(page, opt)` | 「每步兩張」單步：框操作目標 → 操作 → 等反應 → 框反應；`before:null` 表示由前一步之後圖兼任（SKILL §7.3-1），`before` 省略即拋錯 | 單元（2026-09-28 新增，泛化自 perm `*WithShots` 與 sso `capturePermsChangeSave`） |
 | `maskRegions` / `overlayRegions` | 截圖後填黑 / 以參考圖同座標貼回 | sso 實跑、單元 |
 | `overlayImageAt` / `cropRegion` | 以裁切參考圖貼回（w-web-api 之作法） | 單元（sso 無呼叫端） |
-| `assertBaselineMatch(buf, path, label, opt)` | pixelmatch `includeAA:false`、threshold 0.1、maxDiffPixels 100；尺寸不同即敗；testPending 三聯組永不覆蓋（C9）；**只比對不寫檔**（原 `regen` 寫檔旁路 2026-09-28 移除，傳入即拋錯）；通過但計數超過上限 `headroomRatio`（預設 0.5）時印 `[baseline-headroom]` 告警；**收集模式**（`opt.collect`，預設關閉，§2.8）：案例範圍內之收集器啟用時不符照存證據但不拋錯、記錄並回傳該筆，缺標準圖亦收集（capture 為候選標準圖） | sso 實跑、單元 |
+| `pixelmatchOpt` | 比對端 pixelmatch 之判定選項（凍結物件 `{ threshold: 0.1, includeAA: false, checkerboard: true }`），本套件所有以 pixelmatch 計差異像素之處（`assertBaselineMatch`、`runBaselineCase`、`createBaselineGate` changed 模式、`writeBaselineIfChanged`、`compareImageDirs`、`reviewPendingShots`）之唯一預設來源，一律展開之；2026-11-09 起色差度量為 pixelmatch 8（OKLab HyAB），參數與理由見 §5〈pixelmatch 8 之比對度量〉 | 單元（`unit-compareMetric`） |
+| `assertBaselineMatch(buf, path, label, opt)` | pixelmatch 8（OKLab HyAB；選項取自 `pixelmatchOpt`：`includeAA:false`、`checkerboard:true`、threshold 0.1）、maxDiffPixels 100；尺寸不同即敗；testPending 三聯組永不覆蓋（C9）；**只比對不寫檔**（原 `regen` 寫檔旁路 2026-09-28 移除，傳入即拋錯）；通過但計數超過上限 `headroomRatio`（預設 0.5）時印 `[baseline-headroom]` 告警；**收集模式**（`opt.collect`，預設關閉，§2.8）：案例範圍內之收集器啟用時不符照存證據但不拋錯、記錄並回傳該筆，缺標準圖亦收集（capture 為候選標準圖） | sso 實跑、單元 |
 | `typeIntoInput` / `typeIntoNthInput` | Pattern D 真人輸入（C10） | sso 實跑、瀏覽器 |
 | `waitUntilExist(page, label, fn, opt)` | 偵測驅動等待（C11），預設 10000ms；`fn` 為 async 函數時改逐次 `page.evaluate` 輪詢（`waitForFunction` 會把 Promise 當 truthy 立即放行） | sso 實跑、瀏覽器 |
 | `pollUntil(label, fn, { timeout, interval })` | 測試行程端之偵測驅動等待：反覆執行 `fn`（可 async、可用閉包；拋錯視為未成立）直到回 truthy，回傳該值；逾時拋錯含判斷次數與最後一次錯誤。用於瀏覽器外之非同步結果——後端週期計時器寫入資料庫（封鎖、補登記）、背景程序產檔——取代「固定等 N 秒再讀」（計時器於負載高時延遲）；頁面內條件仍用 `waitUntilExist`。預設 30000／200ms | 單元（2026-09-28 自 w-web-sso autoblock 抽出） |
@@ -116,7 +117,7 @@ let browser2 = await wpte.launchBrowser()
 | 檔 | 用途 | 狀態 |
 |---|---|---|
 | `snapshotBaselines(dir)` / `diffBaselineSnapshots(a, b)` | 標準圖 sha256＋mtime 快照與比對；「內容相同但被重寫」亦列出 | sso 實跑、單元 |
-| `compareImageDirs(dirA, dirB, opt)` | 兩目錄同名 PNG 逐檔比對：位元組相同 ⊂ RGBA 相同 ⊂ 容差內；另報 `rgbaDiff`／`rgbaDiffBox`，`equivalent`＝RGBA 相同或相異像素全在 `opt.drift` 登錄漂移點內（**不以 pixelmatch 計數 0 為等價**：threshold 0.1 下均勻 ≤26 級之亮度差不計） | sso 實跑、單元 |
+| `compareImageDirs(dirA, dirB, opt)` | 兩目錄同名 PNG 逐檔比對：位元組相同 ⊂ RGBA 相同 ⊂ 容差內；另報 `rgbaDiff`／`rgbaDiffBox`，`equivalent`＝RGBA 相同或相異像素全在 `opt.drift` 登錄漂移點內（**不以 pixelmatch 計數 0 為等價**：threshold 0.1 下均勻約 23～29 級〔隨明度，近黑較敏感、近白較寬〕以內之亮度差不計） | sso 實跑、單元 |
 | `reviewPendingShots(opt)` / `acceptPendingShots(opt)` | 收集模式單趟執行後之審查與採用（§2.8）：前者讀 `./testPending` 各標籤最新一組證據，分類 SAME／NOISE／CHANGED（附差異外框、可產並排裁圖）／SIZE／MISSING 並帶出所屬案例與結果，只讀；後者只把 `labels` 明列者之 capture 複製為正式標準圖，先全部驗證（無證據、所屬案例另因錯誤失敗、證據過期、無標準圖路徑皆拒收）才複製 | 單元（2026-10-28 新增，Gitea issue #19） |
 | `tools/shardE2e.mjs`（CLI） | `node node_modules/w-package-tools-e2e/tools/shardE2e.mjs [--plan] [--ports <埠,...>] [--instances <N>] …`：`runShardedE2e` 之命令列（§2.11）；離開碼 0 全部通過、1 有失敗／未跑完／收尾失敗／開跑前之問題、2 參數錯誤、128＋訊號值 收到終止訊號 | 真實小專案整合（spawn 實跑） |
 | `tools/reviewPending.mjs`（CLI） | `node node_modules/w-package-tools-e2e/tools/reviewPending.mjs [--pending <dir>] [--since <時間>] [--max-diff <N>] [--crops <dir>] [--json <out>] [--accept <標籤,...>] [--root <dir>] [--dry-run]`：未給 `--accept` 只審查、不改寫任何標準圖（裁圖排他建立、不覆蓋）；`--accept` 任一標籤不合格即全部不採用並以離開碼 1 結束；參數錯誤離開碼 2 | 單元（spawnSync 實跑） |
@@ -541,6 +542,17 @@ let captureStableWithBox = (page, target, opts = {}) => pkgCaptureStableWithBox(
 6. 結束後 `diffBaselineSnapshots` 須 unchanged（added / removed / changed / touched 皆空）且 `git status --porcelain -- test/pics` 為空。
 
 ## 5. 改版須知：哪些變更會動到使用端之標準圖
+
+### 行為變更（2026-11-09，pixelmatch 8 之比對度量；使用端既有標準圖之比對結果可能改變）
+
+**會動到比對結果**（不動標準圖像素本身）。本套件之比對依賴由 `pixelmatch ^7.2.0` 升為 `^8.0.0`；介面（函數名、參數、回傳）不變，新增 `pixelmatchOpt` 匯出。
+
+- **度量改變，無選項可還原**：7.x 以 YIQ 平方距離判定（`> 35215·threshold²`，灰階〔三通道同差〕恆約差 27 級即判為差異）；8 起以 OKLab 之 toe 校正明度 Lr 與色度 a、b 計 HyAB 距離（`|ΔLr| + √(Δa²+Δb²)`），距離大於 `threshold` 即判為差異。同一 `threshold: 0.1` 下，不透明灰階之臨界為 23～29 級（近黑較敏感：黑對 24 級灰判為差異；近白較寬：白對 227 判為相同）；色度差亦不同（`#ff0000` 對 `#ff2020` 7.x 判為差異、8 判為相同）。灰階全表（65536 對）8@0.1 與 7.2.0@0.1 判定一致 98.96%。反鋸齒偵測之邏輯於不透明圖兩版相同。
+- **半透明像素**：`checkerboard`（半透明像素混色之背景）7.2.0 即有且預設 true，但圖樣不同（7.2.0 以位元組偏移取模，紅通道背景恆為 48；8 以像素索引之雜湊），兩版對半透明像素之判定僅約 83～88% 一致；`checkerboard:false`（疊白底）不是 7.2.0 之預設，亦不能還原。
+- **所選參數**（集中於 `src/pixelmatchOpt.mjs`，各比對處一律展開，下游自行呼叫 pixelmatch 者沿用同值）：`threshold: 0.1`、`includeAA: false`、`checkerboard: true`。維持 0.1 之理由（量測：330 張真實標準圖之取樣 110 張＋17 種擾動；真實 Chromium 跨版本渲染差異對；灰階全表）：①雜訊類擾動（亮度 ±8／±16、單點雜訊 ±12／±20、模糊 σ0.5）皆通過，與 7.x 相同，0.08 以下即開始誤報；②真實跨版本渲染差異對之計數與 7.2.0 相同或相近（比值 0.77～1.18）；③文字、色塊、邊框、陰影、1px 平移、亮度 ±40 之真實改變皆被抓到，與 7.x 相同，0.16 以上開始漏掉亮度 ±40；④灰階判定與 7.2.0@0.1 之一致率於 0.1 最高。不放大 `threshold` 或 `maxDiffPixels` 以吸收差異。
+- **8 比 7.x 更敏感之處**（屬度量本身，非參數所致）：近黑區之 16～31 級明度差（整張亮度 +24 時深色區被計入，7.x 為 0）、飽和色之 16～31 級色偏（2000 個單點各自隨機色偏 ±28 時，7.x 平均計 1.0 像素、8@0.1 平均計 91.3 像素）。**已知限制**：疊在有色塊上之半透明遮罩 alpha 改變（.3→.45）7.2.0 與 8@true 皆偵測不到，僅 `checkerboard:false` 可；低對比之主色微調（#1976d2→#1e88e5 等，每通道差 ≤ 約 19 級）兩版皆偵測不到。
+- **使用端既有標準圖之處置**：升版後比對失敗者，不得以放寬 `maxDiffPixels`／`threshold`、整批重產吸收。逐張判定「是否只因度量而失敗」：以 7.2.0 與 8.0.0 對**同一對**（標準圖、當次截圖）各算一次差異像素數（`npm i --no-save pixelmatch7@npm:pixelmatch@7.2.0` 暫裝舊版對照、不寫入 package.json，兩者以同一組選項 `{ threshold: 0.1, includeAA: false }` 呼叫，8 另加 `checkerboard: true`）；7.2.0 之計數 ≤ `maxDiffPixels` 而 8 之計數 > `maxDiffPixels`，且差異圖（`testPending` 三聯組之 `diff`）顯示差異落在近黑區明度、飽和色色偏、半透明邊緣等 8 較敏感之處、**目視確認畫面內容確實未改變**者，才屬「只因度量而失敗」，只重產這些張（定點重產，逐張列入回報）；兩版計數皆 > 容差者依一般流程查成因（真實改變、不穩定、不可固定之值）；兩版皆通過者無須處理。全量執行之使用端以收集模式（`E2E_COLLECT=1`）取得全部不符證據後依上述逐張判定，再 `reviewPending.mjs --accept` 採用。
+- **守門**：`unit-compareMetric` 固定 8 之判定與所選參數——回到 7.x 之判定、改 `threshold` 預設、拿掉 `checkerboard`、改 `includeAA`、或任一 `pixelmatch(` 呼叫不展開 `pixelmatchOpt` 皆會失敗（變異驗證 8 個變異體全數擊殺）。
 
 ### 行為變更（2026-11-05，試綁定增第 5 種；殺殘留後偵測失敗不當成可用）
 

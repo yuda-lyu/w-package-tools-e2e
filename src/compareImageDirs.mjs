@@ -2,6 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import pixelmatch from 'pixelmatch'
 import { PNG } from 'pngjs'
+import pixelmatchOpt from './pixelmatchOpt.mjs'
 
 
 /**
@@ -10,7 +11,7 @@ import { PNG } from 'pngjs'
  * 用途：行為等價證明——把新管線之產製輸出導到暫存目錄(dirA)，與現行標準圖目錄(dirB)逐檔比對，不動標準圖本身。
  * 判準分層：bytesEqual(檔案位元組相同，受PNG編碼器與版本影響) ⊂ rgbaEqual(像素完全相同) ⊂ withinTolerance(pixelmatch差異數≤maxDiffPixels)。
  * 等價層(2026-09-28)：equivalent＝rgbaEqual，或RGBA相異之像素全數落在opt.drift登錄之漂移點(座標＋各通道差上限)內——
- * 不以「pixelmatch計數0」為等價：threshold 0.1時整片均勻亮度差在約26級以內之像素一律不計，會掩蓋肉眼可見之全域變化。
+ * 不以「pixelmatch計數0」為等價：threshold 0.1時整片均勻亮度差在約23～29級(隨明度)以內之像素一律不計，會掩蓋肉眼可見之全域變化。
  * 各檔另報rgbaDiff(RGBA相異像素數)與rgbaDiffBox(其外接框)，供歸因。
  * 以dirA之檔案為準逐一比對；只存在於dirB者列於onlyInB(部分產製時屬正常，由呼叫端判斷)
  *
@@ -32,7 +33,7 @@ import { PNG } from 'pngjs'
  *
  */
 function compareImageDirs(dirA, dirB, opt = {}) {
-    let { pattern = /\.png$/i, threshold = 0.1, maxDiffPixels = 100, drift = [] } = opt
+    let { pattern = /\.png$/i, threshold = pixelmatchOpt.threshold, maxDiffPixels = 100, drift = [] } = opt
     let list = (d) => (fs.existsSync(d) ? fs.readdirSync(d).filter((f) => pattern.test(f)).sort() : [])
     let listA = list(dirA)
     let setA = new Set(listA)
@@ -84,7 +85,7 @@ function compareImageDirs(dirA, dirB, opt = {}) {
         }
         let rgbaEqual = pngA.data.equals(pngB.data)
         let rd = rgbaEqual ? { rgbaDiff: 0, rgbaDiffBox: null, onlyDrift: false } : rgbaDiffOf(file, pngA, pngB)
-        let numDiff = rgbaEqual ? 0 : pixelmatch(pngA.data, pngB.data, null, pngA.width, pngA.height, { threshold, includeAA: false })
+        let numDiff = rgbaEqual ? 0 : pixelmatch(pngA.data, pngB.data, null, pngA.width, pngA.height, { ...pixelmatchOpt, threshold })
         return { file, status: 'ok', bytesEqual: false, rgbaEqual, rgbaDiff: rd.rgbaDiff, rgbaDiffBox: rd.rgbaDiffBox, equivalent: rgbaEqual || rd.onlyDrift, numDiff, withinTolerance: numDiff <= maxDiffPixels }
     })
 

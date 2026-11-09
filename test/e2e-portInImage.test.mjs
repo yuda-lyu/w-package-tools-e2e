@@ -7,6 +7,7 @@ import launchBrowser from '../src/launchBrowser.mjs'
 import captureStable from '../src/captureStable.mjs'
 import overlayRegions from '../src/overlayRegions.mjs'
 import assertBaselineMatch from '../src/assertBaselineMatch.mjs'
+import pixelmatchOpt from '../src/pixelmatchOpt.mjs'
 import { assertE2eBasePort } from '../src/reserveE2ePorts.mjs'
 
 
@@ -32,7 +33,7 @@ function countDiff(a, b) {
     let x = PNG.sync.read(a)
     let y = PNG.sync.read(b)
     assert.strict.deepEqual([x.width, x.height], [y.width, y.height])
-    return pixelmatch(x.data, y.data, null, x.width, x.height, { threshold: 0.1, includeAA: false })
+    return pixelmatch(x.data, y.data, null, x.width, x.height, { ...pixelmatchOpt })
 }
 
 

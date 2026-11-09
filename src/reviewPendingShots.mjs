@@ -3,6 +3,7 @@ import path from 'path'
 import sharp from 'sharp'
 import pixelmatch from 'pixelmatch'
 import { PNG } from 'pngjs'
+import pixelmatchOpt from './pixelmatchOpt.mjs'
 
 
 //證據檔名: <標籤>__<YYYY-MM-DD_hh-mm-ss-mmm>[-N]__<種類>.png / <案例鍵>__<時間戳>[-N]__collect.json
@@ -60,7 +61,7 @@ function sinceStamp(since) {
  *
  */
 async function reviewPendingShots(opt = {}) {
-    let { pendingDir = './testPending', labels = null, maxDiffPixels = 100, threshold = 0.1, cropDir = null, margin = 40, since = null } = opt
+    let { pendingDir = './testPending', labels = null, maxDiffPixels = 100, threshold = pixelmatchOpt.threshold, cropDir = null, margin = 40, since = null } = opt
     let sinceTs = sinceStamp(since)
     if (!fs.existsSync(pendingDir)) {
         return []
@@ -178,7 +179,7 @@ async function reviewPendingShots(opt = {}) {
         }
         let { width, height } = a
         let out = new PNG({ width, height })
-        let n = pixelmatch(a.data, b.data, out.data, width, height, { threshold, includeAA: false, diffMask: true })
+        let n = pixelmatch(a.data, b.data, out.data, width, height, { ...pixelmatchOpt, threshold, diffMask: true })
         r.numDiff = n
         if (n <= maxDiffPixels) {
             r.cls = 'NOISE'

@@ -2,6 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import pixelmatch from 'pixelmatch'
 import { PNG } from 'pngjs'
+import pixelmatchOpt from './pixelmatchOpt.mjs'
 
 
 /**
@@ -52,7 +53,7 @@ export function resolveKeepSame(opt = {}) {
  * 啟用時之判定(依序)：標準圖不存在 → 寫(missing)；transient為true(暫時狀態圖) → 不改寫(transient)；
  * 以toCompare(當次截圖,標準圖路徑)取得比對端覆蓋後之影像(未給即當次截圖；須與比對端用同一覆蓋)，尺寸不同 → 寫(sizeChanged)；
  * RGBA逐像素相同 → 保留(same)；keepMaxDiff為0 → 寫(只保留完全相同者；不以pixelmatch計數0為相同)；
- * 否則以pixelmatch(includeAA:false、threshold同比對端)計真不同像素數，≤keepMaxDiff → 保留，> → 寫。
+ * 否則以pixelmatch(選項取自pixelmatchOpt、threshold同比對端)計真不同像素數，≤keepMaxDiff → 保留，> → 寫。
  * 寫出者一律為當次截圖本身(不是覆蓋後之影像)；判定一律對正式標準圖路徑，寫出落點為outPath(E2E_BASELINE_OUT_DIR等)
  *
  * @param {Buffer} buf 輸入當次截圖PNG之Buffer
@@ -83,7 +84,7 @@ async function writeBaselineIfChanged(buf, baselinePath, opt = {}) {
         transient = false,
         toCompare = null,
         maxDiffPixels = 100,
-        threshold = 0.1,
+        threshold = pixelmatchOpt.threshold,
         env = process.env,
         writeFile = (p, b) => {
             fs.mkdirSync(path.dirname(p), { recursive: true })
@@ -117,7 +118,7 @@ async function writeBaselineIfChanged(buf, baselinePath, opt = {}) {
     if (a.data.equals(b.data)) {
         return { written: false, reason: 'same', numDiff: 0 }
     }
-    let n = pixelmatch(a.data, b.data, null, a.width, a.height, { threshold, includeAA: false })
+    let n = pixelmatch(a.data, b.data, null, a.width, a.height, { ...pixelmatchOpt, threshold })
     if (keepMaxDiff > 0 && n <= keepMaxDiff) {
         return { written: false, reason: `same(diff=${n}px≤${keepMaxDiff})`, numDiff: n }
     }

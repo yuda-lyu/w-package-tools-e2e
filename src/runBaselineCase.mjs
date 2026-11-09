@@ -5,6 +5,7 @@ import openCasePage from './openCasePage.mjs'
 import assertBaselineMatch from './assertBaselineMatch.mjs'
 import createBaselineCollector, { activeBaselineCollector, insideEnabledCollect, runOutsideCollector, runTaggedCall } from './createBaselineCollector.mjs'
 import writeBaselineIfChanged, { resolveKeepSame } from './writeBaselineIfChanged.mjs'
+import pixelmatchOpt from './pixelmatchOpt.mjs'
 
 
 /**
@@ -141,7 +142,7 @@ function runCase(opt) {
         transient = null,
         compareBuf = null,
         maxDiffPixels = 100,
-        threshold = 0.1,
+        threshold = pixelmatchOpt.threshold,
         env = process.env,
     } = opt
     //未自訂 match 而給了容差或 pendingDir 者, 預設比對以之(與有變更才改寫之判定、收集模式之案例清單一致)

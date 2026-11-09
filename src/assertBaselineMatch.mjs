@@ -3,12 +3,13 @@ import path from 'path'
 import pixelmatch from 'pixelmatch'
 import { PNG } from 'pngjs'
 import { activeBaselineCollector } from './createBaselineCollector.mjs'
+import pixelmatchOpt from './pixelmatchOpt.mjs'
 
 
 /**
  * 截圖與標準圖比對(反鋸齒感知之像素比對加容差)，不一致時保留三聯組證據後拋錯
  *
- * 比對：pixelmatch之includeAA:false自動忽略反鋸齒邊緣像素，threshold預設0.1，真不同像素數超過maxDiffPixels(預設100)即失敗；
+ * 比對：pixelmatch 8(OKLab HyAB色差)，選項取自pixelmatchOpt(includeAA:false自動忽略反鋸齒邊緣像素、checkerboard:true、threshold預設0.1)，真不同像素數超過maxDiffPixels(預設100)即失敗；
  * 尺寸不同必為真差異，直接失敗；標準圖不存在直接拋錯。像素層為補強，呼叫前每案仍須先有語意斷言。
  * 證據：失敗時把當次截圖、標準圖與差異圖存到pendingDir(預設'./testPending')，檔名為`<label>__<毫秒時間戳>__{capture,baseline,diff}.png`，撞名加-N(capture以排他建立保留，跨行程同毫秒亦不共用)，永不覆蓋、不自動刪除。
  * 餘裕告警：通過但真不同像素數超過maxDiffPixels之headroomRatio(預設0.5)時印告警——計數貼近上限之標準圖為零餘裕之flake源(2026-09-28 實測兩張恰為100)，應重產或查因。
@@ -39,7 +40,7 @@ import { activeBaselineCollector } from './createBaselineCollector.mjs'
  *
  */
 function assertBaselineMatch(buf, baselinePath, label = '', opt = {}) {
-    let { maxDiffPixels = 100, threshold = 0.1, pendingDir = './testPending', headroomRatio = 0.5, warn = console.warn, collect } = opt
+    let { maxDiffPixels = 100, threshold = pixelmatchOpt.threshold, pendingDir = './testPending', headroomRatio = 0.5, warn = console.warn, collect } = opt
     if (opt.regen !== undefined) {
         throw new Error('assertBaselineMatch: opt.regen 已移除(2026-09-28), 標準圖寫檔請經 runBaselineCase')
     }
@@ -127,7 +128,7 @@ function assertBaselineMatch(buf, baselinePath, label = '', opt = {}) {
     //pixelmatch: 反鋸齒感知比對, 回傳真不同像素數
     let { width, height } = basePng
     let diffPng = new PNG({ width, height })
-    let numDiff = pixelmatch(capPng.data, basePng.data, diffPng.data, width, height, { threshold, includeAA: false })
+    let numDiff = pixelmatch(capPng.data, basePng.data, diffPng.data, width, height, { ...pixelmatchOpt, threshold })
     if (numDiff <= maxDiffPixels) {
         if (numDiff > maxDiffPixels * headroomRatio) {
             warn(`[baseline-headroom] ${label || path.basename(baselinePath, '.png')}: 通過但 diff=${numDiff}px 已超過 maxDiffPixels=${maxDiffPixels} 之 ${Math.round(headroomRatio * 100)}%，餘裕不足(再多 ${maxDiffPixels - numDiff + 1}px 即失敗)，應查因或重產`)

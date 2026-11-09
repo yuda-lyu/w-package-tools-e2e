@@ -18,6 +18,7 @@ import maskRegions from '../src/maskRegions.mjs'
 import overlayRegions from '../src/overlayRegions.mjs'
 import overlayImageAt from '../src/overlayImageAt.mjs'
 import cropRegion from '../src/cropRegion.mjs'
+import pixelmatchOpt from '../src/pixelmatchOpt.mjs'
 import assertBaselineMatch from '../src/assertBaselineMatch.mjs'
 import typeIntoInput from '../src/typeIntoInput.mjs'
 import typeIntoNthInput from '../src/typeIntoNthInput.mjs'
@@ -100,6 +101,7 @@ describe('WPackageToolsE2e', function() {
             'overlayRegions',
             'overlayImageAt',
             'cropRegion',
+            'pixelmatchOpt',
             'assertBaselineMatch',
             'typeIntoInput',
             'typeIntoNthInput',
@@ -163,11 +165,12 @@ describe('WPackageToolsE2e', function() {
         assert.strict.deepEqual(r, rr)
     })
 
-    it('各鍵值型別正確(chromiumLaunchArgs為凍結陣列, 三個框幾何常數為數字, 其餘為函數)', function() {
+    it('各鍵值型別正確(chromiumLaunchArgs為凍結陣列, pixelmatchOpt為凍結物件, 三個框幾何常數為數字, 其餘為函數)', function() {
         let r = Object.keys(wpte).filter((k) => typeof wpte[k] !== 'function').map((k) => [k, Array.isArray(wpte[k]) ? 'array' : typeof wpte[k]])
-        let rr = [['chromiumLaunchArgs', 'array'], ['INK_PAD', 'number'], ['BOX_PAD', 'number'], ['BOX_STROKE', 'number']]
+        let rr = [['chromiumLaunchArgs', 'array'], ['INK_PAD', 'number'], ['BOX_PAD', 'number'], ['BOX_STROKE', 'number'], ['pixelmatchOpt', 'object']]
         assert.strict.deepEqual(r, rr)
         assert.strict.equal(Object.isFrozen(wpte.chromiumLaunchArgs), true)
+        assert.strict.equal(Object.isFrozen(wpte.pixelmatchOpt), true)
     })
 
     it('各鍵值即為對應模組之匯出', function() {
@@ -191,6 +194,7 @@ describe('WPackageToolsE2e', function() {
             overlayRegions,
             overlayImageAt,
             cropRegion,
+            pixelmatchOpt,
             assertBaselineMatch,
             typeIntoInput,
             typeIntoNthInput,

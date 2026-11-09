@@ -3,6 +3,7 @@ import path from 'path'
 import pixelmatch from 'pixelmatch'
 import { PNG } from 'pngjs'
 import findOrphanBaselines from './findOrphanBaselines.mjs'
+import pixelmatchOpt from './pixelmatchOpt.mjs'
 
 
 //讀取命令列旗標之值: 旗標存在時須有值且值不得為另一個旗標(防 `--names --langs cht` 把 --langs 吃成名單)
@@ -84,7 +85,7 @@ function createBaselineGate(opt = {}) {
         env = process.env,
         idPattern = /^(E2E-\d+)(?=-|$)/,
         outDirEnv = 'E2E_BASELINE_OUT_DIR',
-        threshold = 0.1,
+        threshold = pixelmatchOpt.threshold,
         maxDiffPixels = 100,
         log = console.log,
     } = opt
@@ -361,7 +362,7 @@ function createBaselineGate(opt = {}) {
         if (a.width !== b.width || a.height !== b.height) {
             return { write: true, reason: 'sizeChanged' }
         }
-        let n = a.data.equals(b.data) ? 0 : pixelmatch(a.data, b.data, null, a.width, a.height, { threshold, includeAA: false })
+        let n = a.data.equals(b.data) ? 0 : pixelmatch(a.data, b.data, null, a.width, a.height, { ...pixelmatchOpt, threshold })
         if (n > maxDiffPixels) {
             return { write: true, reason: `diff=${n}px` }
         }

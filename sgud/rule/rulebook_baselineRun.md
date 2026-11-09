@@ -45,7 +45,8 @@
 24. 案例清單逐目錄各自寫入,失敗彙報不中斷其餘;無清單之證據預設拒收,舊證據須明示 `legacy:true`(G7).
 25. 清單紀錄以完整證據路徑(依 cwd 解析)對應證據目錄(G8);採用目的地以檔案身分或真實路徑判重(G9).
 26. 預設路徑之 `runBaselineCase` 直接回傳案例本體之 Promise(完成時序同 1.0.10;G11),組態錯誤以 rejected Promise 交回.
-27. 比對之色差度量固定為 pixelmatch 7.x 之 YIQ 判定(`includeAA:false`、`threshold` 預設 0.1;所有比對與判定處——`assertBaselineMatch`、`createBaselineGate` 之 changed、`compareImageDirs`、`reviewPendingShots`、`writeBaselineIfChanged`——共用同一版本與同一組選項);升至 8 以上屬度量變更,須先以真實標準圖與當次截圖對之雙算(7 與 8 計數逐對相同)通過、經使用者裁示後才做,不以放寬容差、改 `checkerboard`、重產標準圖吸收(pm115;現況 `package.json` 為 `^7.2.0`,8.0.0 待裁示).
+27. 比對之色差度量為 pixelmatch 8(OKLab 之 toe 校正明度與色度、HyAB 距離大於 `threshold` 即判為差異;2026-11-09 使用者裁示:有新版且沒問題就升,破壞性更新由下游連動更新),`package.json` 為 `^8.0.0`;所有比對與判定處——`assertBaselineMatch`、`runBaselineCase`、`createBaselineGate` 之 changed、`writeBaselineIfChanged`、`compareImageDirs`、`reviewPendingShots`——共用同一版本與同一組選項 `src/pixelmatchOpt.mjs`(`threshold:0.1`、`includeAA:false`、`checkerboard:true`),一律 `{ ...pixelmatchOpt, threshold }`、不內嵌選項;`opt.threshold` 仍可由呼叫端覆寫(預設即本物件之值).任一值之變動屬度量變更,影響全部標準圖之比對,不以放寬容差(`maxDiffPixels`／`threshold`)或整批重產吸收;守門 `unit-compareMetric` `[M01]`～`[M10]`(回到 7.x 之判定、改預設、拿掉 `checkerboard`、改 `includeAA`、有呼叫處不經 `pixelmatchOpt` 皆失敗).
+28. 度量改變所致之下游標準圖比對失敗,處置為:以 7.2.0 與 8.0.0 對同一對(標準圖、當次截圖)雙算;7.2.0 計數 ≤ 容差而 8 計數 > 容差、且差異圖顯示落在 8 較敏感處(近黑區明度、飽和色色偏、半透明邊緣)並目視確認畫面內容未改變者,才屬「只因度量而失敗」,只重產這些張;兩版皆失敗者依一般流程查成因;不整批重產(README §5〈pixelmatch 8 之比對度量〉).
 
 ## 8.3 單一擁有者
 
