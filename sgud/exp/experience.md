@@ -42,6 +42,7 @@
 - 每案全新瀏覽器行程(確定性優先), 非每 worker 共用.
 - 否決改用 @playwright/test 或 CLI 化: 與「scripts 只留 test」及審圖制衝突.
 - 比對參數刻意較嚴: pixelmatch `includeAA:false`、threshold 0.1(Playwright 預設 0.2)、maxDiffPixels 100; 尺寸不同直接失敗.
+- **pixelmatch 7→8 之色差度量不同, 無選項可還原(pm115, 2026-11-09 實測), 故維持 `^7.2.0`、待裁示**: 8.0.0 把色差由 YIQ(平方距離 `> 35215·t²`)改為 OKLab HyAB(距離 `> t`; 7.2.0 `index.js:56-70,214-249` vs 8.0.0 `index.js:364-534`), release notes 明載「計數會變、依賴確切計數或調過 threshold 者須重驗」.threshold 數值不能換算(灰階全表 98.96% 一致, 其餘兩向皆有: 黑與 24 級灰 7 判相同、8 判差異; 白與白減 28 級 7 判差異、8 判相同; `#ff0000` 與 `#ff2020` 7 判差異、8 判相同); 不透明圖之反鋸齒偵測兩版邏輯相同, 差異只在逐像素判定.**`checkerboard` 不是 8 才有**: 7.2.0 已有且預設 true(`index.js:28`), 但其圖樣以位元組偏移 `k` 取模(`k` 為 4 之倍數, 故紅通道背景恆為 48), 8 改以像素索引之雜湊, 而 8 之 `checkerboard:false`(白底)也不是 7.2.0 之預設, 兩版半透明判定 88% 一致、任何選項組合都不能重現; 勿再以「加 `checkerboard:false` 即等價」為前提.升 8 須先在各使用端以雙算(同一對圖各算 7 與 8)取得真實標準圖與當次截圖對之計數差, 不以放寬容差或重產標準圖吸收.證據見任務報告 pm115.
 
 ## 已定之取捨(除非出現新證據, 勿重議)
 
@@ -178,7 +179,7 @@
 - 抽提期最終版之驗證紀錄未含 lint(09-27 那輪 lint 為 0), 移入時查出 3 個移入檔有 lint 錯誤; 驗證清單須含 lint.無單元測試之 CLI(auditBoxes)做排版修正後, 以真實資料跑修正前後兩版比對輸出, 證明行為不變.
 - 審查意見互相矛盾時以原始碼裁決, 不以多數決(抽提期三方審查: perm 之 restartBackend 是否無條件等 port, 原始碼證實只在 port 仍有回應時才等, 一對二).
 - 全域技能 role-coder-for-test-e2e 之契約(references/e2e-setup-contract.md §0.5 模組對照與 C6–C13 片段)描述本套件之行為; 改動行為或預設值後同步更新技能, 否則技能與套件再度失真(2026-09-28 曾回頭修 8 處失真, 例: 分隔條選擇器、遮罩量測時點、`<img>` 動畫區座標系).
-- 版本現況: 套件 lockfile 為 playwright 1.63.0、sharp 0.35.3; 四使用端(2026-09-28)為 playwright 1.62.1、sharp 0.35.3; 全新安裝(2026-09-29)解析 playwright 1.63.0、sharp 0.35.5.使用端切換時只升本套件, 不順手升 playwright: Chromium 改版可能使標準圖全面變動, 須另依等價驗證評估.
+- 版本現況: 套件 lockfile 為 playwright 1.63.0、sharp 0.35.3; 四使用端(2026-09-28)為 playwright 1.62.1、sharp 0.35.3; 全新安裝(2026-09-29)解析 playwright 1.63.0、sharp 0.35.5.使用端切換時只升本套件, 不順手升 playwright: Chromium 改版可能使標準圖全面變動, 須另依等價驗證評估.2026-11-09(pm115)本套件之 `package.json` 升為 `playwright ^1.64.1`、lockfile 鎖 1.64.1(`npm install` 預設會解到更新之 1.65.0, 須明指 `playwright@1.64.1` 才與其他自有套件一致); 本套件無標準圖, 全套測試綠, 下游標準圖是否受 Chromium 改版影響須由使用端比對趟確認.
 - 使用端視角驗收作法: `npm pack` 後安裝至 `./tmp` 下之假專案, 自 `node_modules` 深層引用實跑; 瀏覽器下載以 `PLAYWRIGHT_BROWSERS_PATH` 導至暫存目錄, 不污染全域快取.
 - 工具陷阱: 同一行程勿同時載入兩版 sharp(原生 DLL 同名, 可能共用已載入者), 版本對照實驗分行程跑; sharp 之 `exports` 未開放 `./package.json`, 取版本改讀檔; GNU tar 把 `C:` 當遠端主機, 需 `--force-local`; Windows 版 `sha256sum` 輸出之路徑前綴 `*`.
 - **使用端建議文件之主張須逐條實測**(2026-09-30): 同一份建議中事實可屬實(提示框殘留、Windows 管線、日誌不足), 定性卻可能過重(「壓字」實為 3–4px)或論據不全(只提 `|` 與括號, 實則括號無害, 而 `^` `>` 空白 `%名稱%` 會靜默改寫); 採納前以像素量測、元件與 Playwright 安裝版原始碼、最小實驗逐條查證, 處理流程見 `sgud/proc/process.md`.

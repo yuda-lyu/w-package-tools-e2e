@@ -4,6 +4,7 @@
 
 ## 版本與最近驗證
 
+- 最近一輪(pm115,2026-11-09):`playwright` 升為 `^1.64.1`(lockfile 鎖 1.64.1);`pixelmatch` **維持 `^7.2.0`**(8.0.0 之色差度量由 YIQ 改為 OKLab HyAB,無選項可還原,待使用者裁示;帳本 `rulebook_baselineRun.md` §8.2 規則 27).全套 `npm test` 等價指令 818 passing、0 failing(約 11 分,`--lock`;升 playwright 後)、`npx eslint --ext .mjs src tools test` 0 error;新增 `test/unit-compareMetric.test.mjs`(5 案:7.2.0 全綠;以 8.0.0 解析跑則 M01、M02、M03、M05 紅).報告 `C:\opensrcOper\dnow\20261109110349\agent-out\pm115-修正報告.md`.
 - `package.json` version:1.0.22(pe309 之自動換埠已發布於此版;pe312 未改版本;依賴 wsemi ^1.9.50;下表標「未發布」者是否已含於已發布版本未逐項核對;發布由使用者／主控之自動化流程處理).
 - 最近一次全套驗證:2026-11-05 pe312(就緒核對、`restart` 查不到不續行、行程表改 OS API),`npm test` 794 passing、0 failing(約 11 分,`--lock`)、lint 0 error、變異 55 個全數擊殺、修前副本(HEAD 之 src)20 failing／9 passing;使用端實跑 w-flow-vue 363 passed(基準埠 3 輪、占用基準埠 1 輪)、w-web-perm 多開全套 5414 passing、`kills` 0 筆;未派第三方外審(sonnet 唯讀審查 1 次).報告 `C:\opensrcOper\dnow\20261105072000\agent-out\pe312-修正報告.md`.
 - 前一輪全套驗證:2026-11-05 pe309(自動換埠;拿掉環境區塊與工作目錄證據),`npm test` 704 passing、0 failing(約 9 分,`--lock`)、lint 0 error、變異 58 個擊殺 57(存活 M06 為等價)、修前副本(HEAD＋舊行為接縫)70 failing／7 passing、競爭實測 30 輪 110 行程 0 重複(修前 8 輪全撞);未派外審.報告 `C:\opensrcOper\dnow\20261105000800\agent-out\pe309-修正報告.md`.
@@ -37,6 +38,8 @@
 
 | 就緒核對與查詢失敗之處置(`createServiceManager` 之 `verifyDef`、`judgePortOwner`; `restart` 查不到不續行; `reselect` 用盡之訊息; `PORT_QUERY_TIMEOUT_MS`; `listProcessTable` 改 OS API; pe312,2026-11-05) | 完成,未發布(行為收嚴,使用端之正常服務不必改,README §5) | `rulebook_port.md` R-15～R-24 | `unit-serviceOwner`(注入)、`api-serviceOwner`(真實監聽與真實占用者,四種位址)、`api-procTable`(真實行程表) | launcher 先結束者無法判定;真實 vue-cli 只在報告證據跑,不入 `npm test`(本套件無 vue-cli 依賴);使用端可移除自寫之核對(選做) |
 | 試綁定增第 5 種(`checkPortFree` 之 `{ host:'::', ipv6Only:true }`,失敗時 `host` 為 `'::(ipv6Only)'`)與殺殘留後偵測失敗不當成可用(`tryOffset` 之等待迴圈;`PROBE_FAILED`);pe316,2026-11-05 | 完成,未發布(沒有占用時埠與行為不變,只在占用與偵測失敗時才走到;README §5) | `rulebook_port.md` R-26、R-27、§6.3 兩張輸入空間表 | `unit-checkPortFree`(替身)、`api-checkPortFree`(真實占用者 × 五種形式)、`unit-reserveE2ePorts` `[PR15d]`～`[PR15f]` | 每個位移第一次偵測失敗(`[PR20]`)仍 fail-open,與 R-27 同族,pe316 報告列需裁示;`src/` 其餘 `\|\| []` 站點已逐處判定(僅 `reserveE2ePorts.mjs:322` 同型) |
+
+| 比對之色差度量固定為 pixelmatch 7.x(pm115,2026-11-09;規則 27) | 完成(守門測試已就位);**pixelmatch 8 升版待裁示**:度量改變且無選項可還原,既有標準圖比對結果不能保證不變;下游 w-flowchart／w-ganttchart／w-infographic 之 devDependencies 同理 | `rulebook_baselineRun.md` §8.2 規則 27 | `unit-compareMetric` `[M01]`～`[M05]`(7.2.0 綠;8.0.0 下 M01、M02、M03、M05 紅) | 缺真實「標準圖 vs 當次截圖」配對,影響面只有合成與真實 Chromium 渲染對之估計(見報告 pm115);若採用 8 須先雙算實測 |
 
 ## 文件整理待辦
 

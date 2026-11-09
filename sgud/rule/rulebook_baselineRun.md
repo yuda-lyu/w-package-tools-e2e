@@ -45,6 +45,7 @@
 24. 案例清單逐目錄各自寫入,失敗彙報不中斷其餘;無清單之證據預設拒收,舊證據須明示 `legacy:true`(G7).
 25. 清單紀錄以完整證據路徑(依 cwd 解析)對應證據目錄(G8);採用目的地以檔案身分或真實路徑判重(G9).
 26. 預設路徑之 `runBaselineCase` 直接回傳案例本體之 Promise(完成時序同 1.0.10;G11),組態錯誤以 rejected Promise 交回.
+27. 比對之色差度量固定為 pixelmatch 7.x 之 YIQ 判定(`includeAA:false`、`threshold` 預設 0.1;所有比對與判定處——`assertBaselineMatch`、`createBaselineGate` 之 changed、`compareImageDirs`、`reviewPendingShots`、`writeBaselineIfChanged`——共用同一版本與同一組選項);升至 8 以上屬度量變更,須先以真實標準圖與當次截圖對之雙算(7 與 8 計數逐對相同)通過、經使用者裁示後才做,不以放寬容差、改 `checkerboard`、重產標準圖吸收(pm115;現況 `package.json` 為 `^7.2.0`,8.0.0 待裁示).
 
 ## 8.3 單一擁有者
 
