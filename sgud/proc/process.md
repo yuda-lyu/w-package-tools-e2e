@@ -83,7 +83,7 @@
 - **關聯**: `package.json` 之 `test`(唯一 script, 全域 §16.5 標準字串); `test/*.test.mjs`; `README.md` §4 等價驗證、§5 改版須知; `sgud/exp/experience.md`「套件身分與相容紀律」.
 - **判斷**: 任何 `src/` 改動 → 全套測試與 lint; 改框幾何、截圖序列、啟動旗標或升依賴 → 使用端標準圖會動, 另需發版說明與使用端等價驗證.
 - **處理**:
-  - `npm test`(2026-09-30 基準: 201 passing, 約 3 分鐘; 首次由 `launchChromium` 下載瀏覽器); 字串固定不得改, 不增設變體; 單檔自編 `npx mocha test/<檔> --timeout 180000`.
+  - `npm test`(2026-09-30 基準: 201 passing, 約 3 分鐘; 首次由 `launchBrowser` 經 w-playwright 安裝瀏覽器;2026-11-13 起); 字串固定不得改, 不增設變體; 單檔自編 `npx mocha test/<檔> --timeout 180000`.
   - `npx eslint --ext .mjs src tools test` 須為 0 error(2026-09-29 共用入口補齊後全部檔案為 0).
   - 跑完確認: `test/_tmp/` 無殘留、無 `./testPending/`、無殘留之 chrome-headless-shell 行程.
   - `test/e2e-captureEquivalence.test.mjs` 之凍結複本比對失敗即行為改變, 不得改凍結複本遷就.
@@ -149,9 +149,9 @@
 
 ## 升級 w-component-vue 或 Playwright 時之複驗
 
-- **關聯**: `src/probeStuckTooltip.mjs`(依 WTooltip 內部結構: `$refs.divTrigger`／`divContent`、`props.mode`、`data.valueTrans`); `src/waitColResizeOverlay.mjs`、`src/waitDrawerReady.mjs`(依 WDrawer 之 DOM 標記); `launchChromium`／`launchBrowser`(Chromium 版本隨 playwright).
+- **關聯**: `src/probeStuckTooltip.mjs`(依 WTooltip 內部結構: `$refs.divTrigger`／`divContent`、`props.mode`、`data.valueTrans`); `src/waitColResizeOverlay.mjs`、`src/waitDrawerReady.mjs`(依 WDrawer 之 DOM 標記); `launchBrowser`(Chromium 版本隨 w-playwright 所釘之 playwright-core;2026-11-13 起 `launchChromium` 已移除).
 - **判斷**: 元件改寫時, 以結構辨識之函數會「找不到任何東西而一律通過」, 測試不會變紅(套件測試只用模擬結構), 必須以真元件實測.Playwright 版本決定 Chromium 版本與預設啟動參數: 1.62 停用 `BoundaryEventDispatchTracksNodeRemoval`, 1.63 起不停用, 邊界事件(mouseleave 等)語意與截圖像素都可能改變.
 - **處理**:
   - w-component-vue 升級: 以使用端 `node_modules` 之 `vue/dist/vue.min.js` 與 `w-component-vue/dist/w-component-vue.umd.js`, 在 `page.setContent` 之頁以 `addScriptTag` 載入並 `Vue.use(window['w-component-vue'])` 掛 WButtonCircle(`tooltip`)、WTooltip(`isolated`)、WPopup(v-model); 驗: 懸停中偵測得到、移開後為空、已開之 WPopup 不誤判、掛進 `captureStable` 之 `beforeShots` 可正常截圖(2026-09-30 以 2.5.24 實測 6/6).WDrawer 之兩個 settle 掛鉤同理以真元件確認標記仍在: `waitDrawerReady` 之預設選擇器 `[state][changedrawerwidth]` 以 `node test/tools/probeWDrawerDom.mjs <w-component-vue 專案根目錄>` 複驗(唯讀載入其 `dist/w-component-vue.umd.js` 與 `node_modules/vue/dist/vue.js`, 於真 Chromium 掛載帶 `state` 之各元件, 預設選擇器須只命中 1 個 `w-drawer`, 否則離開碼 1; 2026-11-01 以 2.5.35 實測通過); 失敗時改 `src/waitDrawerReady.mjs` 之預設值與 JSDoc 之依據、同步夾具(`test/e2e-waitDrawerReady.test.mjs` 之 `KINDS`)與 README §5(Gitea #35).
-  - Playwright 升級: 屬會動像素之依賴升版, 使用端全量重跑並審差異(README §4 等價驗證); 本套件內以 `npm test` 確認(`launchChromium` 會自動下載新版瀏覽器).
+  - Playwright 升級: 屬會動像素之依賴升版, 由 w-playwright 改精確版本後發布, 本套件只升 w-playwright; 使用端全量重跑並審差異(README §4 等價驗證); 本套件內以 `npm test` 確認(`launchBrowser` 經 w-playwright 之 `autoInstall` 自動安裝新版瀏覽器).
 

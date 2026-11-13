@@ -2,8 +2,6 @@ import fs from 'fs'
 import assert from 'assert'
 import { fileURLToPath } from 'url'
 import wpte from '../src/WPackageToolsE2e.mjs'
-import launchChromium from '../src/launchChromium.mjs'
-import launchChromiumCore from '../src/launchChromiumCore.mjs'
 import chromiumLaunchArgs from '../src/chromiumLaunchArgs.mjs'
 import launchBrowser from '../src/launchBrowser.mjs'
 import captureStable from '../src/captureStable.mjs'
@@ -82,8 +80,6 @@ describe('WPackageToolsE2e', function() {
     it('對外提供全部模組與框幾何常數(依截圖與影像、產製與比對管線、生命週期與行程、驗證工具排列)', function() {
         let r = Object.keys(wpte)
         let rr = [
-            'launchChromium',
-            'launchChromiumCore',
             'chromiumLaunchArgs',
             'launchBrowser',
             'captureStable',
@@ -175,8 +171,6 @@ describe('WPackageToolsE2e', function() {
 
     it('各鍵值即為對應模組之匯出', function() {
         let mods = {
-            launchChromium,
-            launchChromiumCore,
             chromiumLaunchArgs,
             launchBrowser,
             captureStable,

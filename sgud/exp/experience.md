@@ -6,17 +6,16 @@
 
 - 本套件是 w-web-sso、w-web-perm、w-web-api、w-web-task 四專案 e2e 共用設施之發佈源.使用端一律經各自 `test/tools/e2eLib.mjs` 單一橋接引用(`export { default as X } from 'w-package-tools-e2e/src/X.mjs'`), 共用層與測試檔只自橋接 import.
 - 各函數預設值即 w-web-sso 現行組態, 其他專案之差異以選項重現.新增函數或選項一律維持原預設行為(opt-in), 才不動到使用端既有標準圖.
-- 會改變使用端標準圖像素之變更: 框幾何(`BOX_PAD`／`BOX_STROKE`／圓角、`itemsUnionBox` 之 fit 與 inkPad、`inkRect`、`gridContentBox`、`canvasInkRects`)、截圖序列(`captureStable` 之 settle、靜態影格、遮罩)、啟動旗標(`chromiumLaunchArgs`, 改動即全量重產)、依賴升版(playwright 帶入之 Chromium; pixelmatch 主版號之色差度量與 `src/pixelmatchOpt.mjs` 之任一選項, 2026-11-09 起為 pixelmatch 8, 見「pixelmatch 8 之比對參數」).改之前先評估, 發版說明明列, 使用端須重產受影響之圖並逐張審.
+- 會改變使用端標準圖像素之變更: 框幾何(`BOX_PAD`／`BOX_STROKE`／圓角、`itemsUnionBox` 之 fit 與 inkPad、`inkRect`、`gridContentBox`、`canvasInkRects`)、截圖序列(`captureStable` 之 settle、靜態影格、遮罩)、啟動旗標(`chromiumLaunchArgs`, 改動即全量重產)、依賴升版(w-playwright 所釘之 playwright-core 帶入之 Chromium, 2026-11-13 起本套件不直接依賴 playwright; pixelmatch 主版號之色差度量與 `src/pixelmatchOpt.mjs` 之任一選項, 2026-11-09 起為 pixelmatch 8, 見「pixelmatch 8 之比對參數」).改之前先評估, 發版說明明列, 使用端須重產受影響之圖並逐張審.
 - 深層引用 `w-package-tools-e2e/src/<名>.mjs`, 無 `main`／`exports`: 任何檔都可被引用; 套件內不能以套件名引用自己, 測試一律以 `../src/` 相對引用.
-- 共用入口 `src/WPackageToolsE2e.mjs`(2026-09-29, 仿 w-dispatch-ai 之 `WDispatchAi.mjs`): 匯入 `src/` 內其他全部模組並加 `BOX_PAD`／`BOX_STROKE`／`INK_PAD`, 依 README §1 分組排列; 引用它會一併載入全部模組與依賴(playwright、sharp).`tools/*.mjs` 為可執行腳本(引用即解析 argv, 無參數時 `process.exit(2)`), 絕不可匯入入口.`test/unit-WPackageToolsE2e.test.mjs` 以目錄列舉守門: `src/` 新增模組未登錄於入口即失敗(已以暫放未登錄之探針模組驗證會擋).
-- 依賴只用 playwright(經 `launchChromium`)、pixelmatch、pngjs、sharp、json5, 以及 wsemi(2026-10-30 起, 僅 `listenerPids` 深層引用 `wsemi/src/execProcessPortPidsSync.mjs`, 不經 wsemi 主入口之 dist 全包); 不引入 lodash.外部副作用(exec、spawn、fetch、process、globalThis、寫檔函數或落點)皆可由 opt 注入, 行程類原語因此能以假物件單元測試.
+- 共用入口 `src/WPackageToolsE2e.mjs`(2026-09-29, 仿 w-dispatch-ai 之 `WDispatchAi.mjs`): 匯入 `src/` 內其他全部模組並加 `BOX_PAD`／`BOX_STROKE`／`INK_PAD`, 依 README §1 分組排列; 引用它會一併載入全部模組與依賴(w-playwright、sharp).`tools/*.mjs` 為可執行腳本(引用即解析 argv, 無參數時 `process.exit(2)`), 絕不可匯入入口.`test/unit-WPackageToolsE2e.test.mjs` 以目錄列舉守門: `src/` 新增模組未登錄於入口即失敗(已以暫放未登錄之探針模組驗證會擋).
+- 依賴只用 w-playwright(經 `launchBrowser`; 2026-11-13 起取代 playwright, 規則見 `sgud/rule/rulebook_launch.md`)、pixelmatch、pngjs、sharp、json5, 以及 wsemi(2026-10-30 起, 僅 `listenerPids` 深層引用 `wsemi/src/execProcessPortPidsSync.mjs`, 不經 wsemi 主入口之 dist 全包); 不引入 lodash.外部副作用(exec、spawn、fetch、process、globalThis、寫檔函數或落點)皆可由 opt 注入, 行程類原語因此能以假物件單元測試.
 
 ## 功能與目的(2026-09-30 現況)
 
 | 類 | 模組 | 目的 |
 |---|---|---|
-| 啟動 | `launchChromium`(核心流程 `launchChromiumCore` 以注入依賴供單元測試) | 所需版本之瀏覽器不存在時以 Playwright 自身 CLI 下載後啟動(不依賴安裝腳本); Linux 缺系統相依時先 install-deps; 指定 `channel` 或 `executablePath` 時不自動安裝 |
-| 啟動 | `chromiumLaunchArgs`、`launchBrowser` | 確定性渲染六旗標(凍結陣列)與唯一 launch 出口; headless 預設之 GPU 光柵化與次像素字形使像素比對不確定 |
+| 啟動 | `chromiumLaunchArgs`、`launchBrowser` | 確定性渲染六旗標(凍結陣列)與唯一 launch 出口; headless 預設之 GPU 光柵化與次像素字形使像素比對不確定.2026-11-13 起 `launchBrowser` 經 w-playwright(`wpw.launchChromium`, `autoInstall`／`installDeps` 為 true; 守門 `--disable-features` 由 w-playwright 合併); 原 `launchChromium`／`launchChromiumCore` 移除, 其下載與安裝之職責移入 w-playwright |
 | 截圖 | `captureStable` | 標準圖截圖唯一入口: 排除「還沒穩定」與「穩定到錯的狀態」後連拍至相鄰兩張相同 |
 | 截圖 | `waitColResizeOverlay`、`waitDrawerReady`(w-component-vue); `resetAgGridScroll`、`waitGridIdle`(ag-grid) | 技術棧就緒訊號: 元件狀態機優先於幾何輪詢 |
 | 截圖 | `probeStuckTooltip`(w-component-vue) | 截圖前守門: 游標已移開而 hover 型提示框(WTooltip `mode='tooltip'`)仍顯示即拋錯, 防殘留凍結進標準圖; 置於 `beforeShots` 首位 |
@@ -180,7 +179,8 @@
 - 抽提期最終版之驗證紀錄未含 lint(09-27 那輪 lint 為 0), 移入時查出 3 個移入檔有 lint 錯誤; 驗證清單須含 lint.無單元測試之 CLI(auditBoxes)做排版修正後, 以真實資料跑修正前後兩版比對輸出, 證明行為不變.
 - 審查意見互相矛盾時以原始碼裁決, 不以多數決(抽提期三方審查: perm 之 restartBackend 是否無條件等 port, 原始碼證實只在 port 仍有回應時才等, 一對二).
 - 全域技能 role-coder-for-test-e2e 之契約(references/e2e-setup-contract.md §0.5 模組對照與 C6–C13 片段)描述本套件之行為; 改動行為或預設值後同步更新技能, 否則技能與套件再度失真(2026-09-28 曾回頭修 8 處失真, 例: 分隔條選擇器、遮罩量測時點、`<img>` 動畫區座標系).
-- 版本現況: 套件 lockfile 為 playwright 1.63.0、sharp 0.35.3; 四使用端(2026-09-28)為 playwright 1.62.1、sharp 0.35.3; 全新安裝(2026-09-29)解析 playwright 1.63.0、sharp 0.35.5.使用端切換時只升本套件, 不順手升 playwright: Chromium 改版可能使標準圖全面變動, 須另依等價驗證評估.2026-11-09(pm115)本套件之 `package.json` 升為 `playwright ^1.64.1`、lockfile 鎖 1.64.1(`npm install` 預設會解到更新之 1.65.0, 須明指 `playwright@1.64.1` 才與其他自有套件一致); 本套件無標準圖, 全套測試綠, 下游標準圖是否受 Chromium 改版影響須由使用端比對趟確認.
+- 版本現況: 套件 lockfile 為 playwright 1.63.0、sharp 0.35.3; 四使用端(2026-09-28)為 playwright 1.62.1、sharp 0.35.3; 全新安裝(2026-09-29)解析 playwright 1.63.0、sharp 0.35.5.使用端切換時只升本套件, 不順手升 playwright: Chromium 改版可能使標準圖全面變動, 須另依等價驗證評估.2026-11-09(pm115)本套件之 `package.json` 升為 `playwright ^1.64.1`、lockfile 鎖 1.64.1(`npm install` 預設會解到更新之 1.65.0, 須明指 `playwright@1.64.1` 才與其他自有套件一致); 本套件無標準圖, 全套測試綠, 下游標準圖是否受 Chromium 改版影響須由使用端比對趟確認.2026-11-13(pm-pte)起本套件不再依賴 playwright, 改依 w-playwright(其精確釘 playwright-core 1.64.1), Playwright 之升版只在 w-playwright 做.
+- 經 w-playwright 啟動之驗證手法(2026-11-13 pm-pte): ①要讀「實際啟動之命令列」, headless shell 下 CDP `Browser.getBrowserCommandLine` 回「--enable-automation not set」、Playwright 之 `logger` 選項收不到 `<launching>`(實測 0 行), 可行者為子行程設 `DEBUG=pw:browser`(須在載入 playwright-core 前)並攔 stderr 之 `<launching>` 紀錄(`test/tools/launchBrowserCmdline.mjs`, 同 w-playwright 之 `pwDriftProbe`).②修前紅或「不經 w-playwright」之變異要跑而不得啟動瀏覽器時: 舊路徑設 `SELENIUM_REMOTE_URL=http://127.0.0.1:9/`(playwright 改連 Selenium hub、連線拒絕即 reject, 本機不起任何瀏覽器); 直呼 playwright-core 之變異設 `PLAYWRIGHT_BROWSERS_PATH` 為空目錄(缺檔即 reject, 該路徑不自動安裝).兩法皆不可用於仍經 w-playwright 者(前者 w-playwright 直接 `E_ENV`; 後者 `autoInstall:true` 會真的下載).③替身(`setBrowserTypeForTest`)只驗合併後選項; `autoInstall`／`installDeps` 屬 w-playwright 自用鍵、合併後即刪, 要驗呼叫端送出之原始選項以 spy 包住 `wpw.launchChromium`(UMD 匯出物件可改寫, 呼叫時以屬性查找).
 - 使用端視角驗收作法: `npm pack` 後安裝至 `./tmp` 下之假專案, 自 `node_modules` 深層引用實跑; 瀏覽器下載以 `PLAYWRIGHT_BROWSERS_PATH` 導至暫存目錄, 不污染全域快取.
 - 工具陷阱: 同一行程勿同時載入兩版 sharp(原生 DLL 同名, 可能共用已載入者), 版本對照實驗分行程跑; sharp 之 `exports` 未開放 `./package.json`, 取版本改讀檔; GNU tar 把 `C:` 當遠端主機, 需 `--force-local`; Windows 版 `sha256sum` 輸出之路徑前綴 `*`.
 - **使用端建議文件之主張須逐條實測**(2026-09-30): 同一份建議中事實可屬實(提示框殘留、Windows 管線、日誌不足), 定性卻可能過重(「壓字」實為 3–4px)或論據不全(只提 `|` 與括號, 實則括號無害, 而 `^` `>` 空白 `%名稱%` 會靜默改寫); 採納前以像素量測、元件與 Playwright 安裝版原始碼、最小實驗逐條查證, 處理流程見 `sgud/proc/process.md`.

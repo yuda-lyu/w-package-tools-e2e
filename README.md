@@ -18,12 +18,11 @@ To view documentation or get support, visit [docs](https://yuda-lyu.github.io/w-
 
 npm i w-package-tools-e2e
 
-//launchChromium: 啟動Playwright之Chromium, 所需版本之瀏覽器不存在時先自動下載(不依賴安裝腳本)
-import launchChromium from 'w-package-tools-e2e/src/launchChromium.mjs'
-let browser = await launchChromium({ headless: true })
+//launchBrowser: e2e測試端、標準圖產製端與探測腳本之唯一啟動出口(經w-playwright啟動無頭Chromium＋確定性渲染六旗標; 瀏覽器缺檔時先安裝一次)
+import launchBrowser from 'w-package-tools-e2e/src/launchBrowser.mjs'
+let browser = await launchBrowser()
 
 //其餘模組同樣以深層引用使用: w-package-tools-e2e/src/<模組名>.mjs, 模組清單見下
-import launchBrowser from 'w-package-tools-e2e/src/launchBrowser.mjs'
 import captureStableWithBox from 'w-package-tools-e2e/src/captureStableWithBox.mjs'
 import assertBaselineMatch from 'w-package-tools-e2e/src/assertBaselineMatch.mjs'
 
@@ -33,13 +32,24 @@ let browser2 = await wpte.launchBrowser()
 
 ```
 
+### 瀏覽器之取得與啟動(經 w-playwright)
+
+本套件一律經自有套件 [w-playwright](https://github.com/yuda-lyu/w-playwright) 啟動瀏覽器(`launchBrowser`),不直接依賴 `playwright`／`playwright-core`。
+
+1. **安裝即帶入**:本套件之 `dependencies` 為 `w-playwright ^1.0.1`,其精確釘定 `playwright-core 1.64.1`(Chromium headless shell revision 1248)。本套件與使用端皆不需、也不應另裝 `playwright` 或 `playwright-core`;使用端之測試若須自行啟動瀏覽器,一律 `import wpw from 'w-playwright'`。
+2. **受管瀏覽器之取得**:`launchBrowser` 預設啟動 Playwright 受管之 headless shell 並帶 `autoInstall: true`——缺檔時由 w-playwright 以其所依之 playwright-core 安裝一次再啟動一次(安裝子行程隱藏視窗)。要預先備妥(如 CI、首次執行前)者:`import wpw from 'w-playwright'; await wpw.ensureChromium()`(有頭或 `channel: 'chromium'` 用之完整 Chromium 另執行 `await wpw.ensureChromium({ kind: 'chromium' })`)。**不要用 `npx playwright install`**(依賴樹中他版 playwright 被提升時會下載到不同版本之瀏覽器)。使用端程式直接 `import wpw from 'w-playwright'` 者,須在自己之 `package.json` 宣告 `w-playwright`(傳遞依賴不保證可由使用端解析)。Linux 缺系統相依時 `launchBrowser` 帶 `installDeps: true`,由 w-playwright 執行 `install-deps chromium`(可能需 sudo);其安裝子行程不接主控台輸入(stdin 忽略、非 Windows 以 detached 起),須互動輸入密碼之 sudo 無法提示而以 `E_INSTALL` 失敗——Linux 宜預先以 root 執行一次 `ensureChromium({ installDeps: true })` 或以系統套件管理員備妥相依(依讀碼推論,Linux 未實測)。
+3. **離線**:於可連網之機器以同版 w-playwright 執行 `ensureChromium()`,把 Playwright 之瀏覽器資料夾(Windows 預設 `%LOCALAPPDATA%\ms-playwright` 內之 `chromium_headless_shell-1248` 等)複製至目標機,並以環境變數 `PLAYWRIGHT_BROWSERS_PATH` 指向該資料夾。**此變數須在載入本套件前設定**(Playwright 於模組載入時決定瀏覽器目錄,執行期改動不生效)。
+4. **用真 Chrome 或 Edge 者**(呼叫端給 `channel: 'chrome'`／`'msedge'`):須自行安裝 Google Chrome／Microsoft Edge,此時不自動安裝。標準圖之產製與比對一律用預設之 headless shell(真 Chrome 隨自動更新換版,像素不可固定)。
+5. **一律加入之守門參數與原因**:Windows 上 Chromium 153 起,每啟動一個新的瀏覽器根行程,即以無效密碼替目前使用者呼叫一次 `LogonUser`(錯誤密碼次數 +1;本機原則 10 分鐘內 10 次即鎖定帳號);停用 Chromium 功能 `AutofillAiWalletPrivatePasses` 即不再發生。Chromium 對兩個 `--disable-features` 只取最後一個,故 w-playwright 於每次啟動之命令列**恰給一個** `--disable-features`(Playwright 預設清單＋`AutofillAiWalletPrivatePasses`＋呼叫端自給者,置於 args 之末),並以 `ignoreDefaultArgs` 去掉 Playwright 預設之那一串;不提供停用之選項。headless shell 本不觸發,守門照加。上述現象與停用之效果以 w-playwright README〈驗證狀態〉所列之組合為已證(Windows 11、無頭之 Chrome 157、Edge 157、Chromium 156 等);有頭、其他通道、持久設定檔之 `chrome://flags`、企業原則與其他作業系統未驗。
+6. **不支援之環境變數**:`PWDEBUG` 為 inspector 模式之值(`console`、`0`、`false` 不受限;亦讀 npm 設定之別名,且 Playwright 於載入時快取)、`SELENIUM_REMOTE_URL` 有值時拒絕啟動(`E_ENV`),因其會使守門失效。另環境變數 `W_PLAYWRIGHT_LOGON_GUARD` 開啟時,啟動非 headless shell 之瀏覽器(真 Chrome、Edge、完整 Chromium、自訂執行檔)前先讀錯誤密碼次數,**≥1、帳號已鎖定或讀不到即拒絕**(`E_LOGON_GUARD`;非 Windows 一律讀不到而拒絕,只應在 Windows 開啟;預設之 headless shell 不讀)。細節見 w-playwright 之 README。
+
 ## 概述
 
 本套件提供 e2e 測試與標準圖（pixel baseline）之共用設施：確定性截圖、截圖後合成之紅框、遮罩與貼圖覆蓋、反鋸齒感知之像素比對、產製端與比對端共用之單一案例管線、截圖前篩選與孤兒檢查、服務生命週期與行程原語、盤點 CLI。內容自 w-web-sso、w-web-perm、w-web-api、w-web-task 四專案之 e2e 基礎設施抽提（2026-09-27～28 暫存於 w-web-sso 之 `srcPack/`，四專案經各自 `test/tools/e2eLib.mjs` 橋接實跑驗證），2026-09-29 移入本套件。規格基準為全域技能 role-coder-for-test-e2e（SKILL.md §3 契約 C1–C15、§7、§8、§9 與 references/e2e-setup-contract.md）。
 
 - 每檔一個 default export，繁中 JSDoc 附 `@example`；以深層引用使用（`w-package-tools-e2e/src/<名稱>.mjs`；本套件無 `main`／`exports`）。另有具名匯出：`composeBox.mjs` 之 `BOX_PAD`／`BOX_STROKE`、`inkRect.mjs` 之 `INK_PAD`。
-- 共用入口 `src/WPackageToolsE2e.mjs`：匯入 `src/` 內其他全部模組，default export 為含全部模組與上述三個常數之物件（依 §1 之分組排列）；引用它會一併載入全部模組與其依賴（playwright、sharp 等），只用少數函數者宜深層引用。`tools/` 之 CLI 為可執行腳本，不經入口匯入。
-- 依賴只用本套件已列者：playwright（經 `launchChromium`）、pixelmatch、pngjs、sharp、json5，以及 wsemi（2026-10-30 起，僅 `listenerPids`／`killPortListeners` 深層引用其 `wsemi/src/execProcessPortPidsSync.mjs` 查埠之監聽者，不經 wsemi 主入口）；不引入 lodash。
+- 共用入口 `src/WPackageToolsE2e.mjs`：匯入 `src/` 內其他全部模組，default export 為含全部模組與上述三個常數之物件（依 §1 之分組排列）；引用它會一併載入全部模組與其依賴（w-playwright、sharp 等），只用少數函數者宜深層引用。`tools/` 之 CLI 為可執行腳本，不經入口匯入。
+- 依賴只用本套件已列者：w-playwright（經 `launchBrowser`；2026-11-13 起取代直接依賴 playwright，見〈Installation〉之〈瀏覽器之取得與啟動〉）、pixelmatch、pngjs、sharp、json5，以及 wsemi（2026-10-30 起，僅 `listenerPids`／`killPortListeners` 深層引用其 `wsemi/src/execProcessPortPidsSync.mjs` 查埠之監聽者，不經 wsemi 主入口）；不引入 lodash。
 - 外部副作用（exec、spawn、fetch、process、globalThis、寫檔函數或落點）皆可由 opt 注入，供單元測試。
 - 各函數之預設值即 w-web-sso 現行組態所用者；其他專案之差異以選項重現。
 
@@ -51,9 +61,8 @@ let browser2 = await wpte.launchBrowser()
 
 | 檔 | 用途 | 狀態 |
 |---|---|---|
-| `launchChromium(opt)` | 啟動 Playwright 之 Chromium；所需版本之瀏覽器不存在時先以 Playwright 自身之 CLI 下載（不依賴安裝腳本），Linux 缺系統相依時先 install-deps；指定 `channel`（如 `'chrome'`）或 `executablePath` 時不自動安裝 | 單元（`launchChromiumCore`）、實跑（全新環境下載、已安裝不重下、多程序並發只下載一次） |
 | `chromiumLaunchArgs` | 確定性渲染六旗標（凍結陣列，C1） | sso 實跑 |
-| `launchBrowser(opt)` | 唯一 launch 出口：`launchChromium({ headless:true, ...opt, args:[...六旗標, ...opt.args] })` | sso 實跑 |
+| `launchBrowser(opt)` | 唯一 launch 出口（2026-11-13 起經 w-playwright）：`wpw.launchChromium({ headless:true, autoInstall:true, installDeps:true, ...opt, args:[...六旗標, ...opt.args] })`（`opt.autoInstall`／`installDeps` 非布林值時用預設 true）；w-playwright 於 args 之末合併唯一之 `--disable-features`（Playwright 預設＋守門功能 `AutofillAiWalletPrivatePasses`＋呼叫端自給者），受管瀏覽器缺檔時安裝一次再啟動；錯誤為帶 `code` 之固定詞彙錯誤（見〈Installation〉與 §5 之 2026-11-13 條） | sso 實跑、接線（`api-launchBrowserWiring`：替身與 `next()` 真啟動） |
 | `captureStable(page, opt)` | 標準圖截圖唯一入口（C6），序列見 §2.3 | sso 實跑、瀏覽器 |
 | `captureStableWithBox(page, target, opt)` | 全頁穩定截圖＋紅框（C7）＋遮罩（C8）；**目標找不到／尺寸為 0／夾邊後過小即拋錯**（2026-09-28；原為靜默回無框圖），`allowNoBox:true` 才容許無框；target 另接受**量測型目標** `{scroll, measure(page), label, probe}`（捲入與等待之後才量）；**被蓋住檢查**：選擇器／Locator 目標（與量測型目標之 `probe`）中心點之最上層元素若為無關元素（彈窗遮罩等）即拋錯（SKILL §7.3-4），`coverCheck:'warn'\|'off'` 或環境變數 `E2E_COVER_CHECK` 調整；**捲入**：目標比其可視區（視窗與各層捲動容器之交集）大且已部分入鏡時，捲入只會改變版面（使用者不會捲動＝假畫面），`scrollTall:false` 不捲、框可見部分，預設沿用捲入並印 `[box-scroll]` 告警；逐案判斷使用者此刻會不會捲動：切分頁後之整個檢視面板不會 → `itemsUnionBox(loc, { scroll: null })` 或 `scrollTall:false`（w-web-api display E2E-007 殷鑑），送出請求後出現在下方之回應卡會 → 照常捲入（w-web-api apitest E2E-001-3） | sso 實跑、瀏覽器 |
 | `itemsUnionBox(itemSel, {within, scroll, fit, inkPad, graphics, graphicAreas})` | 量測型目標：可見項目之聯集夾在範圍容器內（清單／樹／選單／時間軸／工具列項目；SKILL §7.2 清單列、§7.3-2 不框整區空白）；`itemSel` 可為選擇器、其陣列或 **Locator**（同一頁內量測函式；Locator 者輸出 `probe` 供被蓋住檢查）；`fit:true` 依**元素自身有無可見邊界**決定量法：有（底色異於背後、邊框、陰影、背景圖、替換元素）量元素本身，無（透明容器、整行文字、開關與其標籤、勾選列、無內距之欄位列）改量**可見內容**（有邊界之子元素框與文字行框之聯集，透明內距不計）並**一律外擴 `inkPad`（預設 `INK_PAD`=4）**——勾選框、開關軌道、圖示與文字同留白，免紅框壓字；可見內容恰為單一有邊界元素（透明外層包著之面板、按鈕）時視同框該元素、不外擴；`fit` 另使**框線不蓋框外內容**：框線中心置於與相鄰項目（自元素往上至多 4 層之緊鄰兄弟，四向各取最近一層）**可見範圍**之間隙正中——可見範圍為有邊界者之元素框、無邊界者之子元素與文字聯集（不取含透明內距之元素框，免把框線拉回目標自身文字）；空白間隔不算鄰項；`position:fixed` 浮層（下拉清單、浮出面板；全畫面者除外）之外的頁面內容以命中測試找（文字、晶片／按鈕／觸發區級之有邊界元件、圖示與表單元件；大容器底色、整張圖表、遮罩後之背景不算），框線置於「目標內容」與「浮層外最近內容」之間隙正中——目標涵蓋整個浮層時（浮層本身、其透明外層包裝或撐滿之面板）以面板內容計（撐滿面板寬或高之標頭列、清單底色屬結構，改看其內文字與元件）、框線可退入面板內距，四周無內容照常外擴；**圖形內容**（Gitea issue #6）：浮層疊在大型 svg/canvas 圖表上時，框線不蓋其下之資料線——`graphics`（預設 `true`）自動判定 svg 圖形（幾何判定，不靠命中測試）與可讀 2d canvas 之像素為框外內容，`graphicAreas`（選擇器字串或陣列）宣告 img/video/WebGL/跨域污染 canvas/地圖等無從自動判定者整區視為內容；規則、受影響者、逃生口與已知限制見 §2.7；環境變數 `E2E_BOX_DEBUG` 有值時印出量測細節（含各邊命中之圖形） | 瀏覽器（2026-10-20 加 graphics、graphicAreas；2026-09-28 新增；同日加 Locator、可見邊界判準（邊框須 ≥ 3 邊）、inkPad、相鄰與浮層夾邊、鄰項改以可見範圍計、浮層改以命中測試取間隙正中、可見內容一律外擴、透明外層之面板） |
@@ -496,7 +505,7 @@ assert.strictEqual(await page.textContent('#url'), `http://127.0.0.1:${resolveE2
 
 ## 3. 採用步驟（以 w-web-sso 為例）
 
-1. **單一橋接檔**（`test/tools/e2eLib.mjs`）轉出本套件模組；共用層與測試檔一律自橋接檔 import，套件路徑只寫在這一檔（原經 w-web-sso 之 `srcPack/` 橋接者，只需把前綴改為 `'w-package-tools-e2e/src/'`；切換時只升本套件、不連帶升 playwright，Chromium 改版可能使標準圖全面變動，見 §5）：
+1. **單一橋接檔**（`test/tools/e2eLib.mjs`）轉出本套件模組；共用層與測試檔一律自橋接檔 import，套件路徑只寫在這一檔（原經 w-web-sso 之 `srcPack/` 橋接者，只需把前綴改為 `'w-package-tools-e2e/src/'`；切換時只升本套件，使用端不另裝 playwright（Playwright 之版本由本套件所依之 w-playwright 精確釘定，Chromium 改版可能使標準圖全面變動，見 §5）：
 
 ```js
 export { default as createServiceManager } from 'w-package-tools-e2e/src/createServiceManager.mjs'
@@ -542,6 +551,20 @@ let captureStableWithBox = (page, target, opts = {}) => pkgCaptureStableWithBox(
 6. 結束後 `diffBaselineSnapshots` 須 unchanged（added / removed / changed / touched 皆空）且 `git status --porcelain -- test/pics` 為空。
 
 ## 5. 改版須知：哪些變更會動到使用端之標準圖
+
+### Breaking changes（2026-11-13，改經 w-playwright 啟動；移除 `launchChromium`、`launchChromiumCore`）
+
+**預期不影響標準圖像素**（推測，下游須實測確認）：適用於預設呼叫（`launchBrowser()` 或只附加非功能開關之旗標，未給 `ignoreDefaultArgs`）——Playwright 版本相同（playwright-core 1.64.1，headless shell revision 1248；w-playwright 於實裝版本不符時拒絕啟動，故能啟動即為此版）、六旗標相同；命令列只多停用一個功能 `AutofillAiWalletPrivatePasses`（Chromium 之自動填入功能），Playwright 之預設停用清單不變——`[LB07]` 以 Playwright 之 `<launching>` 紀錄（`DEBUG=pw:browser`）讀實際命令列：恰一個 `--disable-features`，其集合＝Playwright 預設∪守門功能，六旗標皆在。呼叫端自給功能開關或 `ignoreDefaultArgs` 者，合併結果與舊路徑不同（見下），像素可能改變。新舊兩路徑未做同頁截圖之直接比對（舊路徑屬未經 w-playwright 之啟動，本輪不執行）；本套件無標準圖，內部之像素測試（`e2e-captureEquivalence` 等）於新路徑全綠；使用端升版後跑一次比對，若有差異即停下回報，不得逕自重產。
+
+- **移除 `launchChromium`、`launchChromiumCore`**（模組 `src/launchChromium.mjs`、`src/launchChromiumCore.mjs` 與 `WPackageToolsE2e` 入口之兩鍵），不保留相容層。深層引用 `w-package-tools-e2e/src/launchChromium.mjs` 者改為 `import wpw from 'w-playwright'` 並呼叫 `wpw.launchChromium({ ...原選項, autoInstall: true, installDeps: true })`（`autoInstall` 維持缺檔自動安裝；`installDeps` 維持舊版於 Linux 缺系統相依時之 install-deps，限制見〈Installation〉第 2 點；不改用 `launchBrowser`，以免多六旗標而改變像素），`devDependencies` 加 `w-playwright`。其單元與全新環境下載之測試移由 w-playwright 涵蓋（`unit-ensureChromium`、`api-autoInstall`）；差異：舊之並發案以下載輸出計「三行程合計只下載一次」，w-playwright 之並發案斷言「各行程至多安裝一次、全部啟動成功」，合計下載次數未再斷言。
+- **`launchBrowser` 改呼叫 `wpw.launchChromium({ headless: true, autoInstall: true, installDeps: true, ...opt, args: [...六旗標, ...opt.args] })`**（原經本套件之 `launchChromium` 直呼 playwright 之 `chromium.launch`）；`opt.autoInstall`、`opt.installDeps` 非布林值（含 `undefined`、`null`）時改用本函數之預設 `true`（不交由 w-playwright 之預設 `false`）。呼叫端可見之差異：
+  - 命令列之 `--disable-features` 由 Playwright 預設串改為 w-playwright 合併之一串（預設＋`AutofillAiWalletPrivatePasses`＋呼叫端自給者），恆為 `args` 之最後一個元素；呼叫端於 `opt.args` 自給之 `--disable-features` 吸收進此串（原為兩串並存，Chromium 只取最後一串，使 Playwright 預設串失效）。呼叫端自給之 `--enable-features` 另合併為唯一之一串（Playwright 預設啟用項＋呼叫端項），其中屬守門功能、或同時被呼叫端停用之項目剔除。
+  - **`opt.args` 任一元素無效**（非字串、前後有空白、不以 `-` 開頭、等於 `--`、`--single-argument`、含控制字元、功能項非 ASCII 等，全表見 w-playwright README），或連同六旗標之元素數逾 10000（即附加逾 9994 項）時，**整個 `args`（含六旗標）視為 `[]`**，只留守門之一串而照常啟動（原為 Playwright 拋錯或原樣傳入）——截圖將失去確定性旗標；呼叫端只給合法旗標。`ignoreDefaultArgs: true` 不支援（視為 `[]`）。`headless`、`channel`、`executablePath`、`ignoreDefaultArgs` 由 w-playwright 檢測，非預期之值視為未給（`debug: true` 時提示）。
+  - **錯誤改為 w-playwright 之固定詞彙錯誤**（帶 `code`：`E_LAUNCH`、`E_LAUNCH_TIMEOUT`、`E_BROWSER_MISSING`、`E_INSTALL`、`E_ENV`、`E_PW_VERSION`、`E_LOGON_GUARD`），不附 Playwright 原錯誤（原錯誤只交呼叫端自給之 `opt.funLog('launch-error', …)`）；依 Playwright 訊息文字判讀者改判 `err.code`。
+  - 環境變數 `PWDEBUG` 為 inspector 模式之值、`SELENIUM_REMOTE_URL` 有值時拒絕啟動（`E_ENV`；細節見〈Installation〉第 6 點）；`W_PLAYWRIGHT_LOGON_GUARD` 開啟時，非 headless shell 之啟動先讀錯誤密碼次數，≥1、帳號已鎖定或讀不到即 `E_LOGON_GUARD`（非 Windows 一律拒絕）；依賴樹之 playwright-core 非 1.64.1（如以 overrides 換版）即拒絕（`E_PW_VERSION`）。
+  - 自動安裝：原以 playwright 之 `cli.js install --only-shell|--no-shell chromium` 安裝（輸出繼承主控台、未隱藏視窗、安裝失敗訊息只含離開碼），改由 w-playwright 安裝（隱藏視窗、`--no-remove`；安裝輸出交 `opt.funLog`，不再印到主控台；失敗為 `E_INSTALL`）；安裝種類同前（無頭且未給通道為 headless shell，其餘受管者為完整 Chromium），`channel: 'chrome-for-testing'` 亦列為受管。Linux 之 install-deps 原可於主控台互動輸入 sudo 密碼，現不接主控台輸入（見〈Installation〉第 2 點）。
+  - `opt` 可另給 w-playwright 之自用鍵 `debug`、`funLog`、`onTrace`；`autoInstall`、`installDeps` 可由 `opt` 以布林值覆寫。`opt` 本身須為物件（`null` 於讀 `opt.args` 時即拋原生 `TypeError`，與改版前相同，非 w-playwright 之固定詞彙錯誤）。
+- **依賴**：`dependencies` 移除 `playwright`，新增 `w-playwright ^1.0.1`。接線測試 `test/api-launchBrowserWiring.test.mjs` 以 `wpw.setBrowserTypeForTest` 驗證本套件之啟動經 w-playwright。
 
 ### 行為變更（2026-11-09，pixelmatch 8 之比對度量；使用端既有標準圖之比對結果可能改變）
 
@@ -617,13 +640,13 @@ let captureStableWithBox = (page, target, opts = {}) => pkgCaptureStableWithBox(
 - 新增函數、新增選項（預設值維持原行為）不影響既有標準圖；一向以「預設值取 w-web-sso 現行行為、其他專案以選項重現」擴充。
 - 已知缺陷之部分截圖與 `--names`（Gitea issue #4、#5）：新增 opt-in（`createKnownDefect` 之 `shots`、`runBaselineCase` 之 `defectStages`、`gate.noteKnownDefect`、`createBaselineGate` 之 `log`），**不影響既有標準圖**，使用端不需重產。唯一語意變更：`createKnownDefect(msg, { shots })` 於 1.0.8 靜默忽略 `shots`，此後生效；`gate.finalize()` 回傳值由 undefined 改為 `{ knownDefects }`，有缺陷紀錄時多印摘要；整案缺陷 + `--names` 只命中它時，`finalize` 不再拋錯（離開碼 1 → 0）。部分缺陷路徑會呼叫 `semantic`／`verify`（`ctx.knownDefect` 為該錯誤），自寫包裝遷移時掛鉤須能分流。
 - 收集模式、有變更才改寫、埠位移（2026-10-28，Gitea issue #19；§2.8～§2.10）：三項皆預設關閉，**不影響既有標準圖與預設行為**（以 1.0.10 與現行模組之差分 34 組全同——含回傳、錯誤訊息、日誌、寫檔、證據檔名與位元組、服務物件與參數物件之可列舉鍵、`runBaselineCase` 回傳 Promise 之完成微工作時序——與既有測試全綠證明；差分為抽樣，未涵蓋之觀察方式如反射不可列舉屬性另見下列）。新增而不改既有可列舉形狀者：`createServiceManager` 之 `spawn`／`beforeSpawn` 參數之 `port` 與回傳之 `portOf`（皆不可列舉）；共用入口多五個鍵（新增模組 `createBaselineCollector`、`writeBaselineIfChanged`、`resolveE2ePort`、`reviewPendingShots`、`acceptPendingShots`）與 CLI `tools/reviewPending.mjs`；`assertBaselineMatch` 之證據 capture 改以排他建立（非併發時檔名與內容不變，跨行程同毫秒撞名時改用 `-N`）。開啟收集模式者 `it()` 之失敗訊息格式改為 §2.8 之彙整格式，報告判讀程式須配合。
-- 依賴升版（playwright 帶入之 Chromium、sharp 之 SVG 光柵化）亦可能改變截圖或紅框像素（推測，需實測確認）；升版後使用端依 §4 等價驗證。
+- 依賴升版（w-playwright 所釘之 playwright-core 帶入之 Chromium、sharp 之 SVG 光柵化）亦可能改變截圖或紅框像素（推測，需實測確認）；升版後使用端依 §4 等價驗證。
 - 首次收錄（2026-09-29）之 `src/` 與四專案 2026-09-28 22:52 起實跑之版本行為相同：51 檔中 48 檔逐位元相同，其餘 3 檔只改註解或等值字面（`compareImageDirs`、`runBaselineCase` 之 JSDoc，`itemsUnionBox` 之字串字面）。
 - 2026-09-30（1.0.2 之下一版）：`gridContentBox` 空表之「無資料」訊息改為外擴 `INK_PAD` 後再取聯集，**空表截圖之紅框底下移 4px**（原字形墨跡距框內緣僅 3–4px，低於技能要求之約 5px）。只影響「無資料列」之截圖（有資料列之分支未改）；使用端升版後跑一次比對，失敗者即為全部受影響之圖，取得授權後以 `--write-mode changed` 重產並逐張審；`noRowsPad:0` 可重現舊行為供等價對照。同版其餘變更（`probeStuckTooltip`、`runBaselineCase` 之 `[write]` 日誌、`runIsolatedE2e` 之 `targets` 與啟動方式）不影響截圖像素。
 
 ## 6. 開發與測試
 
-- `npm test`：mocha 執行 `test/*.test.mjs`——單元測試（注入假物件）、以 `page.setContent` 之無伺服器瀏覽器測試（首次由 `launchChromium` 下載對應版本之瀏覽器）、`launchChromium` 之全新環境下載測試；不需外部伺服器（`unit-portOffset` 之 `[P05]` 自行起一個本機子行程服務於 127.0.0.1:19030＝基準埠 18930＋位移 100，測完關閉並回驗埠釋放；兩埠須空閒，否則該條失敗並註明）。
+- `npm test`：mocha 執行 `test/*.test.mjs`——單元測試（注入假物件）、以 `page.setContent` 之無伺服器瀏覽器測試（經 `launchBrowser` 啟動 headless shell；首次由 w-playwright 安裝對應版本之瀏覽器）、`launchBrowser` 經 w-playwright 之接線測試（`api-launchBrowserWiring`，`[LB*]`：替身與 spy 驗送出之選項，`[LB04]` 以 `next()` 真啟動 headless shell，`[LB07]` 以子行程不掛替身真啟動並讀 Playwright 之 `<launching>` 紀錄驗實際命令列）；全套只啟動 headless shell，不啟動真 Chrome、Edge、完整 Chromium；原 `launchChromium` 之全新環境下載測試已移入 w-playwright（`api-autoInstall`、`unit-ensureChromium`）；不需外部伺服器（`unit-portOffset` 之 `[P05]` 自行起一個本機子行程服務於 127.0.0.1:19030＝基準埠 18930＋位移 100，測完關閉並回驗埠釋放；兩埠須空閒，否則該條失敗並註明）。
 - 測試以 cwd 為根，中介檔落 `./test/_tmp/<名>`（gitignore）並於各測試 `after` 刪除。
 - `test/e2e-captureEquivalence.test.mjs` 含 w-web-sso／w-web-perm 當時實作之凍結複本（逐位元等價之對照組）與框幾何之專測，屬行為契約，勿因「看起來重複」刪除；凍結複本區段以 `eslint-disable` 註明保持逐字。
 - `test/e2e-itemsUnionBoxGraphics.test.mjs`：`itemsUnionBox` 圖形內容（svg 圖形、2d canvas、`graphicAreas`）之真 Chromium 語意/幾何測試，標題前綴 `[ID]` 對應 `CLAUDE_rulebook.md` 表 C；斷言以「無圖形內容時之量框」與「框線外緣不越過內容」為準，無標準圖。

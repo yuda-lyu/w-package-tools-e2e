@@ -1,5 +1,3 @@
-import launchChromium from './launchChromium.mjs'
-import launchChromiumCore from './launchChromiumCore.mjs'
 import chromiumLaunchArgs from './chromiumLaunchArgs.mjs'
 import pixelmatchOpt from './pixelmatchOpt.mjs'
 import launchBrowser from './launchBrowser.mjs'
@@ -69,14 +67,14 @@ import acceptPendingShots from './acceptPendingShots.mjs'
 // WPackageToolsE2e.mjs — e2e 測試與標準圖(pixel baseline)共用設施之共用入口
 //
 // 匯入 ./src 內其他全部模組, 以單一物件對外提供; 各模組亦可逐一以 w-package-tools-e2e/src/<模組>.mjs 深層引用.
-// 引用本入口會一併載入全部模組與其依賴(playwright、sharp 等), 只用少數函數者宜深層引用.
+// 引用本入口會一併載入全部模組與其依賴(w-playwright、sharp 等), 只用少數函數者宜深層引用.
 // ./tools 之盤點 CLI 為可執行腳本(引用即執行並可能結束行程), 不在此匯入, 用法見各檔檔頭.
 
 
 /**
  * e2e 測試與標準圖(pixel baseline)共用設施
  *
- * @returns {Object} 回傳物件，其內含截圖與影像(launchChromium、launchChromiumCore、chromiumLaunchArgs、launchBrowser、captureStable、captureStableWithBox、itemsUnionBox、inkRect、waitAlertGone、canvasInkRects、composeBox、stepShots、maskRegions、overlayRegions、overlayImageAt、cropRegion、pixelmatchOpt、assertBaselineMatch、typeIntoInput、typeIntoNthInput、waitUntilExist、pollUntil、collectDomText、pageHasText、assertTextSpec、waitColResizeOverlay、waitDrawerReady、probeStuckTooltip、resetAgGridScroll、rowBoxSel、gridContentBox、waitGridIdle)、產製與比對管線(getE2eMode、createBaselineGate、findOrphanBaselines、runBaselineCase、normalizeShots、openCasePage、createKnownDefect、createBaselineCollector、writeBaselineIfChanged)、生命週期與行程(createServiceManager、resolveE2ePort、reserveE2ePorts、assertE2eBasePort、checkPortFree、reapShardProcesses、registerCleanupHooks、probeHttp、createTempSettings、runIsolatedE2e、runShardedE2e、planE2eShards、listDirLinks、removeE2eInstance、killOwnTree、isChildAlive、waitChildExit、pidExists、sleepSync、killPortListeners、listenerPids)、驗證工具(snapshotBaselines、diffBaselineSnapshots、compareImageDirs、reviewPendingShots、acceptPendingShots)，以及框幾何常數BOX_PAD、BOX_STROKE、INK_PAD
+ * @returns {Object} 回傳物件，其內含截圖與影像(chromiumLaunchArgs、launchBrowser、captureStable、captureStableWithBox、itemsUnionBox、inkRect、waitAlertGone、canvasInkRects、composeBox、stepShots、maskRegions、overlayRegions、overlayImageAt、cropRegion、pixelmatchOpt、assertBaselineMatch、typeIntoInput、typeIntoNthInput、waitUntilExist、pollUntil、collectDomText、pageHasText、assertTextSpec、waitColResizeOverlay、waitDrawerReady、probeStuckTooltip、resetAgGridScroll、rowBoxSel、gridContentBox、waitGridIdle)、產製與比對管線(getE2eMode、createBaselineGate、findOrphanBaselines、runBaselineCase、normalizeShots、openCasePage、createKnownDefect、createBaselineCollector、writeBaselineIfChanged)、生命週期與行程(createServiceManager、resolveE2ePort、reserveE2ePorts、assertE2eBasePort、checkPortFree、reapShardProcesses、registerCleanupHooks、probeHttp、createTempSettings、runIsolatedE2e、runShardedE2e、planE2eShards、listDirLinks、removeE2eInstance、killOwnTree、isChildAlive、waitChildExit、pidExists、sleepSync、killPortListeners、listenerPids)、驗證工具(snapshotBaselines、diffBaselineSnapshots、compareImageDirs、reviewPendingShots、acceptPendingShots)，以及框幾何常數BOX_PAD、BOX_STROKE、INK_PAD
  * @example
  *
  * import wpte from 'w-package-tools-e2e/src/WPackageToolsE2e.mjs'
@@ -94,8 +92,6 @@ import acceptPendingShots from './acceptPendingShots.mjs'
 let WPackageToolsE2e = {
 
     //截圖與影像
-    launchChromium,
-    launchChromiumCore,
     chromiumLaunchArgs,
     launchBrowser,
     captureStable,
