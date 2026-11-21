@@ -1,11 +1,11 @@
-//itemsUnionBox 圖形內容(svg 圖形 / 2d canvas 像素 / graphicAreas 宣告區)測試——對應 CLAUDE_rulebook.md 表 C(§7.2), 標題前綴 [ID] 即格類 ID
+//itemsUnionBox 圖形內容(svg 圖形 / 2d canvas 像素 / graphicAreas 宣告區)測試——對應 sgud/rule/rulebook.md 表 C(§7.2), 標題前綴 [ID] 即格類 ID
 //斷言之真理源為「無圖形內容時之量框」(blank 基線)與「框線外緣 <= 內容近緣」之幾何關係, 不引用實作之內部數值;
 //框線 = 量測矩形各邊外擴 BOX_PAD(6)px、描邊寬 BOX_STROKE(5)px, 故框線帶 = 矩形邊外 1 至 6px
 import assert from 'assert'
 import launchBrowser from '../src/launchBrowser.mjs'
 import itemsUnionBox from '../src/itemsUnionBox.mjs'
 
-//浮層: fixed, 左 300 上 150 寬 120(底 216、右 420), 兩項文字(padding 7px 8px)
+//浮層: fixed, 左 300 上 150 寬 120(右 420), 兩項文字(padding 7px 8px); 下緣 POP_BOTTOM 由頁面實量(見下)
 let POP = { l: 300, t: 150, w: 120 }
 let popHtml = (style = '') => `<div id="pop" style="position:fixed;z-index:20;left:${POP.l}px;top:${POP.t}px;width:${POP.w}px;background:#fff;box-shadow:0 2px 6px rgba(0,0,0,.3);font:14px sans-serif;${style}"><div tabindex="0" style="padding:7px 8px">OR</div><div tabindex="0" style="padding:7px 8px">AND</div></div>`
 let SV = { l: 20, t: 60, w: 760, h: 300 }
@@ -13,8 +13,11 @@ let svgOpen = (attr = '', style = '') => `<svg id="chart" style="position:absolu
 //視窗座標 → svg 座標
 let sx = (x) => x - SV.l
 let sy = (y) => y - SV.t
-//下緣下方 g px 之 1px 水平線(視窗 y = 216 + g + 0.5; 內容上緣 = 216 + g)
-let POP_BOTTOM = 216
+//浮層下緣(視窗 y): 於 before 以頁面實量取得, 不寫死——浮層高 = 兩項之(內距 7 + 一行文字之行高 + 內距 7), 行高(line-height:normal)依瀏覽器為 generic 字族 sans-serif 所選之字型而定,
+//而該字型隨瀏覽器之應用程式語系(navigator.language)而變(實測: Chromium 156 於 zh-TW 之 Windows 繼承系統語系 → 微軟正黑體、行高 19、下緣 216; Chromium 159 預設 en-US → Arial、行高 16、下緣 210; 2026-11-21);
+//以下凡與浮層下緣相關之位置一律寫成 POP_BOTTOM ± 間距(夾具之幾何關係不隨字型改變), 只可於 it/before 內(執行期)取用
+let POP_BOTTOM = null
+//下緣下方 g px 之 1px 水平線(視窗 y = POP_BOTTOM + g + 0.5; 內容上緣 = POP_BOTTOM + g)
 let lineAt = (g, extra = '', w = 1) => `<path d="M${sx(160)} ${sy(POP_BOTTOM + g + w / 2)} L${sx(560)} ${sy(POP_BOTTOM + g + w / 2)}" stroke="#c00" stroke-width="${w}" fill="none" ${extra}/>`
 let rectOf = (r) => ({ l: r.x, t: r.y, r: r.x + r.width, b: r.y + r.height })
 
@@ -25,6 +28,10 @@ describe('itemsUnionBox 圖形內容(svg 圖形、canvas 像素、graphicAreas)'
     before(async function() {
         browser = await launchBrowser()
         page = await (await browser.newContext({ viewport: { width: 800, height: 420 } })).newPage()
+        await page.setContent(`<body style="margin:0">${popHtml()}</body>`)
+        POP_BOTTOM = await page.evaluate(() => document.getElementById('pop').getBoundingClientRect().bottom)
+        //前提: 浮層下緣落在像素邊界(框線帶之列界 [K01][K02][N05] 依此設計; 下緣為小數時帶端點之列另有規則, 不屬本夾具)
+        assert.ok(Number.isInteger(POP_BOTTOM) && POP_BOTTOM > POP.t, `前提: 浮層下緣須為整數像素(實得 ${POP_BOTTOM})`)
     })
     after(async function() {
         await browser.close()
@@ -83,7 +90,7 @@ describe('itemsUnionBox 圖形內容(svg 圖形、canvas 像素、graphicAreas)'
     }
 
     describe('[C0x] 無內容/大型純色/既有 HTML 規則(不變)', function() {
-        it('[C01] 無任何內容: 四周空白照常外擴(下緣 = 浮層下緣 216)', async function() {
+        it('[C01] 無任何內容: 四周空白照常外擴(下緣 = 浮層下緣)', async function() {
             await load(popHtml())
             assert.strictEqual((await measure()).b, POP_BOTTOM)
         })
@@ -172,7 +179,7 @@ describe('itemsUnionBox 圖形內容(svg 圖形、canvas 像素、graphicAreas)'
     })
 
     describe('[D0x] 位置: 緊貼/間隔/方向(最小介入——只在框線帶內才介入)', function() {
-        //框線帶 = 矩形邊外 1 至 6px(浮層下緣 216 → 像素列 217–221 與帶相交); 另掃緊鄰矩形邊之一列(g=0, 守距: 與框線內緣相切, 且攔下延伸至框線四角之縱橫向內容)
+        //框線帶 = 矩形邊外 1 至 6px(浮層下緣 B → 像素列 B+1 至 B+5 與帶相交); 另掃緊鄰矩形邊之一列(g=0, 守距: 與框線內緣相切, 且攔下延伸至框線四角之縱橫向內容)
         for (let g of [0, 2, 5]) {
             it(`[D0${[0, 2, 5].indexOf(g) + 1}] 下方線距浮層下緣 ${g}px(框線帶內或緊鄰守距列): 退入`, async function() {
                 await load(svgOpen() + lineAt(g) + '</svg>' + popHtml())
@@ -228,7 +235,7 @@ describe('itemsUnionBox 圖形內容(svg 圖形、canvas 像素、graphicAreas)'
         })
         it('[E03] 不透明 div 蓋在圖形上: 圖形不算(該 div 之內容判定依舊規則)', async function() {
             //div 為有可見邊界之元素 → 舊規則已視為內容; 此處以「div 在下方 30px 以外」排除其影響, 圖形被另一不透明 div 蓋住
-            await expectSameAsBlank('被不透明 div 蓋住', svgLine() + `<div style="position:absolute;left:140px;top:210px;width:440px;height:30px;background:#fff"></div>` + popHtml())
+            await expectSameAsBlank('被不透明 div 蓋住', svgLine() + `<div style="position:absolute;left:140px;top:${POP_BOTTOM - 6}px;width:440px;height:30px;background:#fff"></div>` + popHtml())
         })
         it('[E04] 浮層自身含大 svg: 不算外部內容', async function() {
             await load(popHtml().replace('<div tabindex="0" style="padding:7px 8px">OR</div>', '<svg width="120" height="30"><path d="M0 15 L120 15" stroke="#c00" stroke-width="2"/></svg><div tabindex="0" style="padding:7px 8px">OR</div>'))
@@ -254,14 +261,14 @@ describe('itemsUnionBox 圖形內容(svg 圖形、canvas 像素、graphicAreas)'
 
     describe('[G0x] canvas / img / 宣告區', function() {
         let cv = (draw, style = '') => `<canvas id="cv" style="position:absolute;left:20px;top:60px;${style}" width="760" height="300"></canvas><script>(function(){var c=document.getElementById('cv');${draw}})()</script>`
-        let redLine = `var x=c.getContext('2d');x.strokeStyle='#c00';x.lineWidth=1;x.beginPath();x.moveTo(140,${POP_BOTTOM + 2.5 - 60});x.lineTo(540,${POP_BOTTOM + 2.5 - 60});x.stroke();`
+        let redLine = () => `var x=c.getContext('2d');x.strokeStyle='#c00';x.lineWidth=1;x.beginPath();x.moveTo(140,${POP_BOTTOM + 2.5 - 60});x.lineTo(540,${POP_BOTTOM + 2.5 - 60});x.stroke();`
         let white = `var x=c.getContext('2d');x.fillStyle='#fff';x.fillRect(0,0,760,300);`
         it('[G01] canvas 2d 透明底 + 線(緊貼 2px): 退入', async function() {
-            await load(cv(redLine) + popHtml())
+            await load(cv(redLine()) + popHtml())
             await expectAvoidsBottom('canvas 透明底', POP_BOTTOM + 2)
         })
         it('[G02] canvas 2d 不透明白底 + 線: 退入; 同畫布無線: 同無內容(不把整片白底當內容)', async function() {
-            await load(cv(white + redLine) + popHtml())
+            await load(cv(white + redLine()) + popHtml())
             await expectAvoidsBottom('canvas 白底+線', POP_BOTTOM + 2)
             await expectSameAsBlank('canvas 白底無線', cv(white) + popHtml())
         })
@@ -310,7 +317,7 @@ describe('itemsUnionBox 圖形內容(svg 圖形、canvas 像素、graphicAreas)'
             assert.deepStrictEqual(r2, r1, '陣列與字串同果; 無命中之選擇器不影響')
         })
         it('[G08] graphicAreas 區位於浮層內: 不算; 被淡底遮罩蓋住: 不算', async function() {
-            await expectSameAsBlank('區在浮層內', `<div id="in" style="position:fixed;left:${POP.l}px;top:${POP.t}px;width:${POP.w}px;height:66px;z-index:19"></div>` + popHtml(), { graphicAreas: '#in' })
+            await expectSameAsBlank('區在浮層內', `<div id="in" style="position:fixed;left:${POP.l}px;top:${POP.t}px;width:${POP.w}px;height:${POP_BOTTOM - POP.t}px;z-index:19"></div>` + popHtml(), { graphicAreas: '#in' })
             await expectSameAsBlank('區被遮罩蓋住', `<div id="big" style="position:absolute;left:20px;top:60px;width:760px;height:300px"></div><div style="position:fixed;z-index:10;left:0;top:0;width:100vw;height:100vh;background:rgba(0,0,0,.3)"></div>` + popHtml(), { graphicAreas: '#big' })
         })
         it('[G09] svg <use> 與 <image> 不自動判定(限制; 同無內容), <image> 可由 graphicAreas:"svg image" 宣告', async function() {
@@ -330,6 +337,8 @@ describe('itemsUnionBox 圖形內容(svg 圖形、canvas 像素、graphicAreas)'
     describe('[H0x] 結構', function() {
         it('[H01] 透明 fixed 外層 + 有底色面板(元件庫常見結構)之下方有線: 退入', async function() {
             await load(svgOpen() + lineAt(2) + '</svg>' + `<div id="wrap" style="position:fixed;z-index:20;left:300px;top:150px"><div style="padding:7px 8px;width:104px;background:#fff;box-shadow:0 2px 6px rgba(0,0,0,.3);font:14px sans-serif"><div>OR</div><div style="margin-top:14px">AND</div></div></div>`)
+            //前提: 面板(內距 7 + 行 + 間距 14 + 行 + 內距 7)與 #pop 同高, 線方位於面板下緣下方 2px
+            assert.strictEqual(await page.evaluate(() => document.querySelector('#wrap > div').getBoundingClientRect().bottom), POP_BOTTOM, '前提: 面板下緣 = 浮層下緣')
             let r = rectOf(await itemsUnionBox('#wrap', { fit: true }).measure(page))
             assert.ok(r.b + 6 <= POP_BOTTOM + 2, `框線外緣 ${r.b + 6} ≤ 內容上緣 ${POP_BOTTOM + 2}`)
         })
@@ -340,10 +349,11 @@ describe('itemsUnionBox 圖形內容(svg 圖形、canvas 像素、graphicAreas)'
             assert.ok(r.r + 6 <= 424, `右: 框線外緣 ${r.r + 6} ≤ 晶片左緣 424`)
         })
         it('[H03] 頁面已捲動(scrollY=100)之視窗座標', async function() {
-            await load(`<div style="height:160px"></div><svg width="760" height="300" style="display:block;margin-left:20px"><rect width="760" height="300" fill="#fff"/><path d="M180 258.5 L540 258.5" stroke="#c00" fill="none"/></svg><div style="height:1200px"></div>` + popHtml().replace('top:150px', 'top:250px'))
+            //浮層 fixed 於 top 250 → 視窗下緣 POP_BOTTOM + 100; 線之視窗 y = 頁面 y(svg 頂 160 + 路徑 y) - 捲動 100, 置於浮層下緣下方 2px(路徑 y = POP_BOTTOM + 42.5)
+            await load(`<div style="height:160px"></div><svg width="760" height="300" style="display:block;margin-left:20px"><rect width="760" height="300" fill="#fff"/><path d="M180 ${POP_BOTTOM + 42.5} L540 ${POP_BOTTOM + 42.5}" stroke="#c00" fill="none"/></svg><div style="height:1200px"></div>` + popHtml().replace('top:150px', 'top:250px'))
             await page.evaluate(() => window.scrollTo(0, 100))
             let r = rectOf(await itemsUnionBox('#pop', { fit: true }).measure(page))
-            assert.ok(r.b + 6 <= 318, `捲動後框線外緣 ${r.b + 6} ≤ 線上緣 318`)
+            assert.ok(r.b + 6 <= POP_BOTTOM + 102, `捲動後框線外緣 ${r.b + 6} ≤ 線上緣 ${POP_BOTTOM + 102}`)
         })
         it('[H04] position:absolute 之浮層(非 fixed): 浮層規則不適用(既有限制, 不在本次範圍)', async function() {
             await load(svgOpen() + lineAt(2) + '</svg>' + popHtml().replace('position:fixed', 'position:absolute'))
@@ -352,14 +362,16 @@ describe('itemsUnionBox 圖形內容(svg 圖形、canvas 像素、graphicAreas)'
     })
 
     describe('[J0x] 補強(變異驗證揭出之缺口)', function() {
-        it('[J01] 細於 1px 之線落在像素邊界(0.6px, 區間 [218.6, 219.2]): 取樣足跡仍須命中而退入', async function() {
-            await load(svgOpen() + `<path d="M${sx(160)} ${sy(219)} L${sx(560)} ${sy(219)}" stroke="#c00" stroke-width="0.6" fill="none"/></svg>` + popHtml())
-            await expectAvoidsBottom('0.6px 細線', 218.6)
+        it('[J01] 細於 1px 之線落在像素邊界(0.6px, 區間 [下緣+2.6, 下緣+3.2]): 取樣足跡仍須命中而退入', async function() {
+            await load(svgOpen() + `<path d="M${sx(160)} ${sy(POP_BOTTOM + 3)} L${sx(560)} ${sy(POP_BOTTOM + 3)}" stroke="#c00" stroke-width="0.6" fill="none"/></svg>` + popHtml())
+            await expectAvoidsBottom('0.6px 細線', POP_BOTTOM + 2.6)
         })
         //面板大於 fixed 外層(寬高 0 之透明外層 + absolute 面板)之結構: 面板蓋住之圖形看不見, 面板內之宣告區屬浮層自身
         let overflowPanel = `<div id="wrap" style="position:fixed;z-index:20;left:${POP.l}px;top:${POP.t}px;width:0;height:0"><div id="panel" style="position:absolute;left:0;top:0;width:${POP.w}px;background:#fff;box-shadow:0 2px 6px rgba(0,0,0,.3);font:14px sans-serif"><div style="padding:7px 8px">OR</div><div style="padding:7px 8px">AND</div><img id="ico" alt="" width="16" height="16" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" style="position:absolute;left:90px;top:40px"></div></div>`
         it('[J02] 浮層面板大於 fixed 外層: 面板正下方(被面板蓋住)之圖形不算內容', async function() {
-            await load(svgOpen() + `<path d="M${sx(310)} ${sy(POP.t + 62)} L${sx(410)} ${sy(POP.t + 62)}" stroke="#c00" stroke-width="2" fill="none"/></svg>` + overflowPanel)
+            //線在面板下緣之上 4px(面板與 #pop 同高, 下緣 = POP_BOTTOM): 完全被面板蓋住
+            await load(svgOpen() + `<path d="M${sx(310)} ${sy(POP_BOTTOM - 4)} L${sx(410)} ${sy(POP_BOTTOM - 4)}" stroke="#c00" stroke-width="2" fill="none"/></svg>` + overflowPanel)
+            assert.strictEqual(await page.evaluate(() => document.getElementById('panel').getBoundingClientRect().bottom), POP_BOTTOM, '前提: 面板下緣 = 浮層下緣')
             let withLine = rectOf(await itemsUnionBox('#wrap', { fit: true }).measure(page))
             await load(svgOpen() + '</svg>' + overflowPanel)
             assert.deepStrictEqual(withLine, rectOf(await itemsUnionBox('#wrap', { fit: true }).measure(page)), '線被面板完全蓋住: 同無線')
@@ -373,7 +385,7 @@ describe('itemsUnionBox 圖形內容(svg 圖形、canvas 像素、graphicAreas)'
             let ov = (inner) => `<div id="wrap" style="position:fixed;z-index:20;left:${POP.l}px;top:${POP.t}px;width:${POP.w}px;background:#fff;box-shadow:0 2px 6px rgba(0,0,0,.3);font:14px sans-serif"><div style="padding:7px 8px">OR</div><div style="padding:7px 8px">AND</div>${inner}</div>`
             await load(ov(''))
             let base = rectOf(await itemsUnionBox('#wrap', { fit: true }).measure(page))
-            await load(ov(`<svg width="600" height="66" style="position:absolute;left:${POP.w + 2}px;top:0;pointer-events:none"><path d="M0 10 L600 10 M0 40 L600 40" stroke="#c00" stroke-width="2" fill="none"/></svg>`))
+            await load(ov(`<svg width="600" height="${POP_BOTTOM - POP.t}" style="position:absolute;left:${POP.w + 2}px;top:0;pointer-events:none"><path d="M0 10 L600 10 M0 40 L600 40" stroke="#c00" stroke-width="2" fill="none"/></svg>`))
             assert.deepStrictEqual(rectOf(await itemsUnionBox('#wrap', { fit: true }).measure(page)), base)
         })
         it('[J04] 不繪製容器(defs/pattern/marker/symbol)內圖形之幾何不得被當內容(浮層貼近視窗左上角, 零矩形落入掃描範圍)', async function() {
@@ -388,7 +400,7 @@ describe('itemsUnionBox 圖形內容(svg 圖形、canvas 像素、graphicAreas)'
 
     describe('[L0x] 退入位置: 框線外緣退到內容前 1px(剛好不蓋), 放不下描邊時取間隙正中', function() {
         it('[L01] 四邊各自: 框線外緣距圖形內容恰 1px(浮層不因圖形而縮到只剩文字)', async function() {
-            //下: 水平線占 [218, 219] → 外緣 217; 上: 線占 [147, 148] → 外緣 149; 右: 垂直線占 [422, 423] → 外緣 421; 左: 垂直線占 [297, 298] → 外緣 299
+            //下: 水平線占 [下緣+2, 下緣+3] → 外緣 下緣+1; 上: 線占 [147, 148] → 外緣 149; 右: 垂直線占 [422, 423] → 外緣 421; 左: 垂直線占 [297, 298] → 外緣 299
             await load(svgOpen() + lineAt(2) + '</svg>' + popHtml())
             assert.strictEqual((await measure()).b + 6, POP_BOTTOM + 2 - 1, '下')
             await load(svgOpen() + `<path d="M${sx(160)} ${sy(POP.t - 2.5)} L${sx(560)} ${sy(POP.t - 2.5)}" stroke="#c00" fill="none"/></svg>` + popHtml())
@@ -431,11 +443,11 @@ describe('itemsUnionBox 圖形內容(svg 圖形、canvas 像素、graphicAreas)'
                 assert.ok(r.r + 6 <= POP.l + POP.w + 1, `右側水平線列 ${row}: 框線外緣 ${r.r + 6} 須 ≤ 內容左緣 ${POP.l + POP.w + 1}`)
             }
         })
-        it('[K02] 框線帶之界: 下方線在列 221(帶內)退入; 在列 222、223(帶外)與無內容逐位元相同; 右側欄 425 退入、426 不動', async function() {
+        it('[K02] 框線帶之界: 下方線在列 下緣+5(帶內)退入; 在列 下緣+6、+7(帶外)與無內容逐位元相同; 右側欄 425 退入、426 不動', async function() {
             await load(grid(lineAt(5)))
-            assert.ok((await measure()).b < POP_BOTTOM, '列 221(間隙 5)退入')
-            await expectSameAsBlank('列 222', grid(lineAt(6)))
-            await expectSameAsBlank('列 223', grid(lineAt(7)))
+            assert.ok((await measure()).b < POP_BOTTOM, `列 ${POP_BOTTOM + 5}(間隙 5)退入`)
+            await expectSameAsBlank(`列 ${POP_BOTTOM + 6}`, grid(lineAt(6)))
+            await expectSameAsBlank(`列 ${POP_BOTTOM + 7}`, grid(lineAt(7)))
             let vline = (col) => `<path d="M${sx(col + 0.5)} ${sy(100)} L${sx(col + 0.5)} ${sy(300)}" stroke="#c00" stroke-width="1" fill="none"/>`
             await load(grid(vline(POP.l + POP.w + 5)))
             assert.ok((await measure()).r < POP.l + POP.w, '欄 425 退入')
@@ -498,7 +510,7 @@ describe('itemsUnionBox 圖形內容(svg 圖形、canvas 像素、graphicAreas)'
             await expectSameAsBlank('有色全幅底', `<svg style="position:absolute;left:20px;top:60px" width="${SV.w}" height="${SV.h}"><rect width="${SV.w}" height="${SV.h}" fill="#e8eef8"/></svg>` + popHtml())
         })
         it('[K11] 小於 480x120 之 svg/canvas(圖示、迷你圖)不另做圖形判定(舊規則已以整個元素框為內容): 浮層四周有 400 個小 svg 圖示時 graphics 開與關之 elementsFromPoint 次數相同', async function() {
-            let icons = Array.from({ length: 400 }, (_, i) => `<svg width="16" height="16" style="position:absolute;left:${300 + (i % 25) * 4}px;top:${209 + Math.floor(i / 25) * 3}px"><path d="M0 8 L16 8" stroke="#c00" fill="none"/></svg>`).join('')
+            let icons = Array.from({ length: 400 }, (_, i) => `<svg width="16" height="16" style="position:absolute;left:${300 + (i % 25) * 4}px;top:${POP_BOTTOM - 7 + Math.floor(i / 25) * 3}px"><path d="M0 8 L16 8" stroke="#c00" fill="none"/></svg>`).join('')
             await load(icons + popHtml())
             assert.strictEqual(await countEfp(true), await countEfp(false))
         })
@@ -507,8 +519,10 @@ describe('itemsUnionBox 圖形內容(svg 圖形、canvas 像素、graphicAreas)'
             let withLine = (y) => svgOpen() + `<path d="M310 ${sy(y)} L410 ${sy(y)}" stroke="#c00" fill="none"/></svg>` + panel
             await load(svgOpen() + '</svg>' + panel)
             let base = rectOf(await itemsUnionBox('#wrap', { fit: true }).measure(page))
-            await load(withLine(216.5))
-            assert.deepStrictEqual(rectOf(await itemsUnionBox('#wrap', { fit: true }).measure(page)), base, '線在面板下內距內(面板底 218): 同無線')
+            //面板底(內距 8 + 行 + 間距 14 + 行 + 內距 8, 行高依字型)由頁面實量; 線之中心在面板底之上 1.5px(占 [底-2, 底-1]), 落在下內距 8px 之內
+            let pb = await page.evaluate(() => document.getElementById('panel').getBoundingClientRect().bottom)
+            await load(withLine(pb - 1.5))
+            assert.deepStrictEqual(rectOf(await itemsUnionBox('#wrap', { fit: true }).measure(page)), base, `線在面板下內距內(面板底 ${pb}): 同無線`)
         })
         it('[K12] 含翻轉/旋轉之 CSS 變換的 canvas 無從自動判定(座標對應不成立): 預設同無內容, graphicAreas 宣告後退入', async function() {
             let draw = `var x=c.getContext('2d');x.strokeStyle='#c00';x.beginPath();x.moveTo(140,${300 - (POP_BOTTOM + 2.5 - 60)});x.lineTo(540,${300 - (POP_BOTTOM + 2.5 - 60)});x.stroke();`
@@ -567,7 +581,7 @@ describe('itemsUnionBox 圖形內容(svg 圖形、canvas 像素、graphicAreas)'
         it('[N03] 遮蓋雙向: 透明 canvas / 完全透明(opacity:0)有底色層蓋在線上 → 線仍算; 不透明 svg 遮片(他根、同根居後)蓋住 → 不算', async function() {
             await load(gridHtml(hline(POP_BOTTOM + 2)).replace('<div id="pop"', canvasEl('ov', 'z-index:5') + '<div id="pop"'))
             await expectAvoidsBottom('透明 canvas 蓋住', POP_BOTTOM + 2)
-            await load(gridHtml(hline(POP_BOTTOM + 2)) + `<div style="position:absolute;left:140px;top:210px;width:440px;height:30px;background:#fff;opacity:0"></div>`)
+            await load(gridHtml(hline(POP_BOTTOM + 2)) + `<div style="position:absolute;left:140px;top:${POP_BOTTOM - 6}px;width:440px;height:30px;background:#fff;opacity:0"></div>`)
             await expectAvoidsBottom('opacity:0 之白底層蓋住', POP_BOTTOM + 2)
             await expectSameAsBlank('他根不透明 svg 遮片', gridHtml(hline(POP_BOTTOM + 2)) + `<svg style="position:absolute;left:20px;top:60px;z-index:5" width="760" height="300"><rect width="760" height="300" fill="#fff"/></svg>`)
             await expectSameAsBlank('同根居後之不透明遮片', svgOpen() + hline(POP_BOTTOM + 2) + `<rect width="${SV.w}" height="${SV.h}" fill="#fff"/></svg>` + popHtml())
@@ -577,8 +591,8 @@ describe('itemsUnionBox 圖形內容(svg 圖形、canvas 像素、graphicAreas)'
             await load(canvasEl('cv', 'clip-path:inset(0 0 200px 0)') + popHtml())
             await drawRed('cv', 140, POP_BOTTOM + 2 - 60, 400, 1)
             assert.deepStrictEqual(await measure(), await blank(), 'canvas 有線但被 clip-path 裁掉(線在可視範圍外): 同無內容')
-            await load(svgOpen() + `<clipPath id="cp"><rect x="0" y="0" width="${SV.w}" height="${SV.h}"/></clipPath><g clip-path="url(#cp)"><path d="M${sx(160)} ${sy(219)} L${sx(560)} ${sy(219)}" stroke="#c00" stroke-width="0.6" fill="none"/></g></svg>` + popHtml())
-            await expectAvoidsBottom('clip-path 內之 0.6px 細線', 218.6)
+            await load(svgOpen() + `<clipPath id="cp"><rect x="0" y="0" width="${SV.w}" height="${SV.h}"/></clipPath><g clip-path="url(#cp)"><path d="M${sx(160)} ${sy(POP_BOTTOM + 3)} L${sx(560)} ${sy(POP_BOTTOM + 3)}" stroke="#c00" stroke-width="0.6" fill="none"/></g></svg>` + popHtml())
+            await expectAvoidsBottom('clip-path 內之 0.6px 細線', POP_BOTTOM + 2.6)
             await expectSameAsBlank('graphicAreas 被 clip-path 裁掉', `<div id="big" style="position:absolute;left:20px;top:60px;width:760px;height:300px;clip-path:inset(0 0 240px 0)"></div>` + popHtml(), { graphicAreas: '#big' })
         })
 
@@ -699,8 +713,8 @@ describe('itemsUnionBox 圖形內容(svg 圖形、canvas 像素、graphicAreas)'
             await expectAvoidsBottom('object-fit:contain', POP_BOTTOM + 2)
         })
 
-        it('[N12] 粗描邊: 484px 寬之線(中心在視窗外 y=460, 距浮層下緣 244px, 幾何外接框遠離候選範圍, 但描邊涵蓋至浮層下方 2px 起)仍算內容', async function() {
-            await load(svgOpen('overflow="visible"') + `<path d="M${sx(160)} ${sy(460)} L${sx(560)} ${sy(460)}" stroke="#c00" stroke-width="484" fill="none"/></svg>` + popHtml())
+        it('[N12] 粗描邊: 484px 寬之線(中心在視窗外 y=浮層下緣+244, 幾何外接框遠離候選範圍, 但描邊涵蓋至浮層下方 2px 起)仍算內容', async function() {
+            await load(svgOpen('overflow="visible"') + `<path d="M${sx(160)} ${sy(POP_BOTTOM + 244)} L${sx(560)} ${sy(POP_BOTTOM + 244)}" stroke="#c00" stroke-width="484" fill="none"/></svg>` + popHtml())
             await expectAvoidsBottom('484px 粗線', POP_BOTTOM + 2)
         })
 

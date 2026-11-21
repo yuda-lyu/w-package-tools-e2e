@@ -384,17 +384,22 @@ await browser.close()
 <dl class="details">
     
     <dt class="tag-description">Description:</dt>
-    <dd class="tag-description"><ul class="dummy"><li><p>確定性渲染之Chromium啟動旗標(六旗標)，供像素比對之截圖使用</p>
+    <dd class="tag-description"><ul class="dummy"><li><p>確定性渲染之Chromium啟動旗標(六旗標＋語系旗標，共七項)，供像素比對之截圖使用</p>
 <p>headless Chromium預設GPU光柵化與次像素字形反鋸齒，於像素比對下非決定性(拉丁字偶發散落差異，CJK灰階反鋸齒較穩故常只英文語系出錯)。
-本組關閉GPU(改走CPU Skia)、固定sRGB色彩、關閉LCD與次像素字形定位、關閉Skia執行期最佳化與部分光柵化，
-四個web專案實測截圖自我一致(同態連拍)由裸啟動之2/4提升為5/5。旗標組改動即全部標準圖須重產</p>
-<p>陣列已凍結，需增加旗標時由launchBrowser之opt.args附加</p></li></ul></dd>
+本組關閉GPU(改走CPU Skia)、固定sRGB色彩、關閉LCD與次像素字形定位、關閉Skia執行期最佳化與部分光柵化(以上六旗標)，
+四個web專案實測截圖自我一致(同態連拍)由裸啟動之2/4提升為5/5。
+另固定應用程式語系為zh-TW(--lang=zh-TW)：Chromium 159(headless shell revision 1255)起不再繼承主機系統語系(預設en-US)，
+generic字族(sans-serif與未指定字族)之字型隨語系改變(拉丁字由微軟正黑體變Arial、中文字由微軟正黑體變Microsoft YaHei簡體字形)，使截圖隨主機與Chromium版本而變；
+固定後字型不隨執行機器之系統語系而變，且與156(繼承zh-TW主機)之截圖逐位元相同(6種樣本頁實測，159加本旗標對156)。
+旗標組改動即全部標準圖須重產(對156時代之標準圖，159加本旗標於上述樣本頁逐位元相同，預期多數不必重產，仍以全量比對為準)</p>
+<p>陣列已凍結，需增加旗標時由launchBrowser之opt.args附加；呼叫端經launchBrowser自給語系(opt.args含--lang、opt.lang為語系字串或false)時，
+launchBrowser不帶本陣列之--lang，最終命令列之語系以呼叫端者為準</p></li></ul></dd>
     
 
     
     <dt class="tag-source">Source:</dt>
     <dd class="tag-source"><ul class="dummy"><li>
-        <a href="chromiumLaunchArgs.mjs.html">chromiumLaunchArgs.mjs</a>, <a href="chromiumLaunchArgs.mjs.html#line19">line 19</a>
+        <a href="chromiumLaunchArgs.mjs.html">chromiumLaunchArgs.mjs</a>, <a href="chromiumLaunchArgs.mjs.html#line24">line 24</a>
     </li></ul></dd>
     
 
@@ -434,11 +439,16 @@ await browser.close()
 
 
 <div class="description usertext">
-    <p>確定性渲染之Chromium啟動旗標(六旗標)，供像素比對之截圖使用</p>
+    <p>確定性渲染之Chromium啟動旗標(六旗標＋語系旗標，共七項)，供像素比對之截圖使用</p>
 <p>headless Chromium預設GPU光柵化與次像素字形反鋸齒，於像素比對下非決定性(拉丁字偶發散落差異，CJK灰階反鋸齒較穩故常只英文語系出錯)。
-本組關閉GPU(改走CPU Skia)、固定sRGB色彩、關閉LCD與次像素字形定位、關閉Skia執行期最佳化與部分光柵化，
-四個web專案實測截圖自我一致(同態連拍)由裸啟動之2/4提升為5/5。旗標組改動即全部標準圖須重產</p>
-<p>陣列已凍結，需增加旗標時由launchBrowser之opt.args附加</p>
+本組關閉GPU(改走CPU Skia)、固定sRGB色彩、關閉LCD與次像素字形定位、關閉Skia執行期最佳化與部分光柵化(以上六旗標)，
+四個web專案實測截圖自我一致(同態連拍)由裸啟動之2/4提升為5/5。
+另固定應用程式語系為zh-TW(--lang=zh-TW)：Chromium 159(headless shell revision 1255)起不再繼承主機系統語系(預設en-US)，
+generic字族(sans-serif與未指定字族)之字型隨語系改變(拉丁字由微軟正黑體變Arial、中文字由微軟正黑體變Microsoft YaHei簡體字形)，使截圖隨主機與Chromium版本而變；
+固定後字型不隨執行機器之系統語系而變，且與156(繼承zh-TW主機)之截圖逐位元相同(6種樣本頁實測，159加本旗標對156)。
+旗標組改動即全部標準圖須重產(對156時代之標準圖，159加本旗標於上述樣本頁逐位元相同，預期多數不必重產，仍以全量比對為準)</p>
+<p>陣列已凍結，需增加旗標時由launchBrowser之opt.args附加；呼叫端經launchBrowser自給語系(opt.args含--lang、opt.lang為語系字串或false)時，
+launchBrowser不帶本陣列之--lang，最終命令列之語系以呼叫端者為準</p>
 </div>
 
 
@@ -452,7 +462,7 @@ await browser.close()
     <pre class="prettyprint"><code>import chromiumLaunchArgs from 'w-package-tools-e2e/src/chromiumLaunchArgs.mjs'
 
 console.log(chromiumLaunchArgs)
-// => ['--disable-gpu', '--force-color-profile=srgb', '--disable-lcd-text', '--disable-font-subpixel-positioning', '--disable-skia-runtime-opts', '--disable-partial-raster']</code></pre>
+// => ['--disable-gpu', '--force-color-profile=srgb', '--disable-lcd-text', '--disable-font-subpixel-positioning', '--disable-skia-runtime-opts', '--disable-partial-raster', '--lang=zh-TW']</code></pre>
 
 
 
@@ -12949,11 +12959,14 @@ console.log(r)
     
     <dt class="tag-description">Description:</dt>
     <dd class="tag-description"><ul class="dummy"><li><p>以確定性渲染旗標啟動無頭Chromium，為e2e測試端、標準圖產製端與探測腳本之唯一啟動出口</p>
-<p>經自有套件w-playwright啟動(wpw.launchChromium)，不直接使用playwright：預設為無頭並帶chromiumLaunchArgs六旗標，opt.args另附加於六旗標之後，
+<p>經自有套件w-playwright啟動(wpw.launchChromium)，不直接使用playwright：預設為無頭並帶chromiumLaunchArgs七旗標(六旗標＋--lang=zh-TW)，opt.args另附加於七旗標之後，
 並帶autoInstall與installDeps(受管瀏覽器缺檔時安裝一次再啟動，Linux缺系統相依時安裝相依；兩者給布林值可覆寫，非布林值改用預設true)；其餘鍵原樣交給wpw.launchChromium(亦可給其debug、funLog、onTrace)。
 w-playwright於args之末合併唯一之--disable-features(Playwright預設＋AutofillAiWalletPrivatePasses＋呼叫端自給者)，
 停用AutofillAiWalletPrivatePasses使Windows上Chromium 153起之瀏覽器不再以無效密碼替目前使用者呼叫LogonUser(錯誤密碼次數累計將鎖定帳號)。
-opt.args任一元素無效(如不以-開頭)或連同六旗標逾10000項時w-playwright視整個args為<a href="%E5%85%AD%E6%97%97%E6%A8%99%E4%B8%80%E4%BD%B5%E5%A4%B1%E5%8E%BB%EF%BC%8C%E5%8F%AA%E7%95%99%E5%AE%88%E9%96%80%E4%B9%8B%E4%B8%80%E4%B8%B2"></a>，故只給合法旗標。
+opt.args任一元素無效(如不以-開頭)或連同旗標組逾10000項時w-playwright視整個args為<a href="%E6%97%97%E6%A8%99%E7%B5%84%E4%B8%80%E4%BD%B5%E5%A4%B1%E5%8E%BB%EF%BC%8C%E5%90%AB--lang=zh-TW%EF%BC%8C%E5%8F%AA%E7%95%99%E5%AE%88%E9%96%80%E4%B9%8B%E4%B8%80%E4%B8%B2%E8%88%87w-playwright%E8%A3%9C%E5%85%A5%E4%B9%8B%E4%B8%BB%E6%A9%9F%E8%AA%9E%E7%B3%BB"></a>，故只給合法旗標。
+語系：預設以--lang=zh-TW固定應用程式語系(Chromium 159起不再繼承主機系統語系，字型隨語系而變，見chromiumLaunchArgs)，不隨執行機器之系統語系而變；
+呼叫端自給語系者(opt.args含語系開關，如--lang=en-US、-lang=en-US、--LANG=en-US、--lang；或opt.lang為語系字串或false)以呼叫端者為準，launchBrowser不帶旗標組之--lang，
+故最終命令列之語系開關恰為呼叫端所給者(opt.args與opt.lang並存時以opt.args為準，opt.lang被w-playwright忽略；opt.lang為false則不帶任何--lang)；opt.lang為無效值時視為未給，仍用zh-TW。
 啟動與安裝之失敗reject w-playwright之固定詞彙錯誤(帶code，如E_LAUNCH、E_BROWSER_MISSING、E_INSTALL、E_ENV)，不附Playwright原錯誤(原錯誤只交opt.funLog)；
 opt須為物件(null於讀opt.args時即reject原生TypeError，與改版前相同)</p></li></ul></dd>
     
@@ -12961,7 +12974,7 @@ opt須為物件(null於讀opt.args時即reject原生TypeError，與改版前相�
     
     <dt class="tag-source">Source:</dt>
     <dd class="tag-source"><ul class="dummy"><li>
-        <a href="launchBrowser.mjs.html">launchBrowser.mjs</a>, <a href="launchBrowser.mjs.html#line32">line 32</a>
+        <a href="launchBrowser.mjs.html">launchBrowser.mjs</a>, <a href="launchBrowser.mjs.html#line52">line 52</a>
     </li></ul></dd>
     
 
@@ -13183,7 +13196,48 @@ await browser.close()</code></pre>
                 </td>
             
 
-            <td class="description last"><p>輸入附加於六旗標後之旗標字串陣列，非陣列時忽略，預設[]</p></td>
+            <td class="description last"><p>輸入附加於七旗標後之旗標字串陣列，非陣列時忽略；含語系開關時不帶七旗標之--lang，預設[]</p></td>
+        </tr>
+
+    
+
+        <tr>
+            
+                <td class="name"><code>lang</code></td>
+            
+
+            <td class="type">
+            
+                
+<span class="param-type">String</span>
+|
+
+<span class="param-type">Boolean</span>
+
+
+
+            
+            </td>
+
+            
+                <td class="attributes">
+                
+                    &lt;optional><br>
+                
+
+                
+
+                
+                </td>
+            
+
+            
+                <td class="default">
+                
+                </td>
+            
+
+            <td class="description last"><p>輸入啟動語系(語系字串如'en-US'，或false表不帶任何--lang)，由w-playwright處理；有效值時launchBrowser不帶七旗標之--lang，無效值視為未給，預設未給(用zh-TW)</p></td>
         </tr>
 
     
@@ -30730,7 +30784,7 @@ console.log(r) //{ written: false, reason: 'same', numDiff: 0 }</code></pre>
 <br class="clear">
 
 <footer>
-    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 4.0.5</a> on Sat Nov 21 2026 15:33:36 GMT+0800 (台北標準時間) using the <a href="https://github.com/clenemt/docdash">docdash</a> theme.
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 4.0.5</a> on Sat Nov 21 2026 18:15:24 GMT+0800 (台北標準時間) using the <a href="https://github.com/clenemt/docdash">docdash</a> theme.
 </footer>
 
 <script>prettyPrint();</script>

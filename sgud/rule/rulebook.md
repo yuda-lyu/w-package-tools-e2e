@@ -4,7 +4,7 @@
 
 編列依據:Gitea issue #4(runBaselineCase 遇已知缺陷時保留並比對其前各步之截圖)、#5(createBaselineGate.finalize 把已知缺陷案例之未產圖當成 --names 未命中)之審計(`agent-out/run01-審計回應.md`)與修正(2026-10-20);issue #6(itemsUnionBox 不認 svg/canvas 圖形為框外內容)之審計與修正(2026-10-20,見 §7);issue #19(收集模式、有變更才改寫、埠位移;2026-10-28)見分檔 §8.API 細節見 `README.md` §2.1、§2.2 與三檔 JSDoc;取捨緣由見 `sgud/exp/experience.md`「注意事項: 產製與比對」.
 
-**分檔索引**(本檔逾 30KB,新章節起改依類型分檔):§1～§7 在本檔;§8 全量執行之共用層支援(收集模式、有變更才改寫、埠位移、審查與採用)→ `sgud/rule/rulebook_baselineRun.md`;埠之監聽者查詢與處置(`listenerPids`、`killPortListeners`;2026-10-30 e2e01)、自動換埠(`reserveE2ePorts`;2026-11-05 pe309)、就緒核對監聽者身分與查詢失敗之處置、行程表取法(2026-11-05 pe312)、試綁定五種與殺殘留後偵測失敗之處置(2026-11-05 pe316,R-26、R-27)→ `sgud/rule/rulebook_port.md`;settle 掛鉤之元件辨識(`waitDrawerReady` 只認 WDrawer 根節點;2026-11-01 Gitea #35)→ `sgud/rule/rulebook_settle.md`;e2e 分組多開(`runShardedE2e`、`tools/shardE2e.mjs`;2026-11-04 se302)→ `sgud/rule/rulebook_shard.md`;瀏覽器之啟動經 w-playwright(`launchBrowser` 唯一出口、不直接依賴 playwright、接線測試、改動範圍 → 測試檔;2026-11-13 pm-pte)→ `sgud/rule/rulebook_launch.md`.
+**分檔索引**(本檔逾 30KB,新章節起改依類型分檔):§1～§7 在本檔;§8 全量執行之共用層支援(收集模式、有變更才改寫、埠位移、審查與採用)→ `sgud/rule/rulebook_baselineRun.md`;埠之監聽者查詢與處置(`listenerPids`、`killPortListeners`;2026-10-30 e2e01)、自動換埠(`reserveE2ePorts`;2026-11-05 pe309)、就緒核對監聽者身分與查詢失敗之處置、行程表取法(2026-11-05 pe312)、試綁定五種與殺殘留後偵測失敗之處置(2026-11-05 pe316,R-26、R-27)→ `sgud/rule/rulebook_port.md`;settle 掛鉤之元件辨識(`waitDrawerReady` 只認 WDrawer 根節點;2026-11-01 Gitea #35)→ `sgud/rule/rulebook_settle.md`;e2e 分組多開(`runShardedE2e`、`tools/shardE2e.mjs`;2026-11-04 se302)→ `sgud/rule/rulebook_shard.md`;瀏覽器之啟動經 w-playwright(`launchBrowser` 唯一出口、不直接依賴 playwright、接線測試、改動範圍 → 測試檔;2026-11-13 pm-pte;旗標組語系旗標 `--lang=zh-TW` 與呼叫端自給語系之合併 R-LB-6,2026-11-21 pte585)→ `sgud/rule/rulebook_launch.md`.
 
 ## 1. 已知缺陷分流(`src/runBaselineCase.mjs`、`src/createKnownDefect.mjs`)
 
@@ -145,6 +145,9 @@
 - `test/unit-runBaselineCase.test.mjs` 之 `describe('runBaselineCase 部分已知缺陷…')`:表 A(測試標題前綴 `[A..]` 對應列號).
 - `test/unit-baselineGate.test.mjs` 之 `describe('createBaselineGate 已知缺陷紀錄…')`:表 B(前綴 `[B..]`).
 - `test/e2e-itemsUnionBoxGraphics.test.mjs`:表 C(§7.2;前綴 `[ID]`,真 Chromium,語意/幾何斷言,無標準圖).單檔自編 `npx mocha test/e2e-itemsUnionBoxGraphics.test.mjs --no-parallel --timeout 180000`;既有 `test/e2e-captureEquivalence.test.mjs` 之 `itemsUnionBox` 7 條為舊規則之契約,須維持全綠.
+  - **夾具幾何不寫死字型相依之值**(2026-11-21 pte440):浮層之高由文字行高(`line-height:normal`)決定,行高依瀏覽器為 generic 字族所選之字型而定,該字型又隨瀏覽器之應用程式語系(`navigator.language`)而變——Chromium 156 於 zh-TW 之 Windows 繼承系統語系(微軟正黑體,浮層下緣 216),Chromium 159 之 headless shell 預設 en-US(Arial,下緣 210).故浮層下緣 `POP_BOTTOM` 於 `before` 以頁面實量取得(前提斷言:整數像素),凡與下緣相關之位置一律寫 `POP_BOTTOM ± 間距`;另含文字之結構(`[H01]`、`[J02]` 之面板)以前提斷言其下緣 = `POP_BOTTOM`,`[K14]` 之面板底自量.寫死者在字型改變時多數**不轉紅而空轉**(線落到框線帶外,「退入」之斷言照樣成立),只有少數轉紅.
+  - **鑑別力之自檢**:以 `git archive` 取 `src` 至 `./tmp/`,把 `itemsUnionBox` 之 `graphics` 預設改 `false`,對該副本跑本檔——須有 54 條轉紅(即表 C 之「紅」格類;2026-11-21 於 Chromium 156、159 皆 54 條,同一組).少於此數即有格類空轉,先查夾具幾何.
+- 改動範圍 → e2e 檔:`src/itemsUnionBox.mjs` → `e2e-itemsUnionBoxGraphics`、`e2e-captureEquivalence`;本檔之夾具或 `src/launchBrowser.mjs`／`src/chromiumLaunchArgs.mjs`(影響字型與版面)→ 同上兩檔＋全部 e2e 檔.
 - 全套:`node C:/opensrcOper/tools/quiet-run.mjs --name final -- npm test`(`mocha --no-parallel "test/*.test.mjs" --timeout 180000`);單檔自編 `npx mocha test/unit-runBaselineCase.test.mjs test/unit-baselineGate.test.mjs --no-parallel --timeout 60000`.
 - lint:`npx eslint --ext .mjs src tools test` 須 0 error.
 - `test/unit-procPrimitives.test.mjs` 之 `listenerPids`／`killPortListeners`(前綴 `[LP*]`、`[KP*]`、`[RP*]`)對應 `sgud/rule/rulebook_port.md`;單檔自編 `node C:/opensrcOper/tools/quiet-run.mjs --lock --name x -- npx mocha --no-parallel test/unit-procPrimitives.test.mjs --timeout 180000`(`[R*]` 用固定埠 19050、19051,須空閒).
@@ -301,3 +304,4 @@
 ### 7.5 變更紀錄
 
 - 新增選項 `graphics`(預設 true)與 `graphicAreas`;預設開啟屬**會動使用端標準圖像素之變更**(框幾何類):fixed 浮層之框線帶內有 svg 圖形/可讀 2d canvas 墨跡/宣告區者,框線改退入;`graphics:false` 逐位元重現 1.0.9.其餘(無圖形、框線帶外、小 svg/canvas、`fit:false`)不變,以隨機差分與既有 29 條等價測試證明.非 API 不相容變更.
+- 2026-11-21(pte440,w-playwright 1.0.2／Chromium 159 之跟跑):**只改測試**(`test/e2e-itemsUnionBoxGraphics.test.mjs` 之夾具幾何改由頁面實量,見 §6),`src/itemsUnionBox.mjs` 無改動;同一頁面版面下之量框不變,非框幾何類變更.使用端紅框之絕對位置若改變,來自頁面版面本身隨字型改變(瀏覽器預設語系 zh-TW → en-US),不來自本函式.

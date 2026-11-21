@@ -14,7 +14,7 @@ import openCasePage from '../src/openCasePage.mjs'
 import waitGridIdle from '../src/waitGridIdle.mjs'
 
 
-//瀏覽器原語之無伺服器驗證: 真實Chromium(帶六旗標) + page.setContent, 不需任何後端或前端服務
+//瀏覽器原語之無伺服器驗證: 真實Chromium(帶七旗標) + page.setContent, 不需任何後端或前端服務
 //act一律走真鍵盤滑鼠(click/insertText), 頁面內之延遲變化以setTimeout模擬元件行為
 
 
@@ -38,8 +38,8 @@ describe('瀏覽器原語(無伺服器)', function() {
         if (page) await page.context().close()
     })
 
-    it('launchBrowser: 以六旗標啟動無頭Chromium', async function() {
-        assert.strict.deepStrictEqual(chromiumLaunchArgs.length, 6)
+    it('launchBrowser: 以七旗標(六旗標＋--lang=zh-TW)啟動無頭Chromium', async function() {
+        assert.strict.deepStrictEqual(chromiumLaunchArgs.length, 7)
         assert.strict.ok(Object.isFrozen(chromiumLaunchArgs))
         await page.setContent('<div id="x">ok</div>')
         assert.strict.deepStrictEqual(await page.textContent('#x'), 'ok')
