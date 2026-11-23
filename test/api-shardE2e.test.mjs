@@ -717,6 +717,7 @@ exit $LASTEXITCODE
                 child = spawn(process.execPath, [fpCli, '--ports', String(BASE), '--instances', '1', '--progress-min', '60'], {
                     cwd: fx.root,
                     stdio: ['ignore', fd, fd],
+                    windowsHide: true,
                     env: { ...process.env, SHARD_FIX_RECORD: fx.fpRecord, SHARD_FIX_GATE: fx.fpGate },
                 })
                 fs.closeSync(fd)

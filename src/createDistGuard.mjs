@@ -1,0 +1,332 @@
+import fs from 'fs'
+import path from 'path'
+import crypto from 'crypto'
+import pidExists from './pidExists.mjs'
+
+
+const MANIFEST = 'manifest.json'
+const SNAP_ENTRIES = ['files', MANIFEST, `${MANIFEST}.tmp`] //snapDir 內只會有本工具所建之項目
+
+
+let sha256 = (fp) => crypto.createHash('sha256').update(fs.readFileSync(fp)).digest('hex')
+
+
+//遞迴列出 dir 下之檔案與目錄(相對路徑、正斜線、已排序); 遇連結(symlink、junction)或非一般檔案即拋錯(不跟進、不處理)
+function listTree(dir, who) {
+    let files = []
+    let dirs = []
+    let walk = (rel) => {
+        for (let d of fs.readdirSync(path.join(dir, rel), { withFileTypes: true })) {
+            let r = rel === '' ? d.name : `${rel}/${d.name}`
+            if (d.isSymbolicLink()) {
+                throw new Error(`createDistGuard: ${who} 內之 ${r} 為目錄連結或符號連結, 不處理(須先拆除連結)`)
+            }
+            if (d.isDirectory()) {
+                dirs.push(r)
+                walk(r)
+            }
+            else if (d.isFile()) {
+                files.push(r)
+            }
+            else {
+                throw new Error(`createDistGuard: ${who} 內之 ${r} 非一般檔案或目錄, 不處理`)
+            }
+        }
+    }
+    walk('')
+    return { files: files.sort(), dirs: dirs.sort() }
+}
+
+
+//a 是否為 b 本身或其祖先(皆為絕對路徑; Windows 不分大小寫)
+function isSameOrAncestor(a, b) {
+    let norm = (p) => {
+        let s = path.resolve(p)
+        return process.platform === 'win32' ? s.toLowerCase() : s
+    }
+    let ra = norm(a)
+    let rb = norm(b)
+    if (ra === rb) {
+        return true
+    }
+    let rel = path.relative(ra, rb)
+    return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel)
+}
+
+
+/**
+ * dist/ 之暫時覆蓋與原位元組還原：測前備份 dist/(逐檔原位元組＋sha256)，測試期間可由建置或 useBuild 覆蓋，
+ * 測後 restore 清空 dist/ 並寫回、逐檔 sha256 回驗、確認無多餘檔與目錄；崩潰(被強制結束)後下次 start 自動先還原(自癒)
+ *
+ * why(排程第 604 項④，2026-11-24)：以後端 serve 已建置之 dist/ 開頁之 e2e，要驗現行 src/ 時須以新建置暫時覆蓋入版控之 dist/，
+ * 測後須回到原位元組(否則 git status 多出刪改與未追蹤之雜湊檔，每次連動跟跑都要人工還原)。各使用端原各自手寫(備份＋還原＋回驗)，
+ * 收斂為本函數(參考使用端之 distGuard 與 swap-dist 兩種作法)。
+ * 崩潰安全：備份之 manifest 最後才寫(先寫暫存名再改名)，存在即代表備份完整；備份於 restore 回驗通過後才刪除。
+ * 故：備份途中被結束(無 manifest)時 dist/ 尚未被動，下次 start 丟棄不完整之備份重做；備份完成後任一時點(含建置、useBuild、restore 途中)被結束，
+ * 下次 start 先以 manifest 還原 dist/ 再重新備份——dist/ 最終回到「第一次備份時」之位元組(期間若刻意改過 dist/，亦會被還原，start 會印出)。
+ * 一律同步 fs(restore 可於 exit／signal 備援內呼叫，非同步不會被等待)。dist/ 內有目錄連結即拋錯不處理(避免遞迴刪除穿過連結)。
+ * 路徑守門(兩者皆為遞迴刪除之對象)：distDir、snapDir 皆須在 projRoot 之內且不得為 projRoot(distDir 亦不得為磁碟根或 projRoot 之祖先)，
+ * 兩者不得相同或互為祖孫；刪除 snapDir 前確認其內只有本工具所建之項目(files、manifest.json)，誤指到既有目錄者拋錯不刪。
+ * 同一 snapDir 同時只能由一個行程使用：manifest 記錄持有者 PID，start 見持有者仍存活即拋錯(不自癒、不動 dist；PID 重用之誤判只會使其拒絕)。
+ * 路徑類 opt(projRoot、distDir、snapDir)與 useBuild 之 buildDir、mode 給了而無效即拋錯(fail-closed)：皆為遞迴刪除之對象或是否清空之決定，
+ * 比照輸入參數檢測規格之「安全相關 opt 為 K3 之例外」，不改用預設；log、onStep 非函數者視為未給。
+ * manifest 無法解析時拋錯並保留備份(不當成無備份)。只還原檔案之位元組與修改時間(兩者皆回驗)；目錄之修改時間不還原(git 不追蹤)。
+ *
+ * @param {Object} [opt={}] 輸入設定物件，預設{}
+ * @param {String} [opt.projRoot=process.cwd()] 輸入專案根目錄字串，預設process.cwd()
+ * @param {String} [opt.distDir='dist'] 輸入建置輸出目錄字串(相對projRoot或絕對)，預設'dist'
+ * @param {String} [opt.snapDir='test/_tmp/dist-guard'] 輸入備份目錄字串(相對projRoot或絕對；測試中介資料之落點，應已被gitignore)，預設'test/_tmp/dist-guard'
+ * @param {Function} [opt.log=console.log] 輸入訊息輸出函數，預設console.log；傳null不印
+ * @param {Function} [opt.onStep] 輸入步驟回呼(供測試模擬中途結束：於回呼內拋錯即如同該時點被結束)，傳入{phase,rel}，phase為'backup'、'restore'、'useBuild'，預設無
+ * @returns {Object} 回傳物件{start,restore,useBuild,status,distDir,snapDir}；start()回傳{staleRestored,existed,nFiles}；restore()回傳{restored,nFiles}(無備份時restored:false)；useBuild(buildDir,{mode})回傳{nFiles}，mode為'replace'(dist/改為與buildDir完全相同，預設)或'overlay'(buildDir之檔覆蓋進dist/，其餘保留)，須先start；status()回傳{backedUp,same,extra,missing,changed,extraDirs,missingDirs}
+ * @example
+ *
+ * import createDistGuard from 'w-package-tools-e2e/src/createDistGuard.mjs'
+ *
+ * let guard = createDistGuard({ projRoot }) //dist 與 test/_tmp/dist-guard
+ * guard.start() //建置前: 備份(前次未還原者先自癒)
+ * execSync('npm run build', { cwd: projRoot, windowsHide: true }) //或 guard.useBuild(fdBuild, { mode: 'overlay' })
+ * //...起後端、跑 e2e...
+ * guard.restore() //cleanup 內(後端已停): 原位元組還原、逐檔 sha256 回驗、確認無多餘檔
+ *
+ */
+function createDistGuard(opt = {}) {
+    let {
+        projRoot = process.cwd(),
+        distDir = 'dist',
+        snapDir = path.join('test', '_tmp', 'dist-guard'),
+        log = console.log,
+        onStep = null,
+    } = opt
+    for (let [k, v] of [['projRoot', projRoot], ['distDir', distDir], ['snapDir', snapDir]]) {
+        if (typeof v !== 'string' || v === '') {
+            throw new Error(`createDistGuard: ${k} 須為非空字串`)
+        }
+    }
+    let fdProj = path.resolve(projRoot)
+    let fdDist = path.resolve(projRoot, distDir)
+    let fdSnap = path.resolve(projRoot, snapDir)
+    let fdFiles = path.join(fdSnap, 'files')
+    let fpM = path.join(fdSnap, MANIFEST)
+    if (path.parse(fdDist).root === fdDist) {
+        throw new Error(`createDistGuard: distDir 不得為磁碟根(${fdDist})`)
+    }
+    if (isSameOrAncestor(fdDist, fdProj)) {
+        throw new Error('createDistGuard: distDir 不得為 projRoot 或其祖先')
+    }
+    //兩者皆遞迴刪除之對象: 須在 projRoot 之內(不得為 projRoot 本身或其外)
+    if (!isSameOrAncestor(fdProj, fdDist)) {
+        throw new Error('createDistGuard: distDir 須在 projRoot 之內')
+    }
+    if (isSameOrAncestor(fdSnap, fdProj) || !isSameOrAncestor(fdProj, fdSnap)) {
+        throw new Error('createDistGuard: snapDir 須在 projRoot 之內(且不得為 projRoot)')
+    }
+    if (isSameOrAncestor(fdDist, fdSnap) || isSameOrAncestor(fdSnap, fdDist)) {
+        throw new Error('createDistGuard: snapDir 與 distDir 不得相同或互為祖孫')
+    }
+    let say = (s) => {
+        if (typeof log === 'function') {
+            log(s)
+        }
+    }
+    let step = (phase, rel) => {
+        if (typeof onStep === 'function') {
+            onStep({ phase, rel })
+        }
+    }
+    let rm = (fd) => fs.rmSync(fd, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 })
+
+    //刪 snapDir 前確認其內只有本工具所建之項目(誤指到既有目錄時不刪)
+    let rmSnap = () => {
+        if (!fs.existsSync(fdSnap)) {
+            return
+        }
+        if (!fs.lstatSync(fdSnap).isDirectory()) {
+            throw new Error(`createDistGuard: snapDir 不是目錄, 不處理(${fdSnap})`)
+        }
+        let others = fs.readdirSync(fdSnap).filter((n) => !SNAP_ENTRIES.includes(n))
+        if (others.length > 0) {
+            throw new Error(`createDistGuard: snapDir 內有非本工具所建之項目(${others.slice(0, 5).join(', ')}), 不刪除(${fdSnap})`)
+        }
+        rm(fdSnap)
+    }
+
+    let readManifest = () => {
+        try {
+            return JSON.parse(fs.readFileSync(fpM, 'utf8'))
+        }
+        catch (err) {
+            throw new Error(`createDistGuard: manifest 無法讀取或解析(${fpM}): ${err && err.message ? err.message : String(err)}; 備份保留, 請人工確認 dist 後處置`)
+        }
+    }
+
+    //與 manifest 比對現況(不改任何檔)
+    let compare = (m) => {
+        let out = { extra: [], missing: [], changed: [], extraDirs: [], missingDirs: [] }
+        if (!fs.existsSync(fdDist)) {
+            if (m.existed) {
+                out.missing = m.files.map((f) => f.rel)
+                out.missingDirs = [...m.dirs]
+            }
+            return out
+        }
+        if (!m.existed) {
+            //備份時 dist 不存在: dist 本身('.')與其內一切皆為多餘
+            let t = listTree(fdDist, 'dist')
+            out.extra = t.files
+            out.extraDirs = ['.', ...t.dirs]
+            return out
+        }
+        let t = listTree(fdDist, 'dist')
+        let want = new Map(m.files.map((f) => [f.rel, f]))
+        let have = new Set(t.files)
+        out.extra = t.files.filter((r) => !want.has(r))
+        out.missing = m.files.map((f) => f.rel).filter((r) => !have.has(r))
+        out.changed = m.files.filter((f) => have.has(f.rel) && sha256(path.join(fdDist, f.rel)) !== f.sha256).map((f) => f.rel)
+        let wantDirs = new Set(m.dirs)
+        let haveDirs = new Set(t.dirs)
+        out.extraDirs = t.dirs.filter((d) => !wantDirs.has(d))
+        out.missingDirs = m.dirs.filter((d) => !haveDirs.has(d))
+        return out
+    }
+    let isSame = (c) => ['extra', 'missing', 'changed', 'extraDirs', 'missingDirs'].every((k) => c[k].length === 0)
+
+    //以 manifest 還原 dist(不刪備份); 回驗不符即拋錯(備份保留)
+    let restoreCore = () => {
+        let m = readManifest()
+        if (fs.existsSync(fdDist)) {
+            if (!fs.lstatSync(fdDist).isDirectory()) {
+                throw new Error(`createDistGuard: dist 不是目錄, 不處理(備份保留於 ${fdSnap})`)
+            }
+            listTree(fdDist, 'dist') //含連結即拋錯, 不刪
+        }
+        rm(fdDist)
+        if (m.existed) {
+            fs.mkdirSync(fdDist, { recursive: true })
+            for (let d of m.dirs) {
+                fs.mkdirSync(path.join(fdDist, d), { recursive: true })
+            }
+            for (let f of m.files) {
+                step('restore', f.rel)
+                let dst = path.join(fdDist, f.rel)
+                fs.mkdirSync(path.dirname(dst), { recursive: true })
+                fs.copyFileSync(path.join(fdFiles, f.rel), dst)
+                fs.utimesSync(dst, f.atimeMs / 1000, f.mtimeMs / 1000)
+            }
+        }
+        let c = compare(m)
+        if (!isSame(c)) {
+            throw new Error(`createDistGuard: 還原後與備份不符(多 ${c.extra.length + c.extraDirs.length}、缺 ${c.missing.length + c.missingDirs.length}、內容不同 ${c.changed.length}; 備份保留於 ${fdSnap})`)
+        }
+        //修改時間亦回驗(檔案系統精度內)
+        let badTime = m.existed ? m.files.filter((f) => Math.abs(fs.statSync(path.join(fdDist, f.rel)).mtimeMs - f.mtimeMs) >= 2).map((f) => f.rel) : []
+        if (badTime.length > 0) {
+            throw new Error(`createDistGuard: 還原後修改時間與備份不符 ${badTime.length} 檔(備份保留於 ${fdSnap})`)
+        }
+        return m
+    }
+
+    let start = () => {
+        let staleRestored = false
+        if (fs.existsSync(fpM)) {
+            //持有者仍存活即他行程正在用(同一 snapDir 同時只能一個行程): 不自癒、不動 dist; PID 重用之誤判只會使本函數拒絕(安全側)
+            let m0 = readManifest()
+            if (Number.isInteger(m0.pid) && m0.pid !== process.pid && pidExists(m0.pid)) {
+                throw new Error(`createDistGuard: 備份由仍在執行之行程 ${m0.pid} 持有(同一 snapDir 同時只能一個行程使用); 確定該行程非本工具(PID 重用)時, 以 restore() 還原後再 start`)
+            }
+            restoreCore()
+            staleRestored = true
+            say(`[dist-guard] 前次未還原(可能被強制結束), 已先自備份還原 ${fdDist}`)
+        }
+        rmSnap() //無 manifest 之殘留(備份途中被結束; 此時 dist 尚未被動過)或已還原之舊備份
+        let existed = fs.existsSync(fdDist)
+        if (existed && !fs.lstatSync(fdDist).isDirectory()) {
+            throw new Error(`createDistGuard: dist 不是目錄, 不處理(${fdDist})`)
+        }
+        let m = { existed, pid: process.pid, files: [], dirs: [] }
+        if (existed) {
+            let t = listTree(fdDist, 'dist') //含連結即拋錯, 尚未建立任何備份
+            fs.mkdirSync(fdFiles, { recursive: true })
+            m.dirs = t.dirs
+            for (let rel of t.files) {
+                let src = path.join(fdDist, rel)
+                let dst = path.join(fdFiles, rel)
+                fs.mkdirSync(path.dirname(dst), { recursive: true })
+                fs.copyFileSync(src, dst)
+                let st = fs.statSync(src)
+                let h = sha256(src)
+                if (sha256(dst) !== h) {
+                    throw new Error(`createDistGuard: 備份 ${rel} 後 sha256 不符`)
+                }
+                m.files.push({ rel, sha256: h, size: st.size, atimeMs: st.atimeMs, mtimeMs: st.mtimeMs })
+                step('backup', rel)
+            }
+        }
+        else {
+            fs.mkdirSync(fdSnap, { recursive: true })
+        }
+        //最後才寫 manifest(先寫暫存名再改名): 存在即代表備份完整
+        fs.writeFileSync(`${fpM}.tmp`, JSON.stringify(m, null, 1), 'utf8')
+        fs.renameSync(`${fpM}.tmp`, fpM)
+        return { staleRestored, existed, nFiles: m.files.length }
+    }
+
+    let restore = () => {
+        if (!fs.existsSync(fpM)) {
+            return { restored: false, nFiles: 0 }
+        }
+        let m = restoreCore()
+        rmSnap()
+        return { restored: true, nFiles: m.files.length }
+    }
+
+    let useBuild = (buildDir, uopt = {}) => {
+        let { mode = 'replace' } = uopt || {}
+        if (mode !== 'replace' && mode !== 'overlay') {
+            throw new Error(`createDistGuard: useBuild 之 mode 須為 'replace' 或 'overlay'`)
+        }
+        if (!fs.existsSync(fpM)) {
+            throw new Error('createDistGuard: useBuild 前須先 start()(備份 dist)')
+        }
+        if (typeof buildDir !== 'string' || buildDir === '') {
+            throw new Error('createDistGuard: buildDir 須為非空字串')
+        }
+        let fdBuild = path.resolve(projRoot, buildDir)
+        if (!fs.existsSync(fdBuild) || !fs.lstatSync(fdBuild).isDirectory()) {
+            throw new Error(`createDistGuard: buildDir 不存在或不是目錄(${fdBuild})`)
+        }
+        if (isSameOrAncestor(fdBuild, fdDist) || isSameOrAncestor(fdDist, fdBuild)) {
+            throw new Error('createDistGuard: buildDir 與 distDir 不得相同或互為祖孫')
+        }
+        let t = listTree(fdBuild, 'buildDir') //含連結即拋錯
+        if (mode === 'replace') {
+            if (fs.existsSync(fdDist)) {
+                listTree(fdDist, 'dist')
+            }
+            rm(fdDist)
+        }
+        fs.mkdirSync(fdDist, { recursive: true })
+        for (let d of t.dirs) {
+            fs.mkdirSync(path.join(fdDist, d), { recursive: true })
+        }
+        for (let rel of t.files) {
+            step('useBuild', rel)
+            fs.copyFileSync(path.join(fdBuild, rel), path.join(fdDist, rel))
+        }
+        return { nFiles: t.files.length }
+    }
+
+    let status = () => {
+        if (!fs.existsSync(fpM)) {
+            return { backedUp: false, same: null, extra: [], missing: [], changed: [], extraDirs: [], missingDirs: [] }
+        }
+        let m = readManifest()
+        let c = compare(m)
+        return { backedUp: true, same: isSame(c), ...c }
+    }
+
+    return { start, restore, useBuild, status, distDir: fdDist, snapDir: fdSnap }
+}
+
+
+export default createDistGuard

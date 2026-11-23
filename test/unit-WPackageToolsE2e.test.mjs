@@ -22,6 +22,8 @@ import typeIntoInput from '../src/typeIntoInput.mjs'
 import typeIntoNthInput from '../src/typeIntoNthInput.mjs'
 import waitUntilExist from '../src/waitUntilExist.mjs'
 import pollUntil from '../src/pollUntil.mjs'
+import waitStyleSheets from '../src/waitStyleSheets.mjs'
+import waitScrollIdle from '../src/waitScrollIdle.mjs'
 import collectDomText from '../src/collectDomText.mjs'
 import pageHasText from '../src/pageHasText.mjs'
 import assertTextSpec from '../src/assertTextSpec.mjs'
@@ -49,6 +51,8 @@ import reapShardProcesses from '../src/reapShardProcesses.mjs'
 import registerCleanupHooks from '../src/registerCleanupHooks.mjs'
 import probeHttp from '../src/probeHttp.mjs'
 import createTempSettings from '../src/createTempSettings.mjs'
+import warnDistStale from '../src/warnDistStale.mjs'
+import createDistGuard from '../src/createDistGuard.mjs'
 import runIsolatedE2e from '../src/runIsolatedE2e.mjs'
 import runShardedE2e from '../src/runShardedE2e.mjs'
 import planE2eShards from '../src/planE2eShards.mjs'
@@ -103,6 +107,8 @@ describe('WPackageToolsE2e', function() {
             'typeIntoNthInput',
             'waitUntilExist',
             'pollUntil',
+            'waitStyleSheets',
+            'waitScrollIdle',
             'collectDomText',
             'pageHasText',
             'assertTextSpec',
@@ -131,6 +137,8 @@ describe('WPackageToolsE2e', function() {
             'registerCleanupHooks',
             'probeHttp',
             'createTempSettings',
+            'warnDistStale',
+            'createDistGuard',
             'runIsolatedE2e',
             'runShardedE2e',
             'planE2eShards',
@@ -194,6 +202,8 @@ describe('WPackageToolsE2e', function() {
             typeIntoNthInput,
             waitUntilExist,
             pollUntil,
+            waitStyleSheets,
+            waitScrollIdle,
             collectDomText,
             pageHasText,
             assertTextSpec,
@@ -222,6 +232,8 @@ describe('WPackageToolsE2e', function() {
             registerCleanupHooks,
             probeHttp,
             createTempSettings,
+            warnDistStale,
+            createDistGuard,
             runIsolatedE2e,
             runShardedE2e,
             planE2eShards,

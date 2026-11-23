@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    
+    <meta charset="utf-8">
+    <title>waitScrollIdle.mjs - Documentation</title>
+    
+    
+    <script src="scripts/prettify/prettify.js"></script>
+    <script src="scripts/prettify/lang-css.js"></script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc.css">
+    <script src="scripts/nav.js" defer></script>
+    
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+
+<input type="checkbox" id="nav-trigger" class="nav-trigger" />
+<label for="nav-trigger" class="navicon-button x">
+  <div class="navicon"></div>
+</label>
+
+<label for="nav-trigger" class="overlay"></label>
+
+<nav >
+    
+    
+    <h2><a href="index.html">Home</a></h2><h3>Global</h3><ul><li><a href="global.html#BOX_PAD">BOX_PAD</a></li><li><a href="global.html#INK_PAD">INK_PAD</a></li><li><a href="global.html#WPackageToolsE2e">WPackageToolsE2e</a></li><li><a href="global.html#acceptPendingShots">acceptPendingShots</a></li><li><a href="global.html#activeBaselineCollector">activeBaselineCollector</a></li><li><a href="global.html#assertBaselineMatch">assertBaselineMatch</a></li><li><a href="global.html#assertE2eBasePort">assertE2eBasePort</a></li><li><a href="global.html#assertTextSpec">assertTextSpec</a></li><li><a href="global.html#canvasInkRects">canvasInkRects</a></li><li><a href="global.html#captureStable">captureStable</a></li><li><a href="global.html#captureStableWithBox">captureStableWithBox</a></li><li><a href="global.html#checkPortFree">checkPortFree</a></li><li><a href="global.html#chromiumLaunchArgs">chromiumLaunchArgs</a></li><li><a href="global.html#collectDomText">collectDomText</a></li><li><a href="global.html#compareImageDirs">compareImageDirs</a></li><li><a href="global.html#createBaselineCollector">createBaselineCollector</a></li><li><a href="global.html#createBaselineGate">createBaselineGate</a></li><li><a href="global.html#createDistGuard">createDistGuard</a></li><li><a href="global.html#createE2ePortClaimer">createE2ePortClaimer</a></li><li><a href="global.html#createKnownDefect">createKnownDefect</a></li><li><a href="global.html#createServiceManager">createServiceManager</a></li><li><a href="global.html#createTempSettings">createTempSettings</a></li><li><a href="global.html#cropRegion">cropRegion</a></li><li><a href="global.html#describePortOwners">describePortOwners</a></li><li><a href="global.html#diffBaselineSnapshots">diffBaselineSnapshots</a></li><li><a href="global.html#diffLinkTarget">diffLinkTarget</a></li><li><a href="global.html#findOrphanBaselines">findOrphanBaselines</a></li><li><a href="global.html#findProcessDescendants">findProcessDescendants</a></li><li><a href="global.html#getActiveE2ePortReservation">getActiveE2ePortReservation</a></li><li><a href="global.html#getE2eMode">getE2eMode</a></li><li><a href="global.html#gridContentBox">gridContentBox</a></li><li><a href="global.html#insideEnabledCollect">insideEnabledCollect</a></li><li><a href="global.html#isChildAlive">isChildAlive</a></li><li><a href="global.html#itemsUnionBox">itemsUnionBox</a></li><li><a href="global.html#judgePortOwner">judgePortOwner</a></li><li><a href="global.html#killOwnTree">killOwnTree</a></li><li><a href="global.html#killPortListeners">killPortListeners</a></li><li><a href="global.html#launchBrowser">launchBrowser</a></li><li><a href="global.html#listDirLinks">listDirLinks</a></li><li><a href="global.html#listProcessTable">listProcessTable</a></li><li><a href="global.html#listenerPids">listenerPids</a></li><li><a href="global.html#maskRegions">maskRegions</a></li><li><a href="global.html#normalizeShots">normalizeShots</a></li><li><a href="global.html#openCasePage">openCasePage</a></li><li><a href="global.html#overlayImageAt">overlayImageAt</a></li><li><a href="global.html#overlayRegions">overlayRegions</a></li><li><a href="global.html#pageHasText">pageHasText</a></li><li><a href="global.html#pidExists">pidExists</a></li><li><a href="global.html#pixelmatchOpt">pixelmatchOpt</a></li><li><a href="global.html#planE2eShards">planE2eShards</a></li><li><a href="global.html#pollUntil">pollUntil</a></li><li><a href="global.html#probeHttp">probeHttp</a></li><li><a href="global.html#probeStuckTooltip">probeStuckTooltip</a></li><li><a href="global.html#reapShardProcesses">reapShardProcesses</a></li><li><a href="global.html#registerCleanupHooks">registerCleanupHooks</a></li><li><a href="global.html#removeE2eInstance">removeE2eInstance</a></li><li><a href="global.html#reserveE2ePorts">reserveE2ePorts</a></li><li><a href="global.html#resetAgGridScroll">resetAgGridScroll</a></li><li><a href="global.html#resolveE2ePort">resolveE2ePort</a></li><li><a href="global.html#resolveKeepSame">resolveKeepSame</a></li><li><a href="global.html#reviewPendingShots">reviewPendingShots</a></li><li><a href="global.html#rowBoxSel">rowBoxSel</a></li><li><a href="global.html#runBaselineCase">runBaselineCase</a></li><li><a href="global.html#runIsolatedE2e">runIsolatedE2e</a></li><li><a href="global.html#runOutsideCollector">runOutsideCollector</a></li><li><a href="global.html#runShardedE2e">runShardedE2e</a></li><li><a href="global.html#runTaggedCall">runTaggedCall</a></li><li><a href="global.html#sampleShardKnown">sampleShardKnown</a></li><li><a href="global.html#sleepSync">sleepSync</a></li><li><a href="global.html#snapshotBaselines">snapshotBaselines</a></li><li><a href="global.html#snapshotLinkTarget">snapshotLinkTarget</a></li><li><a href="global.html#stepShots">stepShots</a></li><li><a href="global.html#typeIntoInput">typeIntoInput</a></li><li><a href="global.html#typeIntoNthInput">typeIntoNthInput</a></li><li><a href="global.html#waitAlertGone">waitAlertGone</a></li><li><a href="global.html#waitChildExit">waitChildExit</a></li><li><a href="global.html#waitColResizeOverlay">waitColResizeOverlay</a></li><li><a href="global.html#waitDrawerReady">waitDrawerReady</a></li><li><a href="global.html#waitGridIdle">waitGridIdle</a></li><li><a href="global.html#waitPortsFree">waitPortsFree</a></li><li><a href="global.html#waitScrollIdle">waitScrollIdle</a></li><li><a href="global.html#waitStyleSheets">waitStyleSheets</a></li><li><a href="global.html#waitUntilExist">waitUntilExist</a></li><li><a href="global.html#warnDistStale">warnDistStale</a></li><li><a href="global.html#writeBaselineIfChanged">writeBaselineIfChanged</a></li></ul>
+    
+</nav>
+
+<div id="main">
+    
+    <h1 class="page-title">waitScrollIdle.mjs</h1>
+    
+
+    
+
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>/**
+ * 等頁面上進行中之捲動(平滑捲動動畫、JS逐格捲動)結束：連續quietFrames個動畫影格內任何元素(含文件本身)皆無scroll事件即視為靜止；本函數不拋錯
+ *
+ * why(排程第 504 項，2026-11-24)：captureStableWithBox 於量框前以 Playwright 之 scrollIntoViewIfNeeded 把目標捲入，
+ * 其底層為 CDP DOM.scrollIntoViewIfNeeded(瞬間捲動)；平滑捲動進行中呼叫時，進行中之動畫被截斷於中途
+ * (使用端實測：scrollTop 停在 254 而非動畫終點 267，標準圖差約 13px 位移)，即使目標本已完整可見(被截斷者可為目標之外之捲動容器)。
+ * 先等捲動靜止再呼叫，動畫跑完、終點確定；無捲動進行時只多等 quietFrames 個影格(約 50ms)，畫面不變。
+ * 偵測：document 之 capture 階段監聽 scroll(元素之 scroll 事件不冒泡，但 capture 階段可收到)；scroll 事件於影格更新時、rAF 之前派發，
+ * 有捲動之影格即歸零重數。頁面隱藏(背景分頁，rAF 停擺)而 250ms 內一個影格都沒有時視為靜止(無影格即無捲動動畫進行)；
+ * 頁面可見而影格晚到(高負載)時照常等，由硬逾時兜底(不懸置)。
+ * 逾時(仍持續捲動，例如跑馬燈)回傳 idle:false，由呼叫端決定(captureStableWithBox 印告警後續行)。
+ *
+ * @param {Page} page 輸入Playwright之Page
+ * @param {Object} [opt={}] 輸入設定物件，預設{}
+ * @param {Number} [opt.timeout=3000] 輸入等待上限毫秒數，預設3000
+ * @param {Number} [opt.quietFrames=3] 輸入連續無捲動之影格數，預設3
+ * @returns {Promise} 回傳Promise，resolve回傳{idle,scrolls,frames,waitedMs}，idle為是否已靜止，scrolls為等待期間之scroll事件數，frames為經過之影格數
+ * @example
+ *
+ * import waitScrollIdle from 'w-package-tools-e2e/src/waitScrollIdle.mjs'
+ *
+ * await page.locator('#btn').click() //觸發 el.scrollIntoView({ behavior: 'smooth' })
+ * let r = await waitScrollIdle(page)
+ * //r.idle===true 時捲動已結束
+ *
+ */
+async function waitScrollIdle(page, opt = {}) {
+    let { timeout = 3000, quietFrames = 3 } = opt
+    if (!(typeof timeout === 'number' &amp;&amp; timeout >= 0 &amp;&amp; Number.isFinite(timeout))) {
+        timeout = 3000
+    }
+    if (!(Number.isInteger(quietFrames) &amp;&amp; quietFrames >= 1)) {
+        quietFrames = 3
+    }
+    return await page.evaluate(({ timeoutMs, quietN }) => new Promise((resolve) => {
+        let t0 = performance.now()
+        let quiet = 0
+        let frames = 0
+        let scrolls = 0
+        let ended = false
+        let hHard = null
+        let hNoFrame = null
+        let onScroll = () => {
+            scrolls++
+            quiet = -1 //本影格有捲動: 其後之 rAF 會把它加回 0
+        }
+        let finish = (idle) => {
+            if (ended) {
+                return
+            }
+            ended = true
+            clearTimeout(hHard)
+            clearTimeout(hNoFrame)
+            document.removeEventListener('scroll', onScroll, { capture: true })
+            resolve({ idle, scrolls, frames, waitedMs: Math.round(performance.now() - t0) })
+        }
+        document.addEventListener('scroll', onScroll, { capture: true, passive: true })
+        let tick = () => {
+            if (ended) {
+                return
+            }
+            frames++
+            quiet++
+            if (quiet >= quietN) {
+                finish(true)
+                return
+            }
+            if (performance.now() - t0 >= timeoutMs) {
+                finish(false)
+                return
+            }
+            requestAnimationFrame(tick)
+        }
+        requestAnimationFrame(tick)
+        hHard = setTimeout(() => finish(false), timeoutMs)
+        //rAF 停擺只發生於頁面隱藏(背景分頁)時: 此時亦無捲動動畫在進行, 判靜止; 頁面可見而影格晚到(高負載)時照常等, 由硬逾時兜底
+        hNoFrame = setTimeout(() => {
+            if (frames === 0 &amp;&amp; document.hidden) {
+                finish(scrolls === 0)
+            }
+        }, Math.min(250, timeoutMs))
+    }), { timeoutMs: timeout, quietN: quietFrames })
+}
+
+
+export default waitScrollIdle
+</code></pre>
+        </article>
+    </section>
+
+
+
+
+    
+    
+</div>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 4.0.5</a> on Tue Nov 24 2026 05:39:05 GMT+0800 (台北標準時間) using the <a href="https://github.com/clenemt/docdash">docdash</a> theme.
+</footer>
+
+<script>prettyPrint();</script>
+<script src="scripts/polyfill.js"></script>
+<script src="scripts/linenumber.js"></script>
+
+
+
+</body>
+</html>

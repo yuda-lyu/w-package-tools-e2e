@@ -278,6 +278,156 @@ describe('pollUntil', function() {
         await assert.rejects(pollUntil('x', () => true, { interval: -1 }), /interval 須為正數/)
     })
 
+    //以下為排程第 604 項②(每次判斷之期限): 判斷卡住時不再等它, 整體逾時一到即拋錯; 被放棄者之 signal abort
+    //懸置以事件判定: 以 5 秒守門 race 判「有無於逾時拋錯」(修前永久等待), 非以延時同步
+    let raceHang = async (p, ms = 5000) => {
+        let h = null
+        let r = await Promise.race([
+            p.then((v) => ({ v }), (err) => ({ err })),
+            new Promise((resolve) => {
+                h = setTimeout(() => resolve({ hang: true }), ms)
+            }),
+        ])
+        clearTimeout(h)
+        return r
+    }
+
+    it('[PU-A1] 判斷卡住(永不完成)時於整體逾時拋錯、不等該次判斷, 並abort其signal(未給attemptTimeout、attemptTimeout大於整體逾時兩者皆然)', async function() {
+        for (let attemptTimeout of [undefined, 60000]) {
+            let sig = null
+            let r = await raceHang(pollUntil('卡住', (ctx) => {
+                sig = ctx && ctx.signal
+                return new Promise(() => {})
+            }, { timeout: 200, interval: 20, attemptTimeout }))
+            assert.strict.ok(!r.hang, `attemptTimeout=${attemptTimeout}: 應於整體逾時拋錯, 實際懸置`)
+            assert.strict.ok(r.err instanceof Error, `attemptTimeout=${attemptTimeout}: 應拋錯`)
+            assert.strict.match(r.err.message, /pollUntil 超過 200ms\(判斷 1 次\)條件仍不成立「卡住」；最後一次判斷未於期限內完成\(已放棄等待並 abort 其 signal\)/)
+            assert.strict.ok(sig && sig.aborted === true, `attemptTimeout=${attemptTimeout}: 被放棄之判斷其 signal 應已 abort`)
+        }
+    })
+
+    it('[PU-A2] 判斷於整體逾時之後才完成者不再等: 先拋錯, 其後才完成之truthy值不被回傳', async function() {
+        let lateDone = false
+        let doneAtReject = null
+        let r = await raceHang(pollUntil('慢查詢', () => new Promise((resolve) => {
+            setTimeout(() => {
+                lateDone = true
+                resolve('late')
+            }, 1500)
+        }), { timeout: 150, interval: 20 }).catch((err) => {
+            doneAtReject = lateDone
+            throw err
+        }))
+        assert.strict.ok(r.err instanceof Error, `應拋錯, 實得 ${JSON.stringify(r)}`)
+        assert.strict.equal(doneAtReject, false, '拋錯時慢查詢尚未完成(未等它)')
+    })
+
+    it('[PU-A3] attemptTimeout: 單次卡住即放棄並續輪詢, 次一次成立即回傳; 被放棄者signal abort, 成立者signal不abort; ctx.attempt 自1遞增', async function() {
+        let ctxs = []
+        let r = await raceHang(pollUntil('單次期限', (ctx) => {
+            ctxs.push(ctx)
+            if (ctxs.length === 1) {
+                return new Promise(() => {})
+            }
+            return { ok: ctxs.length }
+        }, { timeout: 5000, interval: 10, attemptTimeout: 50 }))
+        assert.strict.ok(!r.hang && !r.err, `應成立, 實得 ${r.err ? r.err.message : 'hang'}`)
+        assert.strict.deepStrictEqual(r.v, { ok: 2 })
+        assert.strict.deepStrictEqual(ctxs.map((c) => c.attempt), [1, 2])
+        assert.strict.equal(ctxs[0].signal.aborted, true)
+        await new Promise((resolve) => setImmediate(resolve))
+        assert.strict.equal(ctxs[1].signal.aborted, false, '成立之判斷其 signal 不得被 abort(回傳值可能仍在讀取本體)')
+    })
+
+    it('[PU-A4] 被放棄之判斷於abort後才拋錯者被攔下, 不成為unhandledRejection; 其後判斷照常', async function() {
+        let unhandled = []
+        let onUnhandled = (reason) => {
+            unhandled.push(reason)
+        }
+        process.on('unhandledRejection', onUnhandled)
+        try {
+            let n = 0
+            let r = await raceHang(pollUntil('abort後拋錯', (ctx) => {
+                n++
+                if (n === 1) {
+                    return new Promise((resolve, reject) => {
+                        ctx.signal.addEventListener('abort', () => reject(new Error('aborted later')))
+                    })
+                }
+                return true
+            }, { timeout: 5000, interval: 10, attemptTimeout: 30 }))
+            assert.strict.ok(!r.hang && !r.err && r.v === true, `應成立, 實得 ${r.err ? r.err.message : JSON.stringify(r)}`)
+            await new Promise((resolve) => setTimeout(resolve, 50))
+            assert.strict.equal(unhandled.length, 0, 'unhandledRejection 應為 0')
+        }
+        finally {
+            process.removeListener('unhandledRejection', onUnhandled)
+        }
+    })
+
+    it('[PU-A5] 判斷全數卡住且有attemptTimeout時, 逾時訊息之判斷次數大於1(有續輪詢)且仍於整體逾時拋錯', async function() {
+        let sigs = []
+        let r = await raceHang(pollUntil('每次皆卡', (ctx) => {
+            sigs.push(ctx.signal)
+            return new Promise(() => {})
+        }, { timeout: 300, interval: 10, attemptTimeout: 40 }))
+        assert.strict.ok(r.err instanceof Error, '應拋錯')
+        let m = /判斷 (\d+) 次/.exec(r.err.message)
+        assert.strict.ok(m && Number(m[1]) >= 2 && Number(m[1]) === sigs.length, r.err.message)
+        assert.strict.ok(sigs.every((s) => s.aborted), '每次被放棄之判斷其 signal 皆應 abort')
+        assert.strict.match(r.err.message, /最後一次判斷未於期限內完成/)
+    })
+
+    it('[PU-A6] attemptTimeout 之非預期輸入(0、負數、字串、NaN、null)視為未給(K3, 不拋錯): 首次卡住即等到整體逾時(不以該值為單次期限)', async function() {
+        for (let bad of [0, -1, '50', NaN, null, undefined]) {
+            let n = 0
+            let r = await raceHang(pollUntil('非預期之單次期限', () => {
+                n++
+                return n === 1 ? new Promise(() => {}) : 'second'
+            }, { timeout: 200, interval: 10, attemptTimeout: bad }))
+            assert.strict.ok(r.err instanceof Error && /判斷 1 次/.test(r.err.message), `attemptTimeout=${String(bad)}: 應等到整體逾時(視為未給), 實得 ${r.err ? r.err.message : JSON.stringify(r)}`)
+        }
+        assert.strict.equal(await pollUntil('x', () => 'v', { attemptTimeout: 'x' }), 'v')
+    })
+
+    it('[PU-A8] timeout 為 Infinity 或超過 2^31-1 毫秒時照常輪詢(單次期限夾在計時器上限內, 不致每次約 1ms 即放棄)', async function() {
+        for (let timeout of [Infinity, 3e9]) {
+            let n = 0
+            let r = await raceHang(pollUntil('大逾時', () => new Promise((resolve) => {
+                n++
+                setTimeout(() => resolve(n >= 2 ? 'ok' : null), 30)
+            }), { timeout, interval: 10 }))
+            assert.strict.ok(!r.hang && !r.err && r.v === 'ok', `timeout=${timeout}: 應成立, 實得 ${r.err ? r.err.message : JSON.stringify(r)}`)
+            assert.strict.equal(n, 2)
+        }
+    })
+
+    it('[PU-A9] 先拋錯後卡住: 逾時訊息同時註明被放棄與此前之錯誤', async function() {
+        let n = 0
+        let r = await raceHang(pollUntil('先拋後卡', () => {
+            n++
+            if (n === 1) {
+                throw new Error('第一次錯')
+            }
+            return new Promise(() => {})
+        }, { timeout: 150, interval: 10 }))
+        assert.strict.ok(r.err instanceof Error)
+        assert.strict.match(r.err.message, /最後一次判斷未於期限內完成\(已放棄等待並 abort 其 signal\)；此前最後一次判斷拋錯: 第一次錯/)
+    })
+
+    it('[PU-A7] 期限內完成之判斷行為不變: 拋錯後回傳falsy者, 逾時訊息仍附最後一次錯誤(與改版前同)', async function() {
+        let n = 0
+        let r = await raceHang(pollUntil('先拋後falsy', () => {
+            n++
+            if (n === 1) {
+                throw new Error('第一次')
+            }
+            return null
+        }, { timeout: 120, interval: 10 }))
+        assert.strict.ok(r.err instanceof Error)
+        assert.strict.match(r.err.message, /最後一次判斷拋錯: 第一次/)
+    })
+
 })
 
 
@@ -494,6 +644,36 @@ describe('runIsolatedE2e', function() {
         assert.strict.deepStrictEqual(got, [
             ['npx', ['--grep', 'E2E-0(0[2-9])-[a-z]!', '--fail-zero'], true],
             ['npx', ['--grep', '^E2E-0(0[2-9]|1[0-5])-', '--fail-zero'], false],
+        ])
+    })
+
+    //排程第 604 項①: 本函數常由背景(detached、排程)腳本呼叫; 無主控台之父行程起子行程而未帶 windowsHide 時 Windows 為其開新視窗
+    it('[RI-W1] 起子行程一律帶windowsHide:true(npx兩平台與node直接執行兩條路徑, 含targets與grep); 其餘選項不變', async function() {
+        let projRoot = path.dirname(testDir)
+        let fdNm = path.join(projRoot, 'node_modules')
+        let bin = path.join(fdNm, 'mocha', 'bin', 'mocha.js')
+        let got = []
+        let spawnSyncFn = (cmd, args, o) => {
+            got.push({ cmd: cmd === process.execPath ? 'node' : cmd, windowsHide: o.windowsHide, stdio: o.stdio, cwd: o.cwd, shell: o.shell })
+            return { status: 0 }
+        }
+        fs.rmSync(fdNm, { recursive: true, force: true })
+        for (let platform of ['win32', 'linux']) {
+            await runIsolatedE2e({ projRoot, testDir, pattern: /^e2e-a\.test\.mjs$/, platform, spawnSyncFn, log: () => {} })
+        }
+        fs.mkdirSync(path.dirname(bin), { recursive: true })
+        fs.writeFileSync(bin, '')
+        try {
+            await runIsolatedE2e({ projRoot, testDir, targets: ['e2e-a.test.mjs', { file: 'e2e-b.test.mjs', grep: 'E2E-001-' }], spawnSyncFn, log: () => {} })
+        }
+        finally {
+            fs.rmSync(fdNm, { recursive: true, force: true })
+        }
+        assert.strict.deepStrictEqual(got, [
+            { cmd: 'npx', windowsHide: true, stdio: 'inherit', cwd: projRoot, shell: true },
+            { cmd: 'npx', windowsHide: true, stdio: 'inherit', cwd: projRoot, shell: false },
+            { cmd: 'node', windowsHide: true, stdio: 'inherit', cwd: projRoot, shell: false },
+            { cmd: 'node', windowsHide: true, stdio: 'inherit', cwd: projRoot, shell: false },
         ])
     })
 

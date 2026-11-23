@@ -17,6 +17,7 @@ import { spawnSync } from 'child_process'
  * < > 為轉向(> 把輸出寫成cwd下之檔案且exit 0)，^ 與 " 被吃掉、空白拆成多個參數、%名稱% 展開為環境變數(皆exit 0，靜默改變篩選)；
  * 括號、[ ]、! , ; = * ? \ 與中文原樣傳遞。Node 24另警告DEP0190。故經npx且於Windows時，參數含空白或 " & | < > ^ % 即於執行前拋錯，不跑被改寫之指令。
  * mocha執行檔之路徑一律以projRoot解析為絕對路徑(spawn之cwd為projRoot，相對路徑會被重複疊加)；明確給定之mochaBin不存在即拋錯，不默默改用npx。
+ * 起子行程一律帶windowsHide:true(2026-11-24起)：由無主控台之背景行程(detached、排程)呼叫時，未帶者Windows會為每個mocha行程開一個新視窗；由前景主控台呼叫時子行程沿用該主控台，輸出不變。
  *
  * @param {Object} opt 輸入設定物件
  * @param {String} opt.projRoot 輸入專案根目錄字串(mocha之工作目錄)
@@ -106,9 +107,10 @@ async function runIsolatedE2e(opt = {}) {
         await beforeEachFile(file)
         log(`\n=== [run-e2e-isolated] 執行 ${file}${grep ? ` --grep ${grep}` : ''}（全新後端）===`)
         let args = [path.join(rel, file), ...mochaArgs, ...(grep ? ['--grep', grep, '--fail-zero'] : [])]
+        //windowsHide: 本函數常由背景(detached、排程)之腳本呼叫, 無主控台之父行程起子行程時 Windows 會為其開新視窗(排程第 604 項①)
         let r = useNode
-            ? spawnSyncFn(process.execPath, [bin, ...args], { cwd: projRoot, stdio: 'inherit', shell: false })
-            : spawnSyncFn('npx', ['mocha', ...args], { cwd: projRoot, stdio: 'inherit', shell: isWin })
+            ? spawnSyncFn(process.execPath, [bin, ...args], { cwd: projRoot, stdio: 'inherit', shell: false, windowsHide: true })
+            : spawnSyncFn('npx', ['mocha', ...args], { cwd: projRoot, stdio: 'inherit', shell: isWin, windowsHide: true })
         results.push(grep ? { file, grep, code: r.status } : { file, code: r.status })
     }
     await afterAll()

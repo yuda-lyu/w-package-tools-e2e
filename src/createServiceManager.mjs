@@ -71,8 +71,8 @@ function withPort(o, port) {
  *
  * let sm = createServiceManager({
  *     services: [
- *         { name: 'backend', port: 11007, readyTimeoutMs: 30000, spawn: ({ args, env }) => spawn('node', ['srv.mjs', ...args], { stdio: 'ignore', env }) },
- *         { name: 'frontend', port: 8080, readyTimeoutMs: 90000, spawn: () => spawn('npm', ['run', 'serve'], { stdio: 'ignore', shell: true }) },
+ *         { name: 'backend', port: 11007, readyTimeoutMs: 30000, spawn: ({ args, env }) => spawn('node', ['srv.mjs', ...args], { stdio: 'ignore', env, windowsHide: true }) },
+ *         { name: 'frontend', port: 8080, readyTimeoutMs: 90000, spawn: () => spawn('npm', ['run', 'serve'], { stdio: 'ignore', shell: true, windowsHide: true }) },
  *     ],
  *     killForeignOnRestart: true,
  * })

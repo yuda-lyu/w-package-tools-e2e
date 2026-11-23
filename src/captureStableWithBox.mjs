@@ -1,6 +1,8 @@
 import captureStable from './captureStable.mjs'
 import maskRegions from './maskRegions.mjs'
 import composeBox from './composeBox.mjs'
+import waitStyleSheets from './waitStyleSheets.mjs'
+import waitScrollIdle from './waitScrollIdle.mjs'
 
 
 /**
@@ -20,6 +22,10 @@ import composeBox from './composeBox.mjs'
  * 被蓋住檢查(2026-09-28)：選擇器/Locator 目標(與量測型目標之 probe)之中心點(夾在視窗內)以 elementFromPoint 取最上層元素，
  * 若非目標本身、其子孫或祖先(例如彈窗遮罩、蓋在上面之面板)即視為「框了被蓋住的東西」——技能 §7.3-4 規定改框蓋在上面者。
  * coverCheck：'throw'(預設，可由環境變數 E2E_COVER_CHECK 覆寫)、'warn'(印 [box-covered] 告警，供全量盤查)、'off'(確屬設計者)。
+ * 量框前之就緒(2026-11-24起)：①等樣式表載入(排程第 529 項；讀 opt.waitStyles／styleTimeoutMs／waitStylesFn，與 captureStable 同一組選項且照常透傳)——
+ * 框於截圖前量，CSS 未載入時量到的是素頁之版面；本處只等待不拋錯，strict 之判定由 captureStable 做。
+ * ②捲入前先等進行中之捲動結束(排程第 504 項；waitScrollIdle，預設開)——scrollIntoViewIfNeeded 會截斷進行中之平滑捲動
+ * (scrollTop 停在動畫中途)；無捲動進行時只多等約 3 個影格，畫面不變。waitScrollIdle:false 為改版前之行為。
  *
  * @param {Page} page 輸入Playwright之Page
  * @param {String|Object|Array} target 輸入框選目標
@@ -32,6 +38,9 @@ import composeBox from './composeBox.mjs'
  * @param {Object} [opt.boxOpts={}] 輸入透傳給composeBox之樣式參數物件(pad、margin、strokeWidth、color、radius)，預設{}
  * @param {Number} [opt.scrollTimeoutMs=8000] 輸入捲入視窗之逾時毫秒數，預設8000
  * @param {Boolean} [opt.scrollTall=true] 輸入目標比其可視區大且已部分入鏡時是否仍捲入布林值，預設true(向後相容，並印[box-scroll]告警)；false則不捲、框其可見部分
+ * @param {Boolean} [opt.waitScrollIdle=true] 輸入捲入前是否先等進行中之捲動結束布林值，預設true；只在有捲入對象(第一個目標非矩形)時執行
+ * @param {Number} [opt.scrollIdleTimeoutMs=3000] 輸入等捲動結束之上限毫秒數，預設3000；逾時印[box-scroll-busy]告警後續行
+ * @param {Function} [opt.waitScrollIdleFn=waitScrollIdle] 輸入等捲動結束函數(page,{timeout})=>Promise<{idle}>，預設waitScrollIdle(供測試注入)
  * @param {Number} [opt.preWaitMs=300] 輸入捲入後之等待毫秒數，預設300
  * @param {Function} [opt.capture=captureStable] 輸入截圖函數(page,opt)=>Promise<Buffer>，預設captureStable
  * @returns {Promise} 回傳Promise，resolve回傳PNG之Buffer
@@ -53,11 +62,26 @@ async function captureStableWithBox(page, target, opt = {}) {
         boxOpts = {},
         scrollTimeoutMs = 8000,
         scrollTall = true,
+        waitScrollIdle: doWaitScrollIdle = true,
+        scrollIdleTimeoutMs = 3000,
+        waitScrollIdleFn = waitScrollIdle,
         preWaitMs = 300,
         capture = captureStable,
         ...captureOpts
     } = opt
     let items = Array.isArray(target) ? target : [target]
+
+    //量框前先等樣式表載入(與 captureStable 同一組選項, 照常透傳給 capture; 本處不拋錯)
+    if (captureOpts.waitStyles !== false) {
+        let fnStyles = typeof captureOpts.waitStylesFn === 'function' ? captureOpts.waitStylesFn : waitStyleSheets
+        let st = await fnStyles(page, { timeout: typeof captureOpts.styleTimeoutMs === 'number' ? captureOpts.styleTimeoutMs : 30000 })
+        let np = (st && Array.isArray(st.pending)) ? st.pending.length : 0
+        let nf = (st && Array.isArray(st.failed)) ? st.failed.length : 0
+        if (np > 0 || nf > 0) {
+            //量框所據之版面可能未套用樣式表; strict 與否由其後之 capture 判定(captureStable 會再等一次並拋錯或告警)
+            console.warn(`[style-not-ready] captureStableWithBox 量框前樣式表未就緒(仍載入中 ${np} 個、載入失敗 ${nf} 個), 框可能依未套用樣式表之版面`)
+        }
+    }
     let isLoc = (x) => x && typeof x === 'object' && typeof x.boundingBox === 'function'
     let isMeasure = (x) => x && typeof x === 'object' && !isLoc(x) && typeof x.measure === 'function'
     let isRect = (x) => x && typeof x === 'object' && !isLoc(x) && !isMeasure(x) && ['x', 'y', 'width', 'height'].every((k) => typeof x[k] === 'number')
@@ -70,6 +94,14 @@ async function captureStableWithBox(page, target, opt = {}) {
     if (items.length > 0 && !isRect(items[0])) {
         let first = isMeasure(items[0]) ? items[0].scroll : items[0]
         if (first) {
+            //先等進行中之捲動結束: scrollIntoViewIfNeeded(CDP 瞬間捲動)會截斷進行中之平滑捲動(排程第 504 項)
+            if (doWaitScrollIdle !== false) {
+                let fnIdle = typeof waitScrollIdleFn === 'function' ? waitScrollIdleFn : waitScrollIdle //非預期之輸入視為未給(K3)
+                let si = await fnIdle(page, { timeout: scrollIdleTimeoutMs })
+                if (si && si.idle === false) {
+                    console.warn(`[box-scroll-busy] 等捲動結束逾時(${scrollIdleTimeoutMs}ms, 期間 scroll 事件 ${si.scrolls} 次), 照常捲入與量框`)
+                }
+            }
             let firstLoc = isLoc(first) ? first.first() : page.locator(first).first()
             let tall = (await firstLoc.count()) > 0 && await firstLoc.evaluate((el) => {
                 let r = el.getBoundingClientRect()

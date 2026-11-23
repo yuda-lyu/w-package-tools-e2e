@@ -1,5 +1,7 @@
 import sharp from 'sharp'
 import maskRegions from './maskRegions.mjs'
+import maskDiagText from 'wsemi/src/maskDiagText.mjs'
+import waitStyleSheets from './waitStyleSheets.mjs'
 
 
 //去掉 SVG 之 SMIL 動畫元素(自閉合與成對兩種寫法), 留下初始靜態影格
@@ -14,7 +16,7 @@ function stripSmil(svg) {
  * 標準圖截圖之唯一入口：先排除「還沒穩定」與「穩定到錯的狀態」兩類成因，再連拍至相鄰兩張完全相同才回傳
  *
  * 順序(不可調換)：滑鼠移到(0,0)消除hover → 初始等待(涵蓋setTimeout延遲顯示與hover離開動畫，animations:'disabled'不快轉setTimeout) →
- * settle掛鉤(元件狀態機優先，例如WDrawer之waitColResizeOverlay、waitDrawerReady) → 凍結inline SVG之SMIL動畫 → 等字型就緒 →
+ * settle掛鉤(元件狀態機優先，例如WDrawer之waitColResizeOverlay、waitDrawerReady) → 凍結inline SVG之SMIL動畫 → 等樣式表載入(waitStyles) → 等字型就緒 →
  * beforeShots掛鉤(例如ag-grid水平捲動歸零) → 偵測<img>內含<animate>之SVG區域(截圖後貼上該SVG去掉動畫元素之靜態影格，兩端同區同圖) →
  * 連拍：每張先遮罩再與前一張比對位元組，相同即回傳；重試用盡仍不同時，strict拋錯(產製端拒絕寫入未穩定畫面)，否則回傳最後一張交由比對揭露真實flake。
  * strict之決定：opt.strict為布林值時依之；否則呼叫strictDefault()(於每次呼叫時求值，預設讀環境變數E2E_STRICT_CAPTURE為'1')。
@@ -24,6 +26,9 @@ function stripSmil(svg) {
  * <img>動畫區之處理(imgSmilFill，2026-09-28)：'static'(預設)先以區外左側像素色填底，再貼上以sharp算繪之「去掉動畫元素之SVG」靜態影格——
  * 手冊用圖看得到真實圖示(技能 §8.2「該讓讀者看到的畫面不填黑」，原填黑使連線中畫面之轉圈成黑方塊)，且輸入固定故輸出決定；
  * 區域超出截圖邊界者退回填黑。'black'為2026-09-28前之行為(僅供等價對照)。
+ * 等樣式表載入(waitStyles，2026-11-24起，排程第 529 項)：截圖前等 <link rel=stylesheet> 全部載入(見waitStyleSheets)；
+ * 逾時仍載入中或同源者載入失敗時，strict拋錯(產製端拒絕寫入 CSS 未載入之素頁)，否則印[style-not-ready]告警並續行(交由比對揭露)。
+ * 正常已載入之頁面不等待、畫面不變。waitStyles:false 為改版前之行為。
  *
  * @param {Page} page 輸入Playwright之Page
  * @param {Object} [opt={}] 輸入設定物件，預設{}
@@ -35,6 +40,9 @@ function stripSmil(svg) {
  * @param {Array} [opt.settle=[]] 輸入settle掛鉤陣列，每個為async(page)
  * @param {Array} [opt.beforeShots=[]] 輸入連拍前掛鉤陣列，每個為async(page)
  * @param {Boolean} [opt.freezeSvg=true] 輸入是否凍結inline SVG之SMIL動畫布林值，預設true
+ * @param {Boolean} [opt.waitStyles=true] 輸入是否等<link rel=stylesheet>載入完成布林值，預設true
+ * @param {Number} [opt.styleTimeoutMs=30000] 輸入等樣式表載入之上限毫秒數，預設30000
+ * @param {Function} [opt.waitStylesFn=waitStyleSheets] 輸入等樣式表函數(page,{timeout})=>Promise<{pending,failed}>，預設waitStyleSheets(供測試注入)
  * @param {Boolean} [opt.waitFonts=true] 輸入是否等document.fonts.ready布林值，預設true
  * @param {Boolean} [opt.maskImgSmil=true] 輸入是否處理<img>內之SVG動畫區布林值，預設true
  * @param {String} [opt.imgSmilFill='static'] 輸入<img>動畫區之處理方式字串，'static'(貼靜態影格)或'black'(填黑)，預設'static'
@@ -61,6 +69,9 @@ async function captureStable(page, opt = {}) {
         settle = [],
         beforeShots = [],
         freezeSvg = true,
+        waitStyles = true,
+        styleTimeoutMs = 30000,
+        waitStylesFn = waitStyleSheets,
         waitFonts = true,
         maskImgSmil = true,
         imgSmilFill = 'static',
@@ -96,6 +107,23 @@ async function captureStable(page, opt = {}) {
                 }
             })
         })
+    }
+
+    //等樣式表載入: 未載入之素頁本身穩定, 連拍相同即被回傳(排程第 529 項); 字型宣告於樣式表內, 故先於 fonts.ready
+    if (waitStyles !== false) {
+        //非預期之輸入視為未給(依輸入參數檢測規格 K3)
+        let fnStyles = typeof waitStylesFn === 'function' ? waitStylesFn : waitStyleSheets
+        let st = await fnStyles(page, { timeout: styleTimeoutMs })
+        let pending = (st && Array.isArray(st.pending)) ? st.pending : []
+        let failed = (st && Array.isArray(st.failed)) ? st.failed : []
+        if (pending.length > 0 || failed.length > 0) {
+            //網址為頁面之外來值: 經 wsemi maskDiagText 遮憑證與查詢秘密值(診斷輸出與遮罩規格 D3; 一般網址不變)
+            let msg = maskDiagText(`captureStable: 樣式表未就緒(逾時 ${styleTimeoutMs}ms 仍載入中 ${pending.length} 個${pending.length > 0 ? `: ${pending.join(', ')}` : ''}; 載入失敗 ${failed.length} 個${failed.length > 0 ? `: ${failed.join(', ')}` : ''})`)
+            if (isStrict) {
+                throw new Error(`${msg} (regen 拒絕寫入樣式表未載入之畫面)`)
+            }
+            console.warn(`[style-not-ready] ${msg}`)
+        }
     }
 
     //等web fonts(含icon字型)載入, 否則截到glyph未渲染之佔位

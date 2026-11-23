@@ -1,3 +1,6 @@
+const MAX_TIMER_MS = 2147483647
+
+
 /**
  * 測試行程端之偵測驅動等待：反覆執行判斷函數直到回傳truthy，逾時即拋錯(代表真實異常，而非固定等待不夠)
  *
@@ -7,11 +10,21 @@
  * 本函數之fn於測試行程執行(資料庫、檔案系統、HTTP)，可使用閉包。
  * fn拋錯視為「尚未成立」並繼續輪詢(例如查詢之紀錄尚不存在而取值失敗)，逾時訊息附最後一次錯誤。
  *
+ * 每次判斷之期限(2026-11-24起，排程第 604 項②)：每次判斷皆與「距整體逾時之剩餘時間」競賽(另給attemptTimeout時取兩者之小)，
+ * 判斷卡住(例如對被壓垮之後端fetch而無回應)時不再等它——整體逾時一到即拋錯，不會超過opt.timeout太多；
+ * 單次期限(attemptTimeout)先到時該次視為未成立並繼續輪詢。被放棄之判斷：其AbortSignal(fn之第一個參數ctx.signal)即被abort，
+ * fn可據以中止(例如fetch(url,{signal:ctx.signal}))；其後才完成之結果一律忽略，其後才拋之錯誤亦已攔下(不成為unhandledRejection)。
+ * 判斷於期限內完成者，signal不會被abort(回傳值為未讀完本體之Response等亦可安全使用)。
+ * 改版前只在兩次判斷之間檢查逾時，最後一次判斷跨過逾時仍會等其完成、且其成立仍回傳成功；改版後跨過逾時者不再等(逾時前數毫秒才起跑之I/O判斷必被放棄)，
+ * 同步或只經微工作即完成之判斷不受影響(與期限計時器競賽時先完成)。單次期限夾在2^31-1毫秒內(timeout為Infinity亦可用)。
+ * 相容性：fn多收一個ctx參數；把「第一參數有他用(例如有預設值之選項物件)」之既有函數直接當fn傳入者，須包一層(()=>check())。
+ *
  * @param {String} label 輸入錯誤訊息用之對象描述字串
- * @param {Function} fn 輸入判斷函數，可為async函數，回傳truthy代表成立
+ * @param {Function} fn 輸入判斷函數，可為async函數，回傳truthy代表成立；呼叫時傳入ctx物件{signal,attempt}，signal為本次判斷之AbortSignal(被放棄時abort)，attempt為第幾次判斷(自1起)
  * @param {Object} [opt={}] 輸入設定物件，預設{}
  * @param {Number} [opt.timeout=30000] 輸入逾時毫秒數，預設30000
  * @param {Number} [opt.interval=200] 輸入輪詢間隔毫秒數，預設200
+ * @param {Number} [opt.attemptTimeout] 輸入單次判斷之期限毫秒數(正數)，未給(或非正數)時單次判斷之期限為距整體逾時之剩餘時間
  * @returns {Promise} 回傳Promise，resolve為fn最後一次之truthy回傳值，逾時reject
  * @example
  *
@@ -23,9 +36,15 @@
  *     return rs.length > 0 ? rs : null
  * }, { timeout: 60000 })
  *
+ * //對可能卡住之後端輪詢: 單次5秒為限, 被放棄之請求以signal中止
+ * await pollUntil('服務恢復', async ({ signal }) => {
+ *     let res = await fetch(url, { signal })
+ *     return res.ok
+ * }, { timeout: 60000, interval: 500, attemptTimeout: 5000 })
+ *
  */
 async function pollUntil(label, fn, opt = {}) {
-    let { timeout = 30000, interval = 200 } = opt
+    let { timeout = 30000, interval = 200, attemptTimeout = null } = opt
     if (typeof label !== 'string' || label === '') {
         throw new Error('pollUntil: label 須為非空字串')
     }
@@ -38,19 +57,53 @@ async function pollUntil(label, fn, opt = {}) {
     if (!(typeof interval === 'number' && interval > 0)) {
         throw new Error('pollUntil: interval 須為正數')
     }
+    //選用之 attemptTimeout: 非正數之非預期輸入視為未給(依輸入參數檢測規格 K3; 既有之 timeout／interval 拋錯維持不變)
+    if (!(typeof attemptTimeout === 'number' && attemptTimeout > 0)) {
+        attemptTimeout = null
+    }
     let deadline = Date.now() + timeout
     let lastErr = null
     let n = 0
+    let lastHung = false //最後一次判斷是否因期限而被放棄
     for (;;) {
         n++
+        let remain = Math.max(0, deadline - Date.now())
+        //setTimeout 之上限為 2^31-1 毫秒(超過即約 1ms 觸發): timeout 為 Infinity 或極大者夾在上限內
+        let limit = Math.min(attemptTimeout ? Math.min(attemptTimeout, remain) : remain, MAX_TIMER_MS)
+        let ac = new AbortController()
+        let p
         try {
-            let v = await fn()
-            if (v) {
-                return v
-            }
+            //同步呼叫(與改版前相同之時點); 同步拋錯轉為 rejected
+            p = Promise.resolve(fn({ signal: ac.signal, attempt: n }))
         }
         catch (err) {
-            lastErr = err
+            p = Promise.reject(err)
+        }
+        let timer = null
+        let hung = new Promise((resolve) => {
+            timer = setTimeout(() => resolve(true), limit)
+        })
+        let r = await Promise.race([
+            p.then((v) => ({ ok: true, v }), (err) => ({ ok: false, err })),
+            hung.then(() => ({ hung: true })),
+        ])
+        clearTimeout(timer)
+        if (r.hung) {
+            //被放棄: 通知 fn 中止; 其後之結果忽略、其後之錯誤攔下
+            p.catch(() => {})
+            ac.abort(new Error(`pollUntil: 單次判斷超過 ${limit}ms 未完成, 已放棄`))
+            lastHung = true //lastErr 保留(此前之錯誤仍附於逾時訊息)
+        }
+        else if (!r.ok) {
+            //與改版前同: 拋錯(含 reject(undefined))即覆寫最後一次錯誤
+            lastHung = false
+            lastErr = r.err
+        }
+        else {
+            lastHung = false
+            if (r.v) {
+                return r.v
+            }
         }
         //至少判斷一次; 逾時後不再睡
         if (Date.now() >= deadline) {
@@ -58,7 +111,14 @@ async function pollUntil(label, fn, opt = {}) {
         }
         await new Promise((resolve) => setTimeout(resolve, Math.min(interval, Math.max(0, deadline - Date.now()))))
     }
-    let tail = lastErr ? `；最後一次判斷拋錯: ${lastErr && lastErr.message ? lastErr.message : String(lastErr)}` : ''
+    let errText = lastErr ? (lastErr && lastErr.message ? lastErr.message : String(lastErr)) : ''
+    let tail = ''
+    if (lastHung) {
+        tail = `；最後一次判斷未於期限內完成(已放棄等待並 abort 其 signal)${errText ? `；此前最後一次判斷拋錯: ${errText}` : ''}`
+    }
+    else if (lastErr) {
+        tail = `；最後一次判斷拋錯: ${errText}`
+    }
     throw new Error(`pollUntil 超過 ${timeout}ms(判斷 ${n} 次)條件仍不成立「${label}」${tail} — 此為真實異常 (計時器未執行 / 寫入失敗)`)
 }
 

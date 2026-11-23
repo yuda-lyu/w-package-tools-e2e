@@ -90,6 +90,17 @@
   - 使用端視角: `npm pack` 後安裝至 `./tmp` 之假專案, 自 `node_modules` 深層引用實跑(瀏覽器下載以 `PLAYWRIGHT_BROWSERS_PATH` 導至暫存目錄), 驗產物落地.
   - 會動到使用端像素者: 先在使用端以 `E2E_BASELINE_OUT_DIR` 導出重產並以 `compareImageDirs` 量影響範圍, 發版說明明列受影響類別; 使用端重產另須授權.
 
+## 改動截圖就緒條件(`captureStable`、`captureStableWithBox` 之等待)之處理
+
+- **關聯**: `src/captureStable.mjs`、`src/captureStableWithBox.mjs`、`src/waitStyleSheets.mjs`、`src/waitScrollIdle.mjs`; `test/e2e-readyWaits.test.mjs`、`test/e2e-captureEquivalence.test.mjs`; `sgud/rule/rulebook_ready.md`; README §2.3、§5.
+- **判斷**: 就緒條件之改動會改變截圖之時點——正常(已就緒)頁面之截圖與量框須逐位元不變, 只允許「原本截到未就緒畫面」之情形改變; 會使正常頁面改變者必為選項且預設維持舊行為.
+- **處理**:
+  - 新條件一律附「關閉即改版前」之選項, 並以開與關之截圖 `Buffer.equals` 證明正常頁面不變(`[RS-06]`、`[SI-03]`); `e2e-captureEquivalence` 之凍結複本對照須全綠.
+  - 讀取之選項不從 `captureOpts` 移除者會透傳給自訂 `capture`(勿新增會被傳進 `page.screenshot` 之鍵); 只給本函數用之新鍵以解構取出.
+  - 不以「目標完整可見即略過 `scrollIntoViewIfNeeded`」修捲動問題(會一併略過 Playwright 之 stable 等待); 改為先等捲動靜止再照常呼叫.
+  - 動手前唯讀盤點使用端: 平滑捲動之來源(`behavior:'smooth'`、`scroll-behavior`)與其 e2e 案例、樣式表之載入方式(head 靜態／動態插入／注入 `<style>`／外部 CDN)、`page.goto` 之 `waitUntil`、是否經 `captureStable`; 依盤點列「可能改變之標準圖」.
+  - 瀏覽器行為(平滑捲動有無動畫、失敗之 `sheet`、Resource Timing)隨 Chromium 版本而變, 判斷前以探測腳本實測(見 `sgud/exp/experience.md`「截圖就緒條件之樣式表與捲動」).
+
 ## e2e 分組多開之操作與修改(`runShardedE2e`、`tools/shardE2e.mjs`)
 
 - **關聯**: `src/runShardedE2e.mjs`、`src/planE2eShards.mjs`、`src/listDirLinks.mjs`、`src/removeE2eInstance.mjs`、`tools/shardE2e.mjs`、`tools/shardE2eReporter.cjs`; `README.md` §2.10、§2.11; `sgud/rule/rulebook_shard.md`; 全域技能 role-coder-for-test-e2e `references/full-run-and-instances.md` §5.

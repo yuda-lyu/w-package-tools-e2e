@@ -71,7 +71,7 @@ describe('auditWaits(CLI)', function() {
 
     it('依前後語句分出 A/B/C/D/L/R/E; 註解行不計; 變數秒數原樣記錄; tools 下 .mjs 亦掃', function() {
         let out = path.join(fdTmp, 'out.json')
-        let r = spawnSync(process.execPath, [tool, '--json', out, path.join(fdTmp, 'proj')], { encoding: 'utf8' })
+        let r = spawnSync(process.execPath, [tool, '--json', out, path.join(fdTmp, 'proj')], { encoding: 'utf8', windowsHide: true })
         assert.strict.equal(r.status, 0, r.stderr)
         let rows = JSON.parse(fs.readFileSync(out, 'utf8'))
         let sampleRows = rows.filter((x) => x.file === 'test/e2e-sample.test.mjs')
@@ -84,7 +84,7 @@ describe('auditWaits(CLI)', function() {
     })
 
     it('--only 只列指定類別之清單(統計仍為全部)', function() {
-        let r = spawnSync(process.execPath, [tool, '--only', 'C', path.join(fdTmp, 'proj')], { encoding: 'utf8' })
+        let r = spawnSync(process.execPath, [tool, '--only', 'C', path.join(fdTmp, 'proj')], { encoding: 'utf8', windowsHide: true })
         assert.strict.equal(r.status, 0, r.stderr)
         let listed = r.stdout.split(/\r?\n/).filter((s) => /^\[[A-Z]\] /.test(s))
         assert.strict.deepStrictEqual(listed.map((s) => s.slice(0, 3)), ['[C]'])
@@ -93,7 +93,7 @@ describe('auditWaits(CLI)', function() {
     })
 
     it('未給專案根目錄: 印用法並以 2 結束', function() {
-        let r = spawnSync(process.execPath, [tool], { encoding: 'utf8' })
+        let r = spawnSync(process.execPath, [tool], { encoding: 'utf8', windowsHide: true })
         assert.strict.equal(r.status, 2)
         //用法訊息印實際執行路徑(套件內 tools/…, 使用端 node_modules/w-package-tools-e2e/tools/…), 不綁目錄
         assert.strict.match(r.stderr, /usage: node \S*tools\/auditWaits\.mjs \[--only/)
