@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    
+    <meta charset="utf-8">
+    <title>loadCdnManifest.mjs - Documentation</title>
+    
+    
+    <script src="scripts/prettify/prettify.js"></script>
+    <script src="scripts/prettify/lang-css.js"></script>
+    <!--[if lt IE 9]>
+      <script src="//html5shiv.googlecode.com/svn/trunk/html5.js"></script>
+    <![endif]-->
+    <link type="text/css" rel="stylesheet" href="styles/prettify.css">
+    <link type="text/css" rel="stylesheet" href="styles/jsdoc.css">
+    <script src="scripts/nav.js" defer></script>
+    
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+
+<input type="checkbox" id="nav-trigger" class="nav-trigger" />
+<label for="nav-trigger" class="navicon-button x">
+  <div class="navicon"></div>
+</label>
+
+<label for="nav-trigger" class="overlay"></label>
+
+<nav >
+    
+    
+    <h2><a href="index.html">Home</a></h2><h3>Global</h3><ul><li><a href="global.html#BOX_PAD">BOX_PAD</a></li><li><a href="global.html#INK_PAD">INK_PAD</a></li><li><a href="global.html#WPackageToolsE2e">WPackageToolsE2e</a></li><li><a href="global.html#acceptPendingShots">acceptPendingShots</a></li><li><a href="global.html#activeBaselineCollector">activeBaselineCollector</a></li><li><a href="global.html#assertBaselineMatch">assertBaselineMatch</a></li><li><a href="global.html#assertE2eBasePort">assertE2eBasePort</a></li><li><a href="global.html#assertTextSpec">assertTextSpec</a></li><li><a href="global.html#canvasInkRects">canvasInkRects</a></li><li><a href="global.html#captureStable">captureStable</a></li><li><a href="global.html#captureStableWithBox">captureStableWithBox</a></li><li><a href="global.html#cdnMimeOf">cdnMimeOf</a></li><li><a href="global.html#cdnNativeFetch">cdnNativeFetch</a></li><li><a href="global.html#checkPortFree">checkPortFree</a></li><li><a href="global.html#chromiumLaunchArgs">chromiumLaunchArgs</a></li><li><a href="global.html#collectDomText">collectDomText</a></li><li><a href="global.html#compareImageDirs">compareImageDirs</a></li><li><a href="global.html#createBaselineCollector">createBaselineCollector</a></li><li><a href="global.html#createBaselineGate">createBaselineGate</a></li><li><a href="global.html#createCdnLocal">createCdnLocal</a></li><li><a href="global.html#createDirLock">createDirLock</a></li><li><a href="global.html#createDistGuard">createDistGuard</a></li><li><a href="global.html#createE2ePortClaimer">createE2ePortClaimer</a></li><li><a href="global.html#createKnownDefect">createKnownDefect</a></li><li><a href="global.html#createServiceManager">createServiceManager</a></li><li><a href="global.html#createTempSettings">createTempSettings</a></li><li><a href="global.html#cropRegion">cropRegion</a></li><li><a href="global.html#describePortOwners">describePortOwners</a></li><li><a href="global.html#diffBaselineSnapshots">diffBaselineSnapshots</a></li><li><a href="global.html#diffCdnManifest">diffCdnManifest</a></li><li><a href="global.html#diffLinkTarget">diffLinkTarget</a></li><li><a href="global.html#findOrphanBaselines">findOrphanBaselines</a></li><li><a href="global.html#findProcessDescendants">findProcessDescendants</a></li><li><a href="global.html#genCdnManifest">genCdnManifest</a></li><li><a href="global.html#getActiveE2ePortReservation">getActiveE2ePortReservation</a></li><li><a href="global.html#getE2eMode">getE2eMode</a></li><li><a href="global.html#gridContentBox">gridContentBox</a></li><li><a href="global.html#insideEnabledCollect">insideEnabledCollect</a></li><li><a href="global.html#isChildAlive">isChildAlive</a></li><li><a href="global.html#itemsUnionBox">itemsUnionBox</a></li><li><a href="global.html#judgePortOwner">judgePortOwner</a></li><li><a href="global.html#killOwnTree">killOwnTree</a></li><li><a href="global.html#killPortListeners">killPortListeners</a></li><li><a href="global.html#launchBrowser">launchBrowser</a></li><li><a href="global.html#listDirLinks">listDirLinks</a></li><li><a href="global.html#listProcessTable">listProcessTable</a></li><li><a href="global.html#listenerPids">listenerPids</a></li><li><a href="global.html#loadCdnManifest">loadCdnManifest</a></li><li><a href="global.html#maskRegions">maskRegions</a></li><li><a href="global.html#normalizeShots">normalizeShots</a></li><li><a href="global.html#openCasePage">openCasePage</a></li><li><a href="global.html#overlayImageAt">overlayImageAt</a></li><li><a href="global.html#overlayRegions">overlayRegions</a></li><li><a href="global.html#pageHasText">pageHasText</a></li><li><a href="global.html#pidExists">pidExists</a></li><li><a href="global.html#pixelmatchOpt">pixelmatchOpt</a></li><li><a href="global.html#planE2eShards">planE2eShards</a></li><li><a href="global.html#pollUntil">pollUntil</a></li><li><a href="global.html#probeHttp">probeHttp</a></li><li><a href="global.html#probeStuckTooltip">probeStuckTooltip</a></li><li><a href="global.html#reapShardProcesses">reapShardProcesses</a></li><li><a href="global.html#registerCleanupHooks">registerCleanupHooks</a></li><li><a href="global.html#removeE2eInstance">removeE2eInstance</a></li><li><a href="global.html#reserveE2ePorts">reserveE2ePorts</a></li><li><a href="global.html#resetAgGridScroll">resetAgGridScroll</a></li><li><a href="global.html#resolveE2ePort">resolveE2ePort</a></li><li><a href="global.html#resolveKeepSame">resolveKeepSame</a></li><li><a href="global.html#reviewPendingShots">reviewPendingShots</a></li><li><a href="global.html#rowBoxSel">rowBoxSel</a></li><li><a href="global.html#runBaselineCase">runBaselineCase</a></li><li><a href="global.html#runIsolatedE2e">runIsolatedE2e</a></li><li><a href="global.html#runOutsideCollector">runOutsideCollector</a></li><li><a href="global.html#runShardedE2e">runShardedE2e</a></li><li><a href="global.html#runTaggedCall">runTaggedCall</a></li><li><a href="global.html#sampleShardKnown">sampleShardKnown</a></li><li><a href="global.html#sleepSync">sleepSync</a></li><li><a href="global.html#snapshotBaselines">snapshotBaselines</a></li><li><a href="global.html#snapshotLinkTarget">snapshotLinkTarget</a></li><li><a href="global.html#stepShots">stepShots</a></li><li><a href="global.html#typeIntoInput">typeIntoInput</a></li><li><a href="global.html#typeIntoNthInput">typeIntoNthInput</a></li><li><a href="global.html#waitAlertGone">waitAlertGone</a></li><li><a href="global.html#waitChildExit">waitChildExit</a></li><li><a href="global.html#waitColResizeOverlay">waitColResizeOverlay</a></li><li><a href="global.html#waitDrawerReady">waitDrawerReady</a></li><li><a href="global.html#waitGridIdle">waitGridIdle</a></li><li><a href="global.html#waitPortsFree">waitPortsFree</a></li><li><a href="global.html#waitScrollIdle">waitScrollIdle</a></li><li><a href="global.html#waitStyleSheets">waitStyleSheets</a></li><li><a href="global.html#waitUntilExist">waitUntilExist</a></li><li><a href="global.html#warnDistStale">warnDistStale</a></li><li><a href="global.html#writeBaselineIfChanged">writeBaselineIfChanged</a></li></ul>
+    
+</nav>
+
+<div id="main">
+    
+    <h1 class="page-title">loadCdnManifest.mjs</h1>
+    
+
+    
+
+
+
+    
+    <section>
+        <article>
+            <pre class="prettyprint source linenums"><code>import fs from 'fs'
+import maskDiagText from 'wsemi/src/maskDiagText.mjs'
+
+
+let RE_URL = /^https?:\/\/[^\s#]+$/
+let RE_SHA256 = /^[0-9a-fA-F]{64}$/
+
+//content-type：1 至 200 字之可見 ASCII(含空白，不含控制字元與換行，免回應標頭被注入)，前後空白無意義
+let RE_TYPE = /^[\x20-\x7e]{1,200}$/
+
+//網址須為 http(s)、不含空白與 #，且能被 URL 解析(createCdnLocal 以正規化後之網址為比對之鍵)
+let isUrl = (u) => typeof u === 'string' &amp;&amp; RE_URL.test(u) &amp;&amp; URL.canParse(u)
+
+
+function mkErr(msg, extra = {}) {
+    let err = new Error(msg)
+    err.code = 'E_CDN_MANIFEST'
+    return Object.assign(err, extra)
+}
+
+
+/**
+ * 讀取並檢核CDN本地副本清單(manifest)，回傳已正規化之新物件(不與輸入共用參照)
+ *
+ * 清單格式：{ schema: 1, note?: String, roots?: { 鍵: 網址 }, files: { 網址: { sha256, size, type? } } }。
+ * files為「網址 → 內容之釘選值」：網址須為http或https且能被URL解析(不得含空白與#片段，可含?查詢)；sha256為64碼十六進位(大小寫不拘，回傳時一律小寫)；
+ * size為非負安全整數(位元組數，0為空檔)；type為選填之content-type(1至200字之可見ASCII)，供副檔名無法判定內容類型之網址(無副檔名、僅有查詢者)使用，未給時依副檔名判定。
+ * roots為產生清單時之根網址(鍵為使用端自訂之名稱)，不參與取得與路由，缺省為{}。
+ * 清單由genCdnManifest(或tools/genCdnManifest.mjs)依網址清單產生，sha256為首次取得時之釘選值，其後之下載一律以其校驗(不符即拒收)。
+ * 給了而不合法者一律拋錯(E_CDN_MANIFEST，fail-closed)：清單決定「什麼內容被信任」，不改用預設；錯誤訊息不回顯sha256，網址經maskDiagText遮蔽。
+ *
+ * @param {String|Object} input 輸入清單物件，或清單JSON檔之路徑字串
+ * @returns {Object} 回傳清單物件{ schema, note, roots, files }，files之各項為{ sha256, size }
+ * @example
+ *
+ * import loadCdnManifest from 'w-package-tools-e2e/src/loadCdnManifest.mjs'
+ *
+ * let m = loadCdnManifest('./test/tools/cdn.manifest.json')
+ * console.log(Object.keys(m.files).length)
+ * // => 126
+ *
+ * let m2 = loadCdnManifest({ schema: 1, files: { 'https://cdn.example.com/a.js': { sha256: 'a'.repeat(64), size: 10 } } })
+ * console.log(m2.files['https://cdn.example.com/a.js'].size)
+ * // => 10
+ *
+ */
+function loadCdnManifest(input) {
+    let m = input
+    if (typeof input === 'string') {
+        if (input === '') {
+            throw mkErr('loadCdnManifest: 清單路徑須為非空字串')
+        }
+        try {
+            m = JSON.parse(fs.readFileSync(input, 'utf8'))
+        }
+        catch (err) {
+            throw mkErr(`loadCdnManifest: 清單檔無法讀取或解析(code ${err &amp;&amp; err.code ? err.code : 'PARSE'})`)
+        }
+    }
+    if (!m || typeof m !== 'object' || Array.isArray(m)) {
+        throw mkErr('loadCdnManifest: 清單須為物件或清單檔路徑')
+    }
+    if (m.schema !== 1) {
+        throw mkErr('loadCdnManifest: 清單格式不符(schema 須為 1)')
+    }
+    let roots = {}
+    if (m.roots !== undefined &amp;&amp; m.roots !== null) {
+        if (typeof m.roots !== 'object' || Array.isArray(m.roots)) {
+            throw mkErr('loadCdnManifest: roots 須為物件')
+        }
+        for (let [k, v] of Object.entries(m.roots)) {
+            if (!isUrl(v)) {
+                throw mkErr(`loadCdnManifest: roots 之項目不合法(鍵 ${maskDiagText(k)})`)
+            }
+            roots[k] = v
+        }
+    }
+    if (!m.files || typeof m.files !== 'object' || Array.isArray(m.files)) {
+        throw mkErr('loadCdnManifest: files 須為物件(網址 → { sha256, size })')
+    }
+    let files = {}
+    for (let [u, e] of Object.entries(m.files)) {
+        let ok = isUrl(u) &amp;&amp; !!e &amp;&amp; typeof e === 'object' &amp;&amp; typeof e.sha256 === 'string' &amp;&amp; RE_SHA256.test(e.sha256) &amp;&amp; Number.isSafeInteger(e.size) &amp;&amp; e.size >= 0
+        let hasType = ok &amp;&amp; e.type !== undefined &amp;&amp; e.type !== null
+        if (ok &amp;&amp; hasType) {
+            ok = typeof e.type === 'string' &amp;&amp; RE_TYPE.test(e.type) &amp;&amp; e.type.trim() !== ''
+        }
+        if (!ok) {
+            throw mkErr(`loadCdnManifest: files 之項目不合法(網址須為 http(s)、sha256 須為 64 碼十六進位、size 須為非負整數、type 須為 1 至 200 字之可見 ASCII): ${maskDiagText(u)}`, { url: maskDiagText(u) })
+        }
+        files[u] = { sha256: e.sha256.toLowerCase(), size: e.size }
+        if (hasType) {
+            files[u].type = e.type.trim()
+        }
+    }
+    return { schema: 1, note: typeof m.note === 'string' ? m.note : '', roots, files }
+}
+
+
+export default loadCdnManifest
+</code></pre>
+        </article>
+    </section>
+
+
+
+
+    
+    
+</div>
+
+<br class="clear">
+
+<footer>
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 4.0.5</a> on Wed Nov 25 2026 02:53:50 GMT+0800 (台北標準時間) using the <a href="https://github.com/clenemt/docdash">docdash</a> theme.
+</footer>
+
+<script>prettyPrint();</script>
+<script src="scripts/polyfill.js"></script>
+<script src="scripts/linenumber.js"></script>
+
+
+
+</body>
+</html>
