@@ -1,0 +1,871 @@
+import fs from 'fs'
+import path from 'path'
+import crypto from 'crypto'
+import fsDownloadFileVerify from 'wsemi/src/fsDownloadFileVerify.mjs'
+import getTrace from 'wsemi/src/getTrace.mjs'
+import maskDiagText from 'wsemi/src/maskDiagText.mjs'
+import createDirLock from './createDirLock.mjs'
+import loadCdnManifest from './loadCdnManifest.mjs'
+
+
+//時限常數(毫秒)，供使用端之before掛this.timeout(CDN_HOOK_TIMEOUT_MS)，不沿用mocha全域之逾時
+//下載預算：持鎖者逾預算不再派發新檔(進行中之檔另受單檔上限約束，故最壞結束於 預算 + 單檔上限)
+export const CDN_BUDGET_MS = 15 * 60 * 1000
+
+//單檔下載整體上限(含重試)
+export const CDN_FILE_TOTAL_MS = 120 * 1000
+
+//殘留判定時長：持鎖者心跳逾此即視為殘留，須大於單檔上限(使慢檔不被誤判為殘留)
+export const CDN_LOCK_STALE_MS = CDN_FILE_TOTAL_MS + 30 * 1000
+
+//等候者之等候上限：須涵蓋持鎖者之最壞結束時刻(預算 + 單檔上限 + 清殘留與回驗等收尾之餘裕 30 秒)，且大於殘留判定時長
+export const CDN_WAIT_MS = CDN_BUDGET_MS + CDN_FILE_TOTAL_MS + 30 * 1000
+
+//取得點(before)之時限：等候(上限CDN_WAIT_MS)後可能接手為持鎖者而自行下載(預算 + 單檔上限)，再加餘裕
+export const CDN_HOOK_TIMEOUT_MS = CDN_WAIT_MS + CDN_BUDGET_MS + CDN_FILE_TOTAL_MS + 60 * 1000
+
+
+let MAX_TIMER_MS = 2147483647
+
+//createCdnLocal所包之fetch補丁之標記(跨模組實例共用，供取得下載用之原生fetch時剝除)
+let WRAPPED = Symbol.for('w-package-tools-e2e.createCdnLocal.fetch')
+
+let seqInst = 0
+
+
+function mkErr(code, msg, extra = {}) {
+    let err = new Error(msg)
+    err.code = code
+    return Object.assign(err, extra)
+}
+
+
+let sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+
+let pickMs = (v, def) => (typeof v === 'number' && Number.isFinite(v) && v > 0 && v <= MAX_TIMER_MS ? v : def)
+
+
+let pickInt = (v, def, min, max) => (Number.isSafeInteger(v) && v >= min && v <= max ? v : def)
+
+
+let maskUrl = (u) => maskDiagText(String(u))
+
+
+//網路請求(http、https、ws、wss)；data:、blob:、about:、file: 等非網路請求不屬外部請求
+let isNetworkUrl = (u) => /^(https?|wss?):\/\//i.test(u)
+
+
+let isLoopbackHost = (h) => {
+    let s = String(h).toLowerCase()
+    return s === 'localhost' || s.endsWith('.localhost') || s === '[::1]' || s === '::1' || /^127(\.\d{1,3}){3}$/.test(s)
+}
+
+
+let MIMES = {
+    css: 'text/css; charset=utf-8',
+    js: 'application/javascript; charset=utf-8',
+    mjs: 'application/javascript; charset=utf-8',
+    cjs: 'application/javascript; charset=utf-8',
+    json: 'application/json; charset=utf-8',
+    map: 'application/json; charset=utf-8',
+    html: 'text/html; charset=utf-8',
+    htm: 'text/html; charset=utf-8',
+    txt: 'text/plain; charset=utf-8',
+    wasm: 'application/wasm',
+    svg: 'image/svg+xml',
+    png: 'image/png',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    gif: 'image/gif',
+    webp: 'image/webp',
+    ico: 'image/x-icon',
+    woff: 'font/woff',
+    woff2: 'font/woff2',
+    ttf: 'font/ttf',
+    otf: 'font/otf',
+}
+
+
+/**
+ * 依網址之副檔名回傳content-type字串(未知者為application/octet-stream)，供路由與Node端fetch補丁回應本地副本使用
+ *
+ * @param {String} url 輸入網址字串
+ * @returns {String} 回傳content-type字串
+ * @example
+ *
+ * import { cdnMimeOf } from 'w-package-tools-e2e/src/createCdnLocal.mjs'
+ *
+ * console.log(cdnMimeOf('https://cdn.example.com/a/b.mjs?v=1'))
+ * // => 'application/javascript; charset=utf-8'
+ *
+ */
+export function cdnMimeOf(url) {
+    let ext = ''
+    try {
+        let m = /\.([A-Za-z0-9]+)$/.exec(new URL(url).pathname)
+        ext = m ? m[1].toLowerCase() : ''
+    }
+    catch (err) {}
+    return MIMES[ext] || 'application/octet-stream'
+}
+
+
+async function sha256File(fp) {
+    let h = crypto.createHash('sha256')
+    await new Promise((resolve, reject) => {
+        let s = fs.createReadStream(fp)
+        s.on('data', (d) => h.update(d))
+        s.on('error', reject)
+        s.on('end', resolve)
+    })
+    return h.digest('hex')
+}
+
+
+//限制並行數之map
+async function mapLimit(items, n, fn) {
+    let rs = new Array(items.length)
+    let i = 0
+    let worker = async () => {
+        while (i < items.length) {
+            let k = i++
+            rs[k] = await fn(items[k], k)
+        }
+    }
+    await Promise.all(Array.from({ length: Math.min(n, items.length) }, worker))
+    return rs
+}
+
+
+/**
+ * 取得下載用之原生fetch：剝除createCdnLocal所裝之全域fetch補丁(補丁內再連網會被自己攔下)，不剝除他人之補丁；取不到fetch函數回傳null
+ *
+ * 供createCdnLocal與genCdnManifest取得下載用之fetch，使用端通常不需直接呼叫。
+ *
+ * @returns {Function|null} 回傳fetch函數，無可用者為null
+ * @example
+ *
+ * import { cdnNativeFetch } from 'w-package-tools-e2e/src/createCdnLocal.mjs'
+ *
+ * let f = cdnNativeFetch()
+ * console.log(typeof f)
+ * // => 'function'
+ *
+ */
+export function cdnNativeFetch() {
+    let f = globalThis.fetch
+    while (typeof f === 'function' && f[WRAPPED]) {
+        f = f[WRAPPED].prev
+    }
+    return typeof f === 'function' ? f : null
+}
+
+
+//fetch 之第一參數轉成網址字串：字串、Request(取 url)、其餘依 fetch 自己之規則轉字串(URL 為 href、帶 toString 之物件)；轉不出者回空字串
+let urlOfInput = (input) => {
+    try {
+        if (typeof input === 'string') {
+            return input
+        }
+        if (input && typeof input === 'object' && typeof input.url === 'string') {
+            return input.url
+        }
+        return String(input)
+    }
+    catch (err) {
+        return ''
+    }
+}
+
+
+//正規化網址(依 WHATWG URL：去前後空白與 tab／換行、主機小寫、預設埠省略、路徑正規化)並去片段，作為清單比對之鍵；無法解析(相對網址等)回傳 null
+//清單之鍵、瀏覽器端與 Node 端 fetch 之請求網址皆經此，故 fetch(' https://…')、fetch('ht\ttps://…') 與瀏覽器之網址正規化一致，不因寫法不同而繞過判定
+let canonOf = (u) => {
+    try {
+        let x = new URL(String(u))
+        x.hash = ''
+        return x.href
+    }
+    catch (err) {
+        return null
+    }
+}
+
+
+/**
+ * 建立測試用之CDN本地副本：依清單取得外部函式庫一次(校驗、內容定址快取、跨行程只下載一次)，並把測試開啟之頁面與Node端fetch之外部網址導到本地副本，清單以外之外部請求一律拋錯
+ *
+ * 用於讓各套件之測試「不連CDN」(外網不穩時大量轉紅，且測到之內容隨CDN改版而飄)。使用端之測試於開瀏覽器處呼叫routeBrowser、於載入時呼叫patchFetch、於before呼叫ensure，
+ * 不改產品程式(src)，產品之預設行為與輸出不變。
+ *
+ * 取得：依清單(網址 → { sha256, size })下載，經wsemi fsDownloadFileVerify(暫存檔、sha256與大小校驗、原子更名)存為內容定址之檔(檔名即其sha256，置於cacheDir內)；
+ * 已備妥且校驗相符者不連網；同內容(sha256相同)之多個網址只取一次；快取內檔案遭損毀(同長度內容不同)即被偵測並只重取該檔；每次下載追加一列到cacheDir/downloads.jsonl(只下載一次之證據)。
+ * 離線(opt.offline或環境變數W_CDN_OFFLINE=1)時缺檔不連網，直接拋E_CDN_OFFLINE_MISSING。
+ *
+ * 跨行程只下載一次：多行程(例如mocha --parallel之多個worker)同時首次取得時，以cacheDir/.lock之資料夾鎖(createDirLock：mkdir原子互斥、owner.json記pid與token、持有者心跳)保證只由一個行程下載，
+ * 其餘行程輪詢等候後直接採用其成果。殘留鎖(持有者行程已不存在，或心跳逾staleMs)由等候者以原子改名回收並核對token，回收不誤刪他人新建之鎖；
+ * 持鎖者逾budgetMs不再派發新檔，等候者之等候上限waitMs涵蓋持鎖者之最壞結束時刻且大於殘留判定時長；持鎖後先清除已逾殘留判定時長之殘留暫存檔(.part)與墓碑資料夾。
+ * 取得(ensure)於本實例內只做一次，失敗亦記住(不讓每個請求重跑整個預算)。
+ *
+ * 瀏覽器端(routeBrowser)：對Playwright之browser、context或page之context掛上涵蓋全部網址之route(glob為雙星號加斜線加星號)，清單內之網址由本地副本回應(content-type、CORS)，
+ * 清單外之http(s)請求中止並記錄違規，清單外之ws(s)連線以routeWebSocket關閉並記錄違規；回送位址(localhost、127.x.x.x、[::1])與opt.allow明列者不屬外部請求，原樣放行(fallback)；
+ * data:、blob:、file:等非網路請求不處理。清單內者優先於放行(清單內之網址即使為回送位址亦由本地副本回應)。對browser或直接傳入之context另包裝close()，關閉後若有違規即拋E_CDN_EXTERNAL。
+ * route只攔得到「經過route處理器」之請求：放行之回送位址回3xx導向外部、使用端於routeBrowser之後註冊之route以continue()放走者，route攔不到；
+ * 另對context掛request事件之觀察者(涵蓋全部頁面之請求含重新導向之後續請求)，清單外且非放行者記為違規(只記錄，來不及中止)，同一請求兩處皆看到時依Request物件去重，只記一筆。
+ * SharedWorker之請求、任何Worker內之WebSocket、context.request(APIRequestContext)不經route亦無request事件，攔不到(見README限制)。
+ * Node端(patchFetch)：覆寫全域fetch，http(s)網址(依fetch自己之解析規則正規化：去前後空白與tab、主機小寫、預設埠省略)只回本地副本，清單外拋E_CDN_EXTERNAL並記錄，回送位址與opt.allow明列者放行，非http(s)原樣放行；回傳還原函數。
+ * 只覆寫全域fetch：先於patchFetch保存之fetch參考、http／https模組、undici、全域WebSocket等其他出口不攔。清單之網址亦先正規化再比對，故不因寫法不同(大小寫主機、預設埠)而漏判。
+ * 兩者不綁定w-playwright之內部接縫，只用Playwright公開之route；已用w-playwright者可於其啟動browser之處(例如setBrowserTypeForTest之launch替身內)呼叫routeBrowser；isRouted(target)供使用端之啟動出口斷言「沒有漏接」。
+ *
+ * 違規之判定：violationMark()於測試前取標記、assertNoViolation(mark)於測試後斷言「自標記起無新增違規」，涵蓋close()未被呼叫或其錯誤被呼叫端吞掉者；
+ * 以事件(onTrace)而非延時同步。事件(凍結物件{ type, ... }，同wsemi getTrace)：'lock-acquired'(取得鎖)、'lock-wait'(首次發現鎖被占用)、'lock-poll'(每輪等候)、'lock-stale-judged'(判定鎖殘留，尚未回收，
+ * 此時同步呼叫之回調可進行檔案操作以重現交錯)、'lock-stale-reclaimed'、'swept'(含n，清除之殘留項數)、'downloaded'(含url)、'ready'、'served'(含kind、url)、'violation'(含kind、url、reason)。
+ *
+ * 錯誤(皆帶code)：E_CDN_ARG(參數無效：未給manifest、cacheDir或allow無效、routeBrowser與assertNoViolation之參數不符)、E_CDN_MANIFEST(清單不合法，或正規化後相同之網址內容矛盾)、
+ * E_CDN_OFFLINE_MISSING(離線缺檔，err.missing為[{url,sha256,size,cachePath}]，訊息只含檔名)、E_CDN_ACQUIRE_TIMEOUT(下載逾預算或等候他行程逾時)、E_CDN_VERIFY(回驗仍缺)、
+ * E_CDN_EXTERNAL(清單外之外部請求，err.violations為違規陣列)、E_CDN_UNAVAILABLE(清單內之網址而本地副本不可用，Node端fetch)、E_CDN_DOWNLOAD(無可用之fetch等)，
+ * 下載失敗沿用fsDownloadFileVerify之code(如E_HASH_MISMATCH、E_HTTP)。網址於訊息與違規紀錄中經maskDiagText遮蔽憑證與查詢秘密值。
+ *
+ * 安全相關之opt(影響信任範圍或檔案落點者：manifest、cacheDir、allow)給了而無效即拋錯(fail-closed)，不改用預設；其餘opt非預期之輸入視為未給、改用預設(不報錯)。
+ *
+ * @param {Object} opt 輸入設定物件
+ * @param {Object|String} opt.manifest 輸入清單物件，或清單JSON檔之路徑字串，必給，格式見loadCdnManifest
+ * @param {String} [opt.cacheDir='test/_cache/cdn'] 輸入快取資料夾路徑字串(相對於process.cwd()解析)，多行程須用同一資料夾才能共用，預設'test/_cache/cdn'；使用端須自行將其列入.gitignore(與.npmignore)
+ * @param {Boolean} [opt.offline] 輸入是否離線之布林值，未給時由環境變數W_CDN_OFFLINE(1或true)決定，預設false
+ * @param {Number} [opt.budgetMs=900000] 輸入下載預算毫秒數，預設900000(15分鐘)
+ * @param {Number} [opt.fileTimeoutMs=120000] 輸入單檔下載整體上限毫秒數(含重試)，預設120000(2分鐘)
+ * @param {Number} [opt.staleMs] 輸入殘留判定時長毫秒數，預設fileTimeoutMs + 30000(建議大於單檔上限，使慢檔不被誤判為殘留；明確給定者不檢查)
+ * @param {Number} [opt.waitMs] 輸入等候他行程之上限毫秒數，預設max(budgetMs + fileTimeoutMs + 30000, staleMs + 30000)(建議涵蓋持鎖者之最壞結束時刻並大於殘留判定時長；明確給定者不檢查)
+ * @param {Number} [opt.pollMs=200] 輸入等候輪詢間隔毫秒數，預設200
+ * @param {Number} [opt.concurrency=6] 輸入並行下載數(1至32之整數)，預設6
+ * @param {Number} [opt.maxAttempts=3] 輸入單檔最多嘗試次數(1至10之整數)，預設3
+ * @param {Number} [opt.retryDelayMs=1000] 輸入單檔重試間隔基數毫秒數，預設1000
+ * @param {Function} [opt.fetch] 輸入下載用之fetch函數(供測試以夾具伺服器驗取得流程)，預設為原生fetch(剝除本模組之補丁)
+ * @param {Boolean} [opt.allowLoopback=true] 輸入是否放行回送位址之請求，預設true(測試之頁面多由本機伺服器提供)
+ * @param {Array} [opt.allow=[]] 輸入額外放行之外部請求，元素為RegExp(比對完整網址，須自行錨定)或函數(url)=>Boolean(須恰回傳true才放行；async函數回傳Promise視為不放行，拋錯亦視為不放行)，預設[]；元素型別不符即拋錯
+ * @param {Function} [opt.onTrace=null] 輸入觀察回調函數，格式為(e)=>{}，e為凍結之事件物件{ type, ... }，預設null
+ * @returns {Object} 回傳物件{ensure,routeBrowser,isRouted,patchFetch,violationMark,assertNoViolation,getViolations,lookup,fileOf,stats,cacheDir,lockDir,journalFp,timeouts,hookTimeoutMs}；
+ * ensure()回傳Promise(本實例內只做一次)；routeBrowser(target,{failOnClose})回傳Promise，resolve為傳入之browser或context，傳入page者為其context；isRouted(target)回傳該browser、context或page之context是否已經本實例routeBrowser；
+ * patchFetch()回傳還原函數；violationMark()回傳標記；assertNoViolation(mark)無違規無回傳、有違規拋E_CDN_EXTERNAL；
+ * getViolations()回傳全部違規之複本；lookup(url)回傳清單項目{sha256,size,type?}或null(網址先正規化並去片段)；fileOf(url)回傳快取檔路徑(不在清單即拋E_CDN_EXTERNAL)；stats()回傳{files,contents,ready,downloaded,served:{browser,fetch},violations,offline,cacheDir}之快照；
+ * timeouts為{budgetMs,fileTimeoutMs,staleMs,waitMs,hookTimeoutMs}，hookTimeoutMs為建議之before時限
+ * @example
+ *
+ * import createCdnLocal from 'w-package-tools-e2e/src/createCdnLocal.mjs'
+ * import launchBrowser from 'w-package-tools-e2e/src/launchBrowser.mjs'
+ *
+ * let cdn = createCdnLocal({ manifest: './test/tools/cdn.manifest.json' })
+ * cdn.patchFetch() //Node端fetch
+ *
+ * describe('demo', function() {
+ *     let mark
+ *     before(async function() {
+ *         this.timeout(cdn.hookTimeoutMs) //首次需下載時之取得點，時限對齊下載預算
+ *         await cdn.ensure()
+ *     })
+ *     beforeEach(function() {
+ *         mark = cdn.violationMark()
+ *     })
+ *     afterEach(function() {
+ *         cdn.assertNoViolation(mark) //自標記起有清單外之外部請求即失敗
+ *     })
+ *     it('page', async function() {
+ *         let browser = await launchBrowser()
+ *         await cdn.routeBrowser(browser) //其newContext/newPage之頁面導向本地副本
+ *         let page = await browser.newPage()
+ *         await page.setContent('<script src="https://cdn.example.com/lib.js"></script>')
+ *         await browser.close() //有違規則於關閉後拋E_CDN_EXTERNAL
+ *     })
+ * })
+ *
+ */
+function createCdnLocal(opt) {
+    let o = (opt && typeof opt === 'object') ? opt : {}
+    let argErr = (msg) => mkErr('E_CDN_ARG', `createCdnLocal: ${msg}`)
+
+    //清單(信任範圍)：必給，無效即拋錯
+    if (o.manifest === undefined || o.manifest === null) {
+        throw argErr('opt.manifest 須為清單物件或清單檔路徑')
+    }
+    let manifest = loadCdnManifest(o.manifest)
+
+    //清單之鍵正規化(與請求網址之比對同一形式)；正規化後相同而內容不同者為清單矛盾，拋錯
+    let files = new Map()
+    for (let [u, e] of Object.entries(manifest.files)) {
+        let k = canonOf(u)
+        let prev = files.get(k)
+        if (prev && (prev.sha256 !== e.sha256 || prev.size !== e.size || prev.type !== e.type)) {
+            throw mkErr('E_CDN_MANIFEST', `createCdnLocal: 清單內有正規化後相同之網址而內容不同: ${maskUrl(u)}`)
+        }
+        files.set(k, e)
+    }
+
+    //快取資料夾(檔案落點)：未給取預設，給了須為非空字串
+    let cacheDir = path.resolve('test', '_cache', 'cdn')
+    if (o.cacheDir !== undefined && o.cacheDir !== null) {
+        if (typeof o.cacheDir !== 'string' || o.cacheDir === '' || o.cacheDir.includes('\0')) {
+            throw argErr('opt.cacheDir 須為不含 NUL 之非空字串')
+        }
+        cacheDir = path.resolve(o.cacheDir)
+    }
+
+    //額外放行(擴大信任範圍)：給了須為 RegExp 或函數之陣列
+    let allow = []
+    if (o.allow !== undefined && o.allow !== null) {
+        if (!Array.isArray(o.allow) || o.allow.some((a) => !(a instanceof RegExp) && typeof a !== 'function')) {
+            throw argErr('opt.allow 須為 RegExp 或函數之陣列')
+        }
+        allow = o.allow.slice()
+    }
+    let allowLoopback = typeof o.allowLoopback === 'boolean' ? o.allowLoopback : true
+
+    let offline = typeof o.offline === 'boolean' ? o.offline : /^(1|true)$/i.test(process.env.W_CDN_OFFLINE || '')
+    let budgetMs = pickMs(o.budgetMs, CDN_BUDGET_MS)
+    let fileTimeoutMs = pickMs(o.fileTimeoutMs, CDN_FILE_TOTAL_MS)
+    let staleMs = pickMs(o.staleMs, fileTimeoutMs + 30 * 1000)
+    let waitMs = pickMs(o.waitMs, Math.max(budgetMs + fileTimeoutMs + 30 * 1000, staleMs + 30 * 1000))
+    let pollMs = pickMs(o.pollMs, 200)
+    let concurrency = pickInt(o.concurrency, 6, 1, 32)
+    let maxAttempts = pickInt(o.maxAttempts, 3, 1, 10)
+    let retryDelayMs = (typeof o.retryDelayMs === 'number' && Number.isFinite(o.retryDelayMs) && o.retryDelayMs >= 0 && o.retryDelayMs <= MAX_TIMER_MS) ? o.retryDelayMs : 1000
+    let hookTimeoutMs = Math.min(waitMs + budgetMs + fileTimeoutMs + 60 * 1000, MAX_TIMER_MS)
+    let timeouts = Object.freeze({ budgetMs, fileTimeoutMs, staleMs, waitMs, hookTimeoutMs })
+
+    //下載用fetch：建立當下取原生fetch(剝除本模組之補丁)，之後patchFetch覆寫全域fetch不影響下載
+    let fetchFn = typeof o.fetch === 'function' ? o.fetch : cdnNativeFetch()
+
+    let trace = getTrace(o)
+    let emit = (type, extra) => {
+        if (trace) {
+            trace(type, extra)
+        }
+    }
+
+    let id = ++seqInst
+    let lockDir = path.join(cacheDir, '.lock')
+    let journalFp = path.join(cacheDir, 'downloads.jsonl')
+    let verified = new Set()
+    let readyP = null
+    let isReady = false
+    let nDownloaded = 0
+    let served = { browser: 0, fetch: 0 }
+    let violations = []
+
+    //網址(經正規化、去片段)在清單內者回傳其項目{sha256,size,type?}，否則null
+    let lookup = (url) => {
+        let k = canonOf(url)
+        return k === null ? null : (files.get(k) || null)
+    }
+
+    let fileOf = (url) => {
+        let e = lookup(url)
+        if (!e) {
+            throw mkErr('E_CDN_EXTERNAL', `createCdnLocal: 未列入 CDN 本地對照表: ${maskUrl(url)}`)
+        }
+        return path.join(cacheDir, e.sha256)
+    }
+
+    //是否為放行之請求(回送位址或opt.allow明列者)，判定失敗者不放行
+    let isAllowed = (u) => {
+        if (allowLoopback) {
+            try {
+                if (isLoopbackHost(new URL(u).hostname)) {
+                    return true
+                }
+            }
+            catch (err) {}
+        }
+        for (let a of allow) {
+            try {
+                if (a instanceof RegExp) {
+                    a.lastIndex = 0
+                    if (a.test(u)) {
+                        return true
+                    }
+                }
+                else {
+                    let r = a(u)
+                    if (r && typeof r.catch === 'function') {
+                        r.catch(() => {}) //async 函數不被等待，其 rejection 不成為未處理之拒絕
+                    }
+                    if (r === true) { //須恰回傳 true 才放行(async 函數回傳之 Promise、回傳 'yes' 等皆不放行)
+                        return true
+                    }
+                }
+            }
+            catch (err) {}
+        }
+        return false
+    }
+
+    let violate = (bucket, kind, url, reason) => {
+        let v = Object.freeze({ kind, url: maskUrl(url), reason })
+        violations.push(v)
+        if (bucket) {
+            bucket.push(v)
+        }
+        emit('violation', { kind: v.kind, url: v.url, reason: v.reason })
+        return v
+    }
+
+    let brief = (vs) => vs.slice(0, 5).map((v) => `${v.kind} ${v.url}`).join(', ')
+
+    //未備妥(缺、大小不符、雜湊不符)之項目；已校驗者(本實例內)不重算，fresh為true時全部自磁碟重算(下載後之回驗用：下載時已校驗者亦須確認仍在、內容未變)
+    async function missingList(fresh = false) {
+        let rs = await mapLimit([...files], 16, async ([url, e]) => {
+            if (!fresh && verified.has(e.sha256)) {
+                return null
+            }
+            let fp = path.join(cacheDir, e.sha256)
+            let ok = false
+            try {
+                let st = fs.statSync(fp)
+                if (st.isFile() && st.size === e.size && await sha256File(fp) === e.sha256) {
+                    ok = true
+                }
+            }
+            catch (err) {}
+            if (ok) {
+                verified.add(e.sha256)
+                return null
+            }
+            verified.delete(e.sha256)
+            return [url, e]
+        })
+        return rs.filter((r) => r !== null)
+    }
+
+    //清除已逾殘留判定時長之殘留暫存檔(.part)與墓碑資料夾(持鎖者才呼叫：此時無他行程在下載)
+    function sweepLeftovers() {
+        let t = Date.now()
+        let n = 0
+        let ds = []
+        try {
+            ds = fs.readdirSync(cacheDir, { withFileTypes: true })
+        }
+        catch (err) {}
+        for (let d of ds) {
+            if (!/\.part$/.test(d.name) && !/^\.lock\.stale-/.test(d.name)) {
+                continue
+            }
+            let fp = path.join(cacheDir, d.name)
+            try {
+                if (t - fs.statSync(fp).mtimeMs > staleMs) {
+                    fs.rmSync(fp, { recursive: true, force: true })
+                    n++
+                }
+            }
+            catch (err) {}
+        }
+        if (n > 0) {
+            emit('swept', { n })
+        }
+    }
+
+    async function downloadAll(missing, holdDeadline) {
+        if (!fetchFn) {
+            throw mkErr('E_CDN_DOWNLOAD', 'createCdnLocal: 無可用之 fetch(需 Node 18 以上或傳入 opt.fetch)')
+        }
+
+        //同內容(sha256相同)之多個網址只取一次
+        let seen = new Set()
+        let queue = missing.filter(([, e]) => !seen.has(e.sha256) && seen.add(e.sha256))
+        let failure = null
+        let worker = async () => {
+            while (queue.length && !failure) {
+                if (Date.now() > holdDeadline) {
+                    failure = mkErr('E_CDN_ACQUIRE_TIMEOUT', `createCdnLocal: 本地副本之下載逾預算(${budgetMs} ms)`)
+                    break
+                }
+                let [url, e] = queue.shift()
+                try {
+                    let fp = path.join(cacheDir, e.sha256)
+                    await fsDownloadFileVerify(url, fp, { sha256: e.sha256, size: e.size }, { fetch: fetchFn, maxAttempts, retryDelayMs, stallMs: Math.min(30000, fileTimeoutMs), totalMs: fileTimeoutMs })
+                    fs.appendFileSync(journalFp, JSON.stringify({ t: new Date().toISOString(), pid: process.pid, url: maskUrl(url), sha256: e.sha256, size: e.size }) + '\n')
+                    verified.add(e.sha256)
+                    nDownloaded++
+                    emit('downloaded', { url: maskUrl(url) })
+                }
+                catch (err) {
+                    failure = failure || mkErr(err && typeof err.code === 'string' ? err.code : 'E_CDN_DOWNLOAD', `createCdnLocal: 本地副本取得失敗: ${maskUrl(url)} → ${err && err.message}`, { cdnUrl: maskUrl(url) })
+                }
+            }
+        }
+        await Promise.all(Array.from({ length: Math.min(concurrency, queue.length) }, worker))
+        if (failure) {
+            throw failure
+        }
+    }
+
+    function offlineErr(missing) {
+        let names = missing.slice(0, 3).map(([u]) => {
+            try {
+                return path.posix.basename(new URL(u).pathname) || '(root)'
+            }
+            catch (err) {
+                return '(url)'
+            }
+        })
+        return mkErr('E_CDN_OFFLINE_MISSING', `createCdnLocal: 本地副本缺 ${missing.length} 檔且為離線(opt.offline 或 W_CDN_OFFLINE): ${names.join(', ')}`, {
+            missing: missing.map(([url, e]) => ({ url: maskUrl(url), sha256: e.sha256, size: e.size, cachePath: path.join(cacheDir, e.sha256) })),
+        })
+    }
+
+    async function run() {
+        fs.mkdirSync(cacheDir, { recursive: true })
+        let missing = await missingList()
+        if (!missing.length) {
+            return
+        }
+        if (offline) {
+            throw offlineErr(missing)
+        }
+        let lock = createDirLock({ lockDir, staleMs })
+        let waitDeadline = Date.now() + waitMs
+        let waited = false
+        while (true) {
+            if (lock.tryLock()) {
+                emit('lock-acquired')
+                try {
+                    sweepLeftovers()
+                    missing = await missingList() //等候期間他行程可能已補齊
+                    if (missing.length) {
+                        await downloadAll(missing, Date.now() + budgetMs)
+                    }
+                    let again = await missingList(true)
+                    if (again.length) {
+                        throw mkErr('E_CDN_VERIFY', `createCdnLocal: 本地副本回驗仍缺 ${again.length} 檔`)
+                    }
+                    return
+                }
+                finally {
+                    lock.release()
+                }
+            }
+            if (Date.now() > waitDeadline) {
+                throw mkErr('E_CDN_ACQUIRE_TIMEOUT', `createCdnLocal: 等候他行程取得本地副本逾時(${waitMs} ms)`)
+            }
+            let judged = lock.judge()
+            if (judged) {
+                emit('lock-stale-judged')
+                if (lock.reclaim(judged)) {
+                    emit('lock-stale-reclaimed')
+                }
+                else {
+                    await sleep(pollMs)
+                }
+                continue
+            }
+            if (!waited) {
+                waited = true
+                emit('lock-wait')
+            }
+            emit('lock-poll')
+            await sleep(pollMs)
+            missing = await missingList()
+            if (!missing.length) {
+                return
+            }
+        }
+    }
+
+    //取得(本實例內只做一次；失敗亦記住，避免每個請求重跑整個預算)
+    let ensure = () => {
+        if (!readyP) {
+            readyP = run().then(() => {
+                isReady = true
+                emit('ready')
+            })
+        }
+        return readyP
+    }
+
+    //已記錄違規之 Playwright Request：route 處理器與 context 之 request 事件對同一個請求各看到一次(同一物件)，依物件去重，一個請求只記一筆
+    let recorded = new WeakSet()
+
+    let violateReq = (bucket, req, url, reason) => {
+        if (req && typeof req === 'object') {
+            if (recorded.has(req)) {
+                return
+            }
+            recorded.add(req)
+        }
+        violate(bucket, 'browser', url, reason)
+    }
+
+    //已掛過路由之browser/context與其違規桶(本實例內重複呼叫routeBrowser不重複掛；不在 Playwright 物件上留屬性)
+    let routedBy = new WeakMap()
+
+    //把清單內之網址以本地副本回應之路由處理器；bucket為該browser/context之違規桶(供close()檢查)
+    let makeHandler = (bucket) => async (route) => {
+        let req = route.request()
+        let u = req.url()
+        if (!isNetworkUrl(u)) {
+            return route.fallback().catch(() => {})
+        }
+        let e = lookup(u)
+        if (!e) {
+            if (isAllowed(u)) {
+                return route.fallback().catch(() => {})
+            }
+            violateReq(bucket, req, u, '未列入 CDN 本地對照表之外部請求')
+            return route.abort('blockedbyclient').catch(() => {})
+        }
+        try {
+            await ensure()
+            let body = await fs.promises.readFile(fileOf(u))
+            served.browser++
+            emit('served', { kind: 'browser', url: maskUrl(u) })
+            return await route.fulfill({ status: 200, headers: { 'content-type': e.type || cdnMimeOf(u), 'access-control-allow-origin': '*' }, body })
+        }
+        catch (err) {
+            violateReq(bucket, req, u, `本地副本不可用(code ${err && typeof err.code === 'string' ? err.code : 'unknown'})`) //不回顯錯誤訊息(可能含本機路徑)
+            return route.abort('failed').catch(() => {})
+        }
+    }
+
+    //context 之 request 事件(涵蓋全部頁面之請求，含重新導向之後續請求，及被使用端後註冊之 route 以 continue() 放走者)：
+    //  清單外且非放行者記為違規。route 處理器攔不到之情形(放行之回送位址回 3xx 導向外部、使用端之 route 先於本處理器執行並放走)由此揭露——只能記錄，來不及中止
+    let makeObserver = (bucket) => (req) => {
+        try {
+            let u = req.url()
+            if (!isNetworkUrl(u) || lookup(u) || isAllowed(u)) {
+                return
+            }
+            violateReq(bucket, req, u, req.redirectedFrom() ? '重新導向至未列入 CDN 本地對照表之外部網址' : '未列入 CDN 本地對照表之外部請求')
+        }
+        catch (err) {}
+    }
+
+    let attachContext = async (ctx, bucket) => {
+        if (routedBy.has(ctx)) {
+            return
+        }
+        routedBy.set(ctx, bucket)
+        let observer = makeObserver(bucket)
+        try {
+            if (typeof ctx.on === 'function') {
+                ctx.on('request', observer)
+            }
+            await ctx.route('**/*', makeHandler(bucket))
+            if (typeof ctx.routeWebSocket === 'function') {
+
+                //清單只含http(s)，故非放行之ws(s)連線皆為外部請求：關閉並記錄(放行者不攔截，原樣連線)
+                await ctx.routeWebSocket((url) => !isAllowed(url.href), async (ws) => {
+                    violate(bucket, 'websocket', ws.url(), '未列入 CDN 本地對照表之外部連線')
+                    await ws.close({ code: 1008, reason: 'blocked' }).catch(() => {})
+                })
+            }
+        }
+        catch (err) {
+            routedBy.delete(ctx)
+            if (typeof ctx.off === 'function') {
+                ctx.off('request', observer)
+            }
+            throw err
+        }
+    }
+
+    //關閉後若該bucket有違規即拋E_CDN_EXTERNAL(包裝close)
+    let wrapClose = (target, bucket) => {
+        let close = target.close.bind(target)
+        target.close = async (...a) => {
+            let r
+            let closeErr = null
+            try {
+                r = await close(...a)
+            }
+            catch (err) {
+                closeErr = err
+            }
+            if (bucket.length) {
+                let vs = bucket.splice(0)
+                throw mkErr('E_CDN_EXTERNAL', `createCdnLocal: 瀏覽器載入了 ${vs.length} 筆未列入 CDN 本地對照表之外部請求: ${vs.slice(0, 5).map((v) => `${v.url}(${v.reason})`).join(', ')}`, { violations: vs })
+            }
+            if (closeErr) {
+                throw closeErr
+            }
+            return r
+        }
+    }
+
+    //Page(有route與context()而無newPage)取其context
+    let pageToContext = (target) => {
+        if (target && typeof target.route === 'function' && typeof target.newPage !== 'function' && typeof target.context === 'function') {
+            return target.context()
+        }
+        return target
+    }
+
+    let routeBrowser = async (target, ropt) => {
+        let failOnClose = !(ropt && typeof ropt.failOnClose === 'boolean') || ropt.failOnClose
+        target = pageToContext(target)
+        let isBrowser = !!target && typeof target.newContext === 'function' && typeof target.contexts === 'function'
+        let isContext = !!target && typeof target.route === 'function' && typeof target.newPage === 'function'
+        if (!isBrowser && !isContext) {
+            throw argErr('routeBrowser 之參數須為 Playwright 之 browser、context 或 page')
+        }
+        if (routedBy.has(target)) {
+            return target
+        }
+        let bucket = []
+        if (isContext) {
+            await attachContext(target, bucket)
+            if (failOnClose && typeof target.close === 'function') {
+                wrapClose(target, bucket)
+            }
+            return target
+        }
+
+        //browser：先(同步)包裝 newContext／newPage，使其後建立者必掛路由，再掛已存在之 context；掛失敗則還原包裝與標記(可重試)
+        let own = (k) => Object.prototype.hasOwnProperty.call(target, k)
+        let saved = { newContext: target.newContext, newPage: target.newPage, hadNewContext: own('newContext'), hadNewPage: own('newPage') }
+        routedBy.set(target, bucket)
+        let newContext = saved.newContext.bind(target)
+        target.newContext = async (...a) => {
+            let ctx = await newContext(...a)
+            await attachContext(ctx, bucket)
+            return ctx
+        }
+        let newPage = saved.newPage.bind(target)
+        target.newPage = async (...a) => {
+            let page = await newPage(...a)
+            await attachContext(page.context(), bucket)
+            return page
+        }
+        try {
+            for (let ctx of target.contexts()) {
+                await attachContext(ctx, bucket)
+            }
+        }
+        catch (err) {
+            for (let k of ['newContext', 'newPage']) {
+                if (saved['had' + k[0].toUpperCase() + k.slice(1)]) {
+                    target[k] = saved[k]
+                }
+                else {
+                    delete target[k]
+                }
+            }
+            routedBy.delete(target)
+            throw err
+        }
+        if (failOnClose) {
+            wrapClose(target, bucket)
+        }
+        return target
+    }
+
+    //browser、context 或 page(其 context)是否已經本實例之 routeBrowser 掛過路由(供使用端之啟動出口或盤點測試斷言「沒有漏接」)
+    let isRouted = (target) => {
+        try {
+            return routedBy.has(pageToContext(target))
+        }
+        catch (err) {
+            return false
+        }
+    }
+
+    let patched = null
+
+    let patchFetch = () => {
+        if (patched) {
+            return patched.restore
+        }
+        let prev = globalThis.fetch
+        let active = true
+        let wrapper = async function(input, init) {
+            if (!active) {
+                return prev(input, init)
+            }
+            let u = canonOf(urlOfInput(input)) //依 fetch 自己之解析規則正規化(去前後空白與 tab、主機小寫等)，不因寫法不同而繞過判定
+            if (u === null || !/^https?:\/\//i.test(u)) {
+                return prev(input, init) //相對網址與非 http(s)(data:、blob: 等)交給原 fetch(相對網址由其拋錯)
+            }
+            let e = lookup(u)
+            if (e) {
+                let body
+                try {
+                    await ensure()
+                    body = await fs.promises.readFile(fileOf(u))
+                }
+                catch (err) {
+                    let code = err && typeof err.code === 'string' ? err.code : 'unknown'
+                    violate(null, 'fetch', u, `本地副本不可用(code ${code})`)
+                    throw mkErr('E_CDN_UNAVAILABLE', `createCdnLocal: Node 端 fetch 之本地副本不可用(code ${code}): ${maskUrl(u)}`, { cause: err, violations: [violations[violations.length - 1]] })
+                }
+                served.fetch++
+                emit('served', { kind: 'fetch', url: maskUrl(u) })
+                return new Response(body, { status: 200, headers: { 'content-type': e.type || cdnMimeOf(u) } })
+            }
+            if (isAllowed(u)) {
+                return prev(input, init)
+            }
+            violate(null, 'fetch', u, '未列入 CDN 本地對照表之外部請求')
+            throw mkErr('E_CDN_EXTERNAL', `createCdnLocal: Node 端 fetch 之外部請求未列入 CDN 本地對照表: ${maskUrl(u)}`, { violations: [violations[violations.length - 1]] })
+        }
+        Object.defineProperty(wrapper, WRAPPED, { value: { prev, id } })
+        globalThis.fetch = wrapper
+        let me = {}
+        me.restore = () => {
+            active = false //被他人包在其上而無法還原時，本補丁改為直通
+            if (globalThis.fetch === wrapper) {
+                globalThis.fetch = prev
+            }
+            if (patched === me) {
+                patched = null
+            }
+        }
+        patched = me
+        return me.restore
+    }
+
+    let violationMark = () => Object.freeze({ id, n: violations.length })
+
+    let assertNoViolation = (mark) => {
+        let n = 0
+        if (mark !== undefined && mark !== null) {
+            if (typeof mark !== 'object' || mark.id !== id || !Number.isSafeInteger(mark.n) || mark.n < 0) {
+                throw argErr('assertNoViolation 之參數須為本實例之 violationMark() 所回傳')
+            }
+            n = mark.n
+        }
+        let vs = violations.slice(n)
+        if (vs.length) {
+            throw mkErr('E_CDN_EXTERNAL', `createCdnLocal: 自標記起有 ${vs.length} 筆未列入 CDN 本地對照表之外部請求: ${brief(vs)}`, { violations: vs })
+        }
+    }
+
+    let stats = () => ({
+        files: files.size,
+        contents: new Set([...files.values()].map((e) => e.sha256)).size,
+        ready: isReady,
+        downloaded: nDownloaded,
+        served: { ...served },
+        violations: violations.length,
+        offline,
+        cacheDir,
+    })
+
+    return {
+        ensure,
+        routeBrowser,
+        isRouted,
+        patchFetch,
+        violationMark,
+        assertNoViolation,
+        getViolations: () => violations.slice(),
+        lookup,
+        fileOf,
+        stats,
+        cacheDir,
+        lockDir,
+        journalFp,
+        timeouts,
+        hookTimeoutMs,
+    }
+}
+
+
+export default createCdnLocal

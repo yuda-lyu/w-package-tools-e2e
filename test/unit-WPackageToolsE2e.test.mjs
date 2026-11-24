@@ -65,6 +65,10 @@ import pidExists from '../src/pidExists.mjs'
 import sleepSync from '../src/sleepSync.mjs'
 import killPortListeners from '../src/killPortListeners.mjs'
 import listenerPids from '../src/listenerPids.mjs'
+import createCdnLocal, { CDN_BUDGET_MS, CDN_FILE_TOTAL_MS, CDN_LOCK_STALE_MS, CDN_WAIT_MS, CDN_HOOK_TIMEOUT_MS } from '../src/createCdnLocal.mjs'
+import genCdnManifest, { diffCdnManifest } from '../src/genCdnManifest.mjs'
+import loadCdnManifest from '../src/loadCdnManifest.mjs'
+import createDirLock from '../src/createDirLock.mjs'
 import snapshotBaselines from '../src/snapshotBaselines.mjs'
 import diffBaselineSnapshots from '../src/diffBaselineSnapshots.mjs'
 import compareImageDirs from '../src/compareImageDirs.mjs'
@@ -151,6 +155,16 @@ describe('WPackageToolsE2e', function() {
             'sleepSync',
             'killPortListeners',
             'listenerPids',
+            'createCdnLocal',
+            'CDN_BUDGET_MS',
+            'CDN_FILE_TOTAL_MS',
+            'CDN_LOCK_STALE_MS',
+            'CDN_WAIT_MS',
+            'CDN_HOOK_TIMEOUT_MS',
+            'genCdnManifest',
+            'diffCdnManifest',
+            'loadCdnManifest',
+            'createDirLock',
             'snapshotBaselines',
             'diffBaselineSnapshots',
             'compareImageDirs',
@@ -169,9 +183,9 @@ describe('WPackageToolsE2e', function() {
         assert.strict.deepEqual(r, rr)
     })
 
-    it('各鍵值型別正確(chromiumLaunchArgs為凍結陣列, pixelmatchOpt為凍結物件, 三個框幾何常數為數字, 其餘為函數)', function() {
+    it('各鍵值型別正確(chromiumLaunchArgs為凍結陣列, pixelmatchOpt為凍結物件, 三個框幾何常數與五個CDN時限常數為數字, 其餘為函數)', function() {
         let r = Object.keys(wpte).filter((k) => typeof wpte[k] !== 'function').map((k) => [k, Array.isArray(wpte[k]) ? 'array' : typeof wpte[k]])
-        let rr = [['chromiumLaunchArgs', 'array'], ['INK_PAD', 'number'], ['BOX_PAD', 'number'], ['BOX_STROKE', 'number'], ['pixelmatchOpt', 'object']]
+        let rr = [['chromiumLaunchArgs', 'array'], ['INK_PAD', 'number'], ['BOX_PAD', 'number'], ['BOX_STROKE', 'number'], ['pixelmatchOpt', 'object'], ['CDN_BUDGET_MS', 'number'], ['CDN_FILE_TOTAL_MS', 'number'], ['CDN_LOCK_STALE_MS', 'number'], ['CDN_WAIT_MS', 'number'], ['CDN_HOOK_TIMEOUT_MS', 'number']]
         assert.strict.deepEqual(r, rr)
         assert.strict.equal(Object.isFrozen(wpte.chromiumLaunchArgs), true)
         assert.strict.equal(Object.isFrozen(wpte.pixelmatchOpt), true)
@@ -246,6 +260,16 @@ describe('WPackageToolsE2e', function() {
             sleepSync,
             killPortListeners,
             listenerPids,
+            createCdnLocal,
+            CDN_BUDGET_MS,
+            CDN_FILE_TOTAL_MS,
+            CDN_LOCK_STALE_MS,
+            CDN_WAIT_MS,
+            CDN_HOOK_TIMEOUT_MS,
+            genCdnManifest,
+            diffCdnManifest,
+            loadCdnManifest,
+            createDirLock,
             snapshotBaselines,
             diffBaselineSnapshots,
             compareImageDirs,

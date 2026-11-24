@@ -178,6 +178,22 @@
 - **mocha 之統計不解析 log**: 測試自身可印「3 failing」, spec 輸出也沒有檔名, 無法得各檔耗時; 改以繼承 Spec 之報告器寫 JSON. 報告器須 `.cjs`, mocha 以 `require` 載入; `require.resolve('mocha', { paths: [cwd] })` 經 junction 解析到實際路徑, 與執行中之 mocha 同一模組.
 - **log 直接寫 outDir, 不複製**: 工具被硬殺時 log 仍在, 且 mocha 持有之檔案把柄不在實例內, 不會擋實例之刪除.
 
+## 注意事項: 測試不連 CDN(2026-11-25 te2e632; 規則見 `sgud/rule/rulebook_cdn.md`)
+
+- **共用化時回送位址必須放行**: 他套件之原型把「清單外」一律當外部、含回送位址,因其測試頁皆為 `setContent`／`data:`;使用端若以本機伺服器(dev server、`createServiceManager` 起之後端)提供頁面,不放行則連頁面本身都載不進.故預設放行回送位址(`new URL().hostname` 判定,`127.0.0.1.invalid`、`localhost.invalid` 等前綴相似者不算),放行用 `route.fallback()`(使用端先註冊之 `route` 才串得起來,`continue()` 會繞過),清單內者優先於放行.
+- **Playwright 之 ACAO 標頭不暴露給頁面**: 跨來源 `fetch` 回應之 `access-control-allow-origin` 不在 CORS 可讀標頭內,頁面 `headers.get(...)` 為 `null`,不是沒回.驗 CORS 改驗 `res.type === 'cors'` 且本體可讀.
+- **瀏覽器預載掃描使同一網址被路由兩次**: HTML 內有兩個以上 `<script src>`,解析器卡在前一個時,預載掃描會先對後一個發請求;該請求被中止後解析器到該標籤時再發一次 → 同一個外部網址記兩筆違規(單一腳本之頁面只有一筆).斷言違規一律依網址去重,不斷言筆數;違規之判定(有無)不受影響.
+- **測試行程不可對「本機夾具伺服器在同一行程」之子行程用 `spawnSync`**: `spawnSync` 阻塞測試行程之事件迴圈,同行程之夾具伺服器回不了子行程之請求而死結(子行程等到 `timeout` 被殺,離開碼 `null`).一律用非同步 `spawn` 並等 `close`.
+- **以 `onTrace` 之同步事件重現鎖之交錯,不另開測試後門**: `lock-stale-judged` 於「判定殘留、回收之前」同步呼叫,回調內直接以檔案操作(或另一個 `createDirLock` 實例之原語)讓「另一行程已回收並取得新鎖」,確定性地走到回收核對 token 之分支;`lock-stale-reclaimed` 於「回收後、取鎖前」同步呼叫,回調內補齊快取即可驗「取鎖後先重算缺檔」.原型之 `opt.onStaleJudged`(await 之測試鉤子)因此不需要.
+- **下載後之回驗須自磁碟全部重算**: 原型在下載完成後記入「已校驗」,其後之回驗跳過已校驗者,實質為空(下載後被刪或被改不會被抓到).`missingList(true)` 忽略記錄全部重算,`[CL37]` 以「第一檔下載完成之當下於 `onTrace` 回調內刪檔」驗證.
+- **被強制結束之行程之鎖**: 子行程被 `kill()`(Windows 為 TerminateProcess)時不執行任何清理,`.lock/owner.json` 殘留,其 pid 已不存在 → 下一個行程於第一次判定即回收(`[CA02]`,不需等 `staleMs`);`.part` 與墓碑資料夾則靠持鎖後之 `sweepLeftovers`(逾 `staleMs`)清除.
+- **Playwright 之 request 事件與 route 之關係(2026-11-25 探測,Playwright 1.65.1／Chromium 159 headless shell)**: ①`context.on('request')` 先於 `route` 處理器觸發,且兩處之 Request 為同一物件(可用 `WeakSet` 去重)；②放行之請求回 302 導向外部,導向後之請求只有 `request` 事件(`redirectedFrom()` 非空),**不經 route**；③使用端後註冊之 `route.continue()` 使請求繞過先註冊之處理器,但 `request` 事件照發；④SharedWorker 內之 `fetch` 既無 route 亦無 `request` 事件(伺服器收得到),Worker 內之 WebSocket 亦不經 `routeWebSocket`.故「route 攔」＋「`request` 事件記」兩道並用,仍有 ④ 之缺口,README 限制③揭露.
+- **鎖之判定退回路徑不可更鬆(獨立複審 F7)**: 原型與初版於 `owner.json` 暫時讀不到時改看鎖資料夾 mtime,而心跳只更新 `owner.json`,長時間持鎖之活鎖(資料夾 mtime 停在建立時刻)即被判殘留,與回收之空窗疊加可使兩行程同時持鎖.改為:`owner.json` 在即以其 mtime 判定(不論能否解析)、心跳亦更新資料夾 mtime、只有 `owner.json` 不在才看資料夾.心跳同時核對 token(被接手後停止),鎖消失(ENOENT)後停止.
+- **檢查之值即使用之值(獨立複審 F1)**: 以原字串之 `^https?://` 判定外部請求,而真 fetch 依 WHATWG 規則去前後空白、去 tab 與換行才連線,`' https://x'`、`'ht\ttps://x'` 因而直通.凡「先判定、後使用」者,判定與使用須經同一個正規化(`canonOf`);清單之鍵同形式正規化.
+- **全域技能 role-coder-for-test 之「測試不連外部 CDN」一節本機尚無**(`Grep` 該技能資料夾無 CDN 字樣,僅 §5.1〈跑他套件之測試〉);本輪依派工摘要之五點(取得一次、校驗、內容定址快取、跨行程只下載一次、頁面與 Node 端導向本地副本且表外一律拋錯)實作,技能同步後須對照其全文.
+- **變異驗證之作法**: 鏡像根只複製檔案(`src`、`tools`、`test` 除 `_tmp`、`pics`),在 `./tmp/` 之下以 `node mocha --bail` 對鏡像內之測試檔跑,裸名匯入向上解析到本庫之 `node_modules`;錨點不唯一即報錯.一個變異之擊殺通常 1～5 秒(unit 檔優先、`--bail`).
+- **未實測**: Service Worker 經手之請求(Playwright 文件註明不經 `route`)、非 Windows 平台(`createDirLock` 之 EPERM 分支只有注入測試,POSIX 之 `pidExists` 同 `kill(pid,0)`)、Playwright 低於 1.48 之 `routeWebSocket`(程式判斷有無該方法,無則只掛 HTTP 路由,`[CL31]` 以刪除方法之替身驗).
+
 ## 注意事項: 套件維護與驗證(2026-09-29, 移入)
 
 - `test/e2e-captureEquivalence.test.mjs` 含 w-web-sso／w-web-perm 當時實作之凍結複本(逐位元等價之對照組)與框幾何專測, 屬行為契約, 勿因「看起來重複」刪除; 凍結區段以 `eslint-disable` 保持逐字.

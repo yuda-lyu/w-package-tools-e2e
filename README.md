@@ -45,11 +45,11 @@ let browser2 = await wpte.launchBrowser()
 
 ## 概述
 
-本套件提供 e2e 測試與標準圖（pixel baseline）之共用設施：確定性截圖、截圖後合成之紅框、遮罩與貼圖覆蓋、反鋸齒感知之像素比對、產製端與比對端共用之單一案例管線、截圖前篩選與孤兒檢查、服務生命週期與行程原語、盤點 CLI。內容自 w-web-sso、w-web-perm、w-web-api、w-web-task 四專案之 e2e 基礎設施抽提（2026-09-27～28 暫存於 w-web-sso 之 `srcPack/`，四專案經各自 `test/tools/e2eLib.mjs` 橋接實跑驗證），2026-09-29 移入本套件。規格基準為全域技能 role-coder-for-test-e2e（SKILL.md §3 契約 C1–C15、§7、§8、§9 與 references/e2e-setup-contract.md）。
+本套件提供 e2e 測試與標準圖（pixel baseline）之共用設施：確定性截圖、截圖後合成之紅框、遮罩與貼圖覆蓋、反鋸齒感知之像素比對、產製端與比對端共用之單一案例管線、截圖前篩選與孤兒檢查、服務生命週期與行程原語、盤點 CLI、外部資源之本地副本（測試不連 CDN，§2.13）。內容自 w-web-sso、w-web-perm、w-web-api、w-web-task 四專案之 e2e 基礎設施抽提（2026-09-27～28 暫存於 w-web-sso 之 `srcPack/`，四專案經各自 `test/tools/e2eLib.mjs` 橋接實跑驗證），2026-09-29 移入本套件。規格基準為全域技能 role-coder-for-test-e2e（SKILL.md §3 契約 C1–C15、§7、§8、§9 與 references/e2e-setup-contract.md）。
 
-- 每檔一個 default export，繁中 JSDoc 附 `@example`；以深層引用使用（`w-package-tools-e2e/src/<名稱>.mjs`；本套件無 `main`／`exports`）。另有具名匯出：`composeBox.mjs` 之 `BOX_PAD`／`BOX_STROKE`、`inkRect.mjs` 之 `INK_PAD`。
+- 每檔一個 default export，繁中 JSDoc 附 `@example`；以深層引用使用（`w-package-tools-e2e/src/<名稱>.mjs`；本套件無 `main`／`exports`）。另有具名匯出：`composeBox.mjs` 之 `BOX_PAD`／`BOX_STROKE`、`inkRect.mjs` 之 `INK_PAD`、`createCdnLocal.mjs` 之 `CDN_BUDGET_MS`／`CDN_FILE_TOTAL_MS`／`CDN_LOCK_STALE_MS`／`CDN_WAIT_MS`／`CDN_HOOK_TIMEOUT_MS`（時限常數）與 `cdnMimeOf`、`cdnNativeFetch`、`genCdnManifest.mjs` 之 `diffCdnManifest`。
 - 共用入口 `src/WPackageToolsE2e.mjs`：匯入 `src/` 內其他全部模組，default export 為含全部模組與上述三個常數之物件（依 §1 之分組排列）；引用它會一併載入全部模組與其依賴（w-playwright、sharp 等），只用少數函數者宜深層引用。`tools/` 之 CLI 為可執行腳本，不經入口匯入。
-- 依賴只用本套件已列者：w-playwright（經 `launchBrowser`；2026-11-13 起取代直接依賴 playwright，見〈Installation〉之〈瀏覽器之取得與啟動〉）、pixelmatch、pngjs、sharp、json5，以及 wsemi（2026-10-30 起，`listenerPids`／`killPortListeners` 深層引用其 `wsemi/src/execProcessPortPidsSync.mjs` 查埠之監聽者；2026-11-24 起 `captureStable` 深層引用 `wsemi/src/maskDiagText.mjs` 遮罩訊息中之網址；皆不經 wsemi 主入口）；不引入 lodash。
+- 依賴只用本套件已列者：w-playwright（經 `launchBrowser`；2026-11-13 起取代直接依賴 playwright，見〈Installation〉之〈瀏覽器之取得與啟動〉）、pixelmatch、pngjs、sharp、json5，以及 wsemi（2026-10-30 起，`listenerPids`／`killPortListeners` 深層引用其 `wsemi/src/execProcessPortPidsSync.mjs` 查埠之監聽者；2026-11-24 起 `captureStable` 深層引用 `wsemi/src/maskDiagText.mjs` 遮罩訊息中之網址；2026-11-25 起 `createCdnLocal` 深層引用 `wsemi/src/fsDownloadFileVerify.mjs`、`getTrace.mjs`、`maskDiagText.mjs`；皆不經 wsemi 主入口）；不引入 lodash。
 - 外部副作用（exec、spawn、fetch、process、globalThis、寫檔函數或落點）皆可由 opt 注入，供單元測試。
 - 各函數之預設值即 w-web-sso 現行組態所用者；其他專案之差異以選項重現。
 
@@ -136,6 +136,16 @@ let browser2 = await wpte.launchBrowser()
 | `tools/reviewPending.mjs`（CLI） | `node node_modules/w-package-tools-e2e/tools/reviewPending.mjs [--pending <dir>] [--since <時間>] [--max-diff <N>] [--crops <dir>] [--json <out>] [--accept <標籤,...>] [--root <dir>] [--dry-run]`：未給 `--accept` 只審查、不改寫任何標準圖（裁圖排他建立、不覆蓋）；`--accept` 任一標籤不合格即全部不採用並以離開碼 1 結束；參數錯誤離開碼 2 | 單元（spawnSync 實跑） |
 | `tools/auditWaits.mjs`（CLI） | 固定等待盤點：`node node_modules/w-package-tools-e2e/tools/auditWaits.mjs [--only C,E,R] [--json <out>] <專案根目錄...>`；掃 `test/*.test.mjs` 與 `test/tools/*.mjs` 之每個 `waitForTimeout`，依前後語句分七類——A 偵測後之 settle、B 緩衝後接偵測、L 輪詢間隔、R 隨即離開函式（看呼叫端）、C 後接截圖／讀取／斷言（「固定秒數為唯一同步」候選）、D 後接操作、E 其他。旗標僅為候選：C／E／R 逐一判讀前一動作到預期狀態之間有無非同步來源（伺服器往返、轉址、計時器、廣播、防抖），有則改偵測（頁面內 `waitUntilExist`、瀏覽器外 `pollUntil`）；spec 規定之時間與負向斷言之觀察窗照留 | 單元（2026-09-28 自 w-web-sso 盤點腳本定稿；該日盤出 SSO 251／PERM 67／API 8／TASK 26 處） |
 | `tools/auditBoxes.mjs`（CLI） | 標準圖紅框盤點：`node node_modules/w-package-tools-e2e/tools/auditBoxes.mjs [--out <json>] <pics目錄...>`（遞迴、略過 `_` 參考片）；六類候選——`noBox` 無框（#f26 長段 < 20px，SKILL §7.6-3）、`fullFrame` 整張一框、`blank` 框內大片空白（底部 ≥ 120px 且 ≥ 30%，或右側 ≥ 200px 且 ≥ 30%，§7.3-2）、`black` 框內遮黑方塊（§8.2）、`touch` 紅框壓字（§7.3-8）、`cut` 框線外緣緊貼框外字形（框線壓到相鄰內容，§7.3-9）。旗標僅為候選，缺陷與否逐類裁框目視（彈窗／抽屜面板內留白、整列框、元素邊界貼框、有遮罩彈窗之框外背景屬合規） | 2026-09-28 自 w-web-sso 五支掃描器合併；四專案 1024 張與五支舊掃描器逐類計數相同（6/12/105/12/189）；同日加 `cut` |
+
+### 1.5 外部資源之本地副本（測試不連 CDN；2026-11-25）
+
+| 檔 | 用途 | 狀態 |
+|---|---|---|
+| `createCdnLocal(opt)` | 依清單（網址 → `{ sha256, size }`）取得外部函式庫一次、校驗、內容定址快取、跨行程只下載一次；`routeBrowser(browser\|context\|page)` 把頁面之外部網址導到本地副本、`patchFetch()` 把 Node 端 `fetch` 導到本地副本，清單以外之外部請求一律中止並記錄、`assertNoViolation(mark)` 斷言自標記起無違規（§2.13）；具名匯出時限常數 `CDN_BUDGET_MS`、`CDN_FILE_TOTAL_MS`、`CDN_LOCK_STALE_MS`、`CDN_WAIT_MS`、`CDN_HOOK_TIMEOUT_MS`、`cdnMimeOf`、`cdnNativeFetch` | 單元、真實多行程、真瀏覽器（2026-11-25 新增） |
+| `loadCdnManifest(input)` | 讀取並檢核清單（物件或 JSON 檔路徑），回傳正規化之新物件；不合法即拋 `E_CDN_MANIFEST`（fail-closed） | 單元（2026-11-25 新增） |
+| `genCdnManifest(opt)`／`diffCdnManifest(a, b)` | 依根網址清單下載並求「相對匯入之閉包」（ESM 之 `import`／`export from`／`import()`；CSS 之 `@import`／`url()`），算 sha256 與大小產生清單；`diffCdnManifest` 比對兩份清單（`--check` 用） | 單元（夾具伺服器）、真實子行程（2026-11-25 新增） |
+| `tools/genCdnManifest.mjs`（CLI） | `node node_modules/w-package-tools-e2e/tools/genCdnManifest.mjs --roots <roots.json\|.mjs> --out <manifest.json> [--check]`（亦可重複給 `--url <網址>`）：產生清單；`--check` 重新下載並與現行清單比對，不同則列出並以離開碼 1 結束（不寫檔）；參數錯誤離開碼 2（§2.13） | 真實子行程（2026-11-25 新增） |
+| `createDirLock(opt)` | 跨行程之資料夾鎖原語：`tryLock`（`mkdir` 原子互斥）、`release`（核對 token）、`judge`（殘留判定：持有者行程不存在或心跳逾 `staleMs`）、`reclaim`（原子改名回收並核對 token）；`createCdnLocal` 之取得鎖用，亦可獨立使用 | 單元（2026-11-25 新增） |
 
 ## 2. 通用規格
 
@@ -507,6 +517,77 @@ assert.strictEqual(await page.textContent('#url'), `http://127.0.0.1:${resolveE2
 
 **限制**：只防已導入者之間互撞與偵測當下之占用者；未導入者（含非 e2e 測試寫死之埠）在保留之後才綁定者，由管理器大聲報錯（§2.4 就緒核對），不自動處理（規格 E8 另案）。登錄目錄在使用者家目錄（不是暫存目錄：`TEMP` 可能因工作階段不同而不同，就看不到彼此之預約）；持有者 PID 判定只用於回收預約，不用於下殺。同一行程內多個管理器管同一埠時，第二個會把第一個啟動之服務當成他人（一個實例一個管理器）。POSIX 只有注入測試。
 
+### 2.13 測試不連 CDN（`createCdnLocal`；2026-11-25）
+
+測試載入之外部函式庫（CDN 之 script、stylesheet、ESM chunk）與 Node 端 `fetch` 之外部網址，改由本地副本供應；清單以外之外部請求一律中止並使測試失敗。對應全域技能 role-coder-for-test 之「測試不連外部 CDN」要求（外網不穩時測試大量轉紅，且測到之內容隨 CDN 改版而飄）。**不改產品程式**（`src/`），產品之預設行為與輸出不變；使用端只在測試端接線。需求出處：使用端（Gitea 另案）。
+
+| 要求 | 實作 |
+|---|---|
+| 依清單取得外部函式庫一次 | 清單 `{ schema: 1, files: { 網址: { sha256, size, type? } } }`（`loadCdnManifest`；網址可含查詢、不含 `#`；`type` 為選填之 content-type，供副檔名無法判定內容類型之網址〔無副檔名、僅有查詢〕使用，由產生器依伺服器回應記下，未給時依副檔名判定）；清單之鍵與請求網址一律先依 WHATWG URL 正規化再比對（大小寫主機、預設埠、前後空白不影響）；`ensure()` 缺什麼取什麼；同內容（sha256 相同）之多個網址只取一次 |
+| 校驗 | wsemi `fsDownloadFileVerify`（暫存檔、sha256 與大小校驗、原子更名）；不符即拒收（`E_HASH_MISMATCH`），不留未驗證之檔；快取內之檔每次就緒前重算 sha256，損毀者只重取該檔；下載後之回驗自磁碟全部重算（`E_CDN_VERIFY`） |
+| 內容定址快取 | `<cacheDir>/<sha256>`（預設 `test/_cache/cdn`，相對 `process.cwd()`；**使用端須自行列入 `.gitignore` 與 `.npmignore`**）；每次下載追加一列到 `<cacheDir>/downloads.jsonl`（只下載一次之證據） |
+| 跨行程只下載一次 | `<cacheDir>/.lock` 資料夾鎖（`createDirLock`）：多個 worker 同時首次取得時只有一個行程下載，其餘輪詢等候後直接採用其成果；殘留鎖（持有者行程不存在，或心跳逾 `staleMs`）由等候者原子回收並核對 token；持鎖後先清除逾 `staleMs` 之殘留暫存檔（`.part`）與墓碑資料夾 |
+| 頁面導到本地副本 | `routeBrowser(browser)`：其 `newContext`／`newPage` 建立之 context 與已存在之 context 皆掛涵蓋全部網址之路由；清單內之網址以本地副本回應（`content-type`、CORS），清單外之 http(s) 中止（`blockedbyclient`）並記錄，ws(s) 以 `routeWebSocket` 關閉並記錄；也可直接傳 context 或 page（回傳其 context）；掛失敗者還原包裝與標記，可重試；`isRouted(target)` 供使用端之啟動出口斷言「沒有漏接」 |
+| Node 端 `fetch` | `patchFetch()` 覆寫全域 `fetch`：http(s) 網址（依 fetch 自己之規則正規化：`' https://…'`、`'ht\ttps://…'`、主機大小寫皆不能繞過判定）只回本地副本，清單外拋 `E_CDN_EXTERNAL` 並記錄，清單內而本地副本不可用拋 `E_CDN_UNAVAILABLE`；回傳還原函數（可重複呼叫；被他人包在其上而無法還原時改為直通） |
+| 表外一律拋錯 | 違規記錄於實例；`browser.close()`（`routeBrowser(browser)`）與直接傳入之 `context.close()` 於關閉後有違規即拋 `E_CDN_EXTERNAL`（`failOnClose:false` 可關）；`violationMark()` 於測試前取標記、`assertNoViolation(mark)` 於測試後斷言「自標記起無新增違規」（涵蓋 `close()` 未被呼叫或其錯誤被呼叫端吞掉者）；**route 攔不到者另由 context 之 `request` 事件觀察者揭露**（放行之回送位址回 3xx 導向外部、使用端於 `routeBrowser` 之後才註冊之 `route` 以 `continue()` 放走者）——只記錄、來不及中止，測試仍因違規而失敗 |
+| 時限對齊 | 預設下載預算 15 分鐘（`budgetMs`）、單檔 120 秒（`fileTimeoutMs`）、殘留判定 150 秒、等候上限 17.5 分鐘（預算 ＋ 單檔上限 ＋ 30 秒收尾餘裕）；`before` 取得點須掛 `this.timeout(cdn.hookTimeoutMs)`（預設 35.5 分鐘 ＝ 等候上限 ＋ 接手為持鎖者之預算 ＋ 單檔上限 ＋ 1 分鐘），不沿用 mocha 全域之 180 秒；常數具名匯出 |
+
+**放行**：回送位址（`localhost`、`*.localhost`、`127.x.x.x`、`[::1]`）之請求不屬外部請求，原樣放行（`route.fallback()`，故使用端先註冊之 `route` 照常生效；頁面多由本機伺服器提供，不放行則連頁面本身都載不進）；`allowLoopback:false` 關閉；`allow` 明列額外放行者（RegExp，須自行錨定完整網址；或函數，**須恰回傳 `true` 才放行**——async 函數回傳之 Promise、回傳 `'yes'` 等真值、拋錯皆不放行）。`data:`、`blob:`、`file:`、`about:` 等非網路請求不處理。**清單內者優先於放行**（清單列了回送位址之網址時由本地副本回應）。
+
+**用法**：
+
+```js
+import createCdnLocal from 'w-package-tools-e2e/src/createCdnLocal.mjs'
+import launchBrowser from 'w-package-tools-e2e/src/launchBrowser.mjs'
+
+let cdn = createCdnLocal({ manifest: './test/tools/cdn.manifest.json' }) //cacheDir 預設 test/_cache/cdn
+cdn.patchFetch() //Node 端 fetch(測試檔載入時一次)
+
+describe('demo', function() {
+    let mark
+    before(async function() {
+        this.timeout(cdn.hookTimeoutMs) //首次需下載時之取得點
+        await cdn.ensure()
+    })
+    beforeEach(function() {
+        mark = cdn.violationMark()
+    })
+    afterEach(function() {
+        cdn.assertNoViolation(mark) //自標記起有清單外之外部請求即失敗
+    })
+    it('page', async function() {
+        let browser = await launchBrowser()
+        await cdn.routeBrowser(browser) //於啟動瀏覽器之處呼叫；已用 w-playwright 之 setBrowserTypeForTest 者，於其 launch 替身內呼叫
+        let page = await browser.newPage()
+        await page.setContent('<script src="https://cdn.example.com/lib@1.0.0/lib.min.js"></script>')
+        await browser.close() //有違規則於關閉後拋 E_CDN_EXTERNAL
+    })
+})
+```
+
+**清單之產生**（需連網，不屬 `npm test`）：
+
+```
+node node_modules/w-package-tools-e2e/tools/genCdnManifest.mjs --roots test/tools/cdn.roots.json --out test/tools/cdn.manifest.json
+node node_modules/w-package-tools-e2e/tools/genCdnManifest.mjs --roots test/tools/cdn.roots.json --out test/tools/cdn.manifest.json --check
+```
+
+`cdn.roots.json` 為 `{ "dagre": "https://cdn.jsdelivr.net/npm/dagre@0.8.5/dist/dagre.min.js", … }`（或網址陣列；亦可用 `.mjs` 之 `default`／具名匯出 `roots`，讓產品之 CDN 網址表成為單一事實來源）。產生器對 `.mjs` 之根網址求相對匯入之閉包（chunk 式 ESM 常有上百檔）、對 `.css` 求 `@import` 與 `url()` 之相對引用；**絕對網址與協定相對網址（`//host/x`）之匯入不自動納入**（未列入 roots 即拋 `E_CDN_GEN`，請把它列入 roots）；經典（UMD）`.js` 內動態載入之資源不解析，測試時由違規紀錄揭露後補列 roots；副檔名無法判定內容類型之網址（如 `…/css2?family=…`）另記伺服器回應之 content-type 於 `type` 欄。sha256 為首次取得時之釘選值，其後之下載一律以其校驗；網址或版本改變後須重新產生並審視差異（`--check` 不寫檔）。建議使用端另寫一案核對「產品之 CDN 網址表 ＝ 清單之 roots」，使產品改版而清單未更新時測試轉紅。
+
+**選項**（K3：非預期之輸入視為未給、改用預設；**`manifest`、`cacheDir`、`allow` 為安全相關，給了而無效即拋錯**：清單不合法 `E_CDN_MANIFEST`，`cacheDir`、`allow` 無效或未給 `manifest` 為 `E_CDN_ARG`）：`manifest`（必給，物件或路徑）、`cacheDir`、`offline`（未給時看環境變數 `W_CDN_OFFLINE`＝`1`／`true`；離線缺檔不連網，直接拋 `E_CDN_OFFLINE_MISSING`，`err.missing` 為 `[{ url, sha256, size, cachePath }]`，訊息只含檔名）、`budgetMs`、`fileTimeoutMs`、`staleMs`、`waitMs`、`pollMs`、`concurrency`、`maxAttempts`、`retryDelayMs`、`fetch`（下載用，供測試以夾具伺服器驗取得流程）、`allowLoopback`、`allow`、`onTrace`（凍結之事件物件 `{ type, … }`：`lock-acquired`、`lock-wait`、`lock-poll`、`lock-stale-judged`〔判定殘留、尚未回收；同步呼叫之回調可於此重現交錯〕、`lock-stale-reclaimed`、`swept`、`downloaded`、`ready`、`served`、`violation`，規格同 wsemi `getTrace`）。網址於訊息與違規紀錄中經 wsemi `maskDiagText` 遮蔽憑證與查詢秘密值。
+
+**限制**（攔不到或只能記錄者；標有測試編號者為本庫之真瀏覽器測試，其餘為獨立審查者以真瀏覽器與本機伺服器之實測或讀碼）：
+①取得（`ensure`）於實例內只做一次，失敗亦記住（不讓每個請求重跑整個預算）。
+②**只記錄、來不及中止**：放行之回送位址回 3xx 導向外部（`[CE12]`）、使用端於 `routeBrowser` 之後才註冊之 `route` 以 `continue()` 放走者（`[CE13]`）——由 `request` 事件之觀察者記為違規，請求本身已送出，測試因違規而失敗；使用端自己之 `route` 請在 `routeBrowser` 之前註冊（`fallback()` 才串得起來，`[CE10]`）。
+③**攔不到亦無事件**：SharedWorker 之請求、任何 Worker 內之 WebSocket（頁面自己之 WebSocket 會被攔，`[CE07]`）、`context.request`（`APIRequestContext`）之請求；專用 Worker 之 HTTP 請求會被攔（`[CE11]`）。頁面會用到者請使用端自行避免或以 `allow` 外之方式驗證。
+④Service Worker 處理之請求：Playwright 文件註明不經 `route`；獨立審查者於 Playwright 1.65 實測 Service Worker 內之 `fetch` 仍被攔下、`serviceWorkers: 'block'` 有效（本庫無測試）；不作保證，頁面會註冊 Service Worker 者建 context 時傳 `serviceWorkers: 'block'`。
+⑤**Node 端只覆寫全域 `fetch`**：先於 `patchFetch()` 保存之 `fetch` 參考、`http`／`https` 模組、`undici`、全域 `WebSocket`／`EventSource` 等其他出口不攔；放行之回送位址回 3xx 導向外部時，其後續請求由 undici 內部處理，不經補丁（瀏覽器端有 `request` 事件觀察者，Node 端沒有）。
+⑥**漏接**：`routeBrowser` 須於每個啟動瀏覽器之處呼叫，漏接者其外部請求不被攔也不被記錄；建議在使用端之單一啟動出口（如包裝 `launchBrowser` 之輔助函數）呼叫，並以 `isRouted(target)` 斷言。
+⑦ws(s) 之攔截需 Playwright 之 `routeWebSocket`（較舊之版本只掛 HTTP 路由）。
+⑧判定回收鎖與改名之間有極小空窗，其後果至多為持有新鎖者失去鎖而重複下載（內容仍經 sha256 校驗與原子更名，不會損檔）；以持有者行程（PID）與心跳判定殘留：PID 重用者只會使判定偏向「仍存活」，心跳逾時後仍會被回收；PID 命名空間不同者（WSL、容器共用快取資料夾）可能把活鎖判為已結束（未測）。
+⑨快取資料夾須各行程相同才能共用（預設相對 `process.cwd()`，測試一律以專案根為 cwd 執行）。
+⑩`allowLoopback` 預設放行代表本機伺服器之回應不受清單約束，需要連本機服務也禁止者設 `allowLoopback:false` 並以 `allow` 明列。
+
 ## 3. 採用步驟（以 w-web-sso 為例）
 
 1. **單一橋接檔**（`test/tools/e2eLib.mjs`）轉出本套件模組；共用層與測試檔一律自橋接檔 import，套件路徑只寫在這一檔（原經 w-web-sso 之 `srcPack/` 橋接者，只需把前綴改為 `'w-package-tools-e2e/src/'`；切換時只升本套件，使用端不另裝 playwright（Playwright 之版本由本套件所依之 w-playwright 精確釘定，Chromium 改版可能使標準圖全面變動，見 §5）：
@@ -555,6 +636,12 @@ let captureStableWithBox = (page, target, opts = {}) => pkgCaptureStableWithBox(
 6. 結束後 `diffBaselineSnapshots` 須 unchanged（added / removed / changed / touched 皆空）且 `git status --porcelain -- test/pics` 為空。
 
 ## 5. 改版須知：哪些變更會動到使用端之標準圖
+
+### 新增（2026-11-25，測試不連 CDN：`createCdnLocal`、`genCdnManifest`、`loadCdnManifest`、`createDirLock`、`tools/genCdnManifest.mjs`）
+
+- **純新增**：不改既有公開函式與行為，不改 `package.json` 之依賴（沿用 wsemi `fsDownloadFileVerify`、`getTrace`、`maskDiagText`）；使用端不接線即與改版前完全相同。**對標準圖無影響**（只改測試端取得外部資源之來源；清單依 sha256 釘選，頁面載入之位元組與 CDN 現行檔相同）。
+- **使用端接線**（逐項，見 §2.13）：①以 `tools/genCdnManifest.mjs` 依產品之 CDN 網址表產生清單並入版控；②於測試端單一啟動出口呼叫 `routeBrowser`、載入時呼叫 `patchFetch()`、`before` 呼叫 `ensure()`（掛 `this.timeout(cdn.hookTimeoutMs)`）、前後以 `violationMark()`／`assertNoViolation()` 夾住；③快取資料夾（預設 `test/_cache/cdn`）列入 `.gitignore` 與 `.npmignore`；④首次執行須能連 CDN 下載（之後離線可跑，`W_CDN_OFFLINE=1` 可強制離線）。
+- 錯誤之型別為帶 `code` 之 `Error`（`E_CDN_EXTERNAL` 等），不是 `TypeError`；依 `instanceof TypeError` 判斷「網路失敗」之使用端程式碼須留意。
 
 ### 行為變更（2026-11-24，截圖就緒條件補樣式表與捲動；`pollUntil` 每次判斷之期限；`runIsolatedE2e` 隱藏視窗；新增 `warnDistStale`、`createDistGuard`）
 
@@ -680,6 +767,7 @@ let captureStableWithBox = (page, target, opts = {}) => pkgCaptureStableWithBox(
 - `test/unit-planE2eShards.test.mjs`（`[S-G*]`、`[S-M*]`，注入值）、`test/unit-removeE2eInstance.test.mjs`（`[S-R*]`、`[S-L*]`、`[S-T*]`，連結目標內放哨兵檔、以會跟進連結之刪除注入）、`test/api-shardE2e.test.mjs`（`[S-I*]`，`test/_tmp/shardE2e/` 下建小專案：真 mocha、真 HTTP 服務、真 junction、真殺**自建**行程與主控台事件；固定埠 19200、19210、19300、19310、19400 須空閒）、`test/unit-shardProcIdentity.test.mjs`（`[S-P*]`、`[S-V*]`，注入行程表與下殺之純判定）、`test/api-shardKillIdentity.test.mjs`（`[S-W*]`，真 mocha 與真鎖檔、行程表疊加夾具列、下殺一律攔下不轉送；固定埠 19500）：分組多開，標題前綴對應 `sgud/rule/rulebook_shard.md`。**後二檔不會對真實行程下殺，變異測試只跑這兩檔**。
 - `test/unit-procPrimitives.test.mjs`：行程原語。`listenerPids`／`killPortListeners` 之案以 spawnSync 形替身（`test/tools/portPidsFake.mjs`）驗判定（對外連線錯置為 LISTENING 不得誤判、netstat 漏列由 `Get-NetTCPConnection` 補、查詢失敗回 null 非 `[]`、`useBoth`／`timeout`／`onTrace` 透傳），標題前綴 `[LP*]`（`listenerPids`）／`[KP*]`（`killPortListeners`）；`[RP*]` 為本機真實案：起真實監聽（固定埠 19050）查得到自己、真實子程序監聽（固定埠 19051）被 `killPortListeners` 殺掉並回驗；兩埠須空閒，否則該條失敗並註明。
 - `test/e2e-readyWaits.test.mjs`（`[RS-*]` 樣式表載入、`[SI-*]` 捲入前等捲動結束；真 Chromium，夾具為本機 HTTP 服務〔作業系統配發之埠〕，`[SI-01]`、`[SI-02]` 以 `--enable-smooth-scrolling` 重現平滑捲動動畫）、`test/unit-distTools.test.mjs`（`[DS-*]` `warnDistStale`、`[DG-*]` `createDistGuard`，含備份途中、建置後、還原途中被結束之自癒與目錄連結）、`test/unit-childProcHide.test.mjs`（`[CP-*]`：盤點 `src/`、`tools/`、`toolg/`、`test/` 之 child_process 呼叫皆帶 `windowsHide: true`，含盤點器之鑑別力自測與防空集合）、`test/unit-harnessHelpers.test.mjs` 之 `[PU-A*]`（`pollUntil` 每次判斷之期限）與 `[RI-W1]`：2026-11-24，標題前綴對應 `sgud/rule/rulebook_ready.md`。
+- `test/unit-createDirLock.test.mjs`（`[DL*]`，資料夾鎖原語：互斥、殘留判定、確定性重現兩個回收者之交錯、心跳與接手、`EPERM`／`EBUSY` 之處置）、`test/unit-createCdnLocal.test.mjs`（`[CL*]`，本機夾具伺服器：取得、鎖之交錯〔以 `onTrace` 之同步事件重現〕、離線、`fetch` 補丁、路由處理器各分支〔替身〕）、`test/unit-genCdnManifest.test.mjs`（`[GM*]`）、`test/api-createCdnLocal.test.mjs`（`[CA*]`，真實多行程：4 行程同時首次取得只下載一次、持鎖行程被強制結束後接手、跨行程心跳、離線）、`test/api-genCdnManifest.test.mjs`（`[GC*]`，CLI 子行程）、`test/e2e-createCdnLocal.test.mjs`（`[CE*]`，真 Chromium 對本機頁面與夾具：路由、ws、Worker、重新導向、與使用端 route 並存）：2026-11-25，標題前綴對應 `sgud/rule/rulebook_cdn.md`；夾具為 `test/tools/cdnLocalFixture.mjs`（「外部網址」為不可解析之 `cdn.fixture.invalid`，下載時以 `opt.fetch` 改接本機伺服器，不連外網）與子行程 `test/tools/cdnAcquireChild.mjs`。
 - lint：`npx eslint --ext .mjs src tools test`。
 
 ## 7. 後續候選（未納入）
