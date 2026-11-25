@@ -384,13 +384,16 @@ await browser.close()
 <dl class="details">
     
     <dt class="tag-description">Description:</dt>
-    <dd class="tag-description"><ul class="dummy"><li><p>確定性渲染之Chromium啟動旗標(六旗標＋語系旗標，共七項)，供像素比對之截圖使用</p>
+    <dd class="tag-description"><ul class="dummy"><li><p>確定性渲染之Chromium啟動旗標(六旗標＋語系旗標＋關閉平滑捲動旗標，共八項)，供像素比對之截圖使用</p>
 <p>headless Chromium預設GPU光柵化與次像素字形反鋸齒，於像素比對下非決定性(拉丁字偶發散落差異，CJK灰階反鋸齒較穩故常只英文語系出錯)。
 本組關閉GPU(改走CPU Skia)、固定sRGB色彩、關閉LCD與次像素字形定位、關閉Skia執行期最佳化與部分光柵化(以上六旗標)，
 四個web專案實測截圖自我一致(同態連拍)由裸啟動之2/4提升為5/5。
 另固定應用程式語系為zh-TW(--lang=zh-TW)：Chromium 159(headless shell revision 1255)起不再繼承主機系統語系(預設en-US)，
 generic字族(sans-serif與未指定字族)之字型隨語系改變(拉丁字由微軟正黑體變Arial、中文字由微軟正黑體變Microsoft YaHei簡體字形)，使截圖隨主機與Chromium版本而變；
 固定後字型不隨執行機器之系統語系而變，且與156(繼承zh-TW主機)之截圖逐位元相同(6種樣本頁實測，159加本旗標對156)。
+另以--disable-smooth-scrolling關閉平滑捲動動畫：鍵盤與滾輪之捲動改為即時到位，使「讀到目標位置後立即按鍵」不因動畫相位而時序競賽(動畫進行中之按鍵可能被吞)，
+結果不隨主機作業系統之動畫設定而變；不影響靜止畫面之光柵化。本機Chromium 159之headless shell預設已為非平滑(同一鍵盤捲動之位置序列於旗標有無下相同)，
+故既有標準圖不變(截圖皆於捲動靜止後取得)；旗標之作用在於使確定性不依賴預設值與主機設定。
 旗標組改動即全部標準圖須重產(對156時代之標準圖，159加本旗標於上述樣本頁逐位元相同，預期多數不必重產，仍以全量比對為準)</p>
 <p>陣列已凍結，需增加旗標時由launchBrowser之opt.args附加；呼叫端經launchBrowser自給語系(opt.args含--lang、opt.lang為語系字串或false)時，
 launchBrowser不帶本陣列之--lang，最終命令列之語系以呼叫端者為準</p></li></ul></dd>
@@ -399,7 +402,7 @@ launchBrowser不帶本陣列之--lang，最終命令列之語系以呼叫端者�
     
     <dt class="tag-source">Source:</dt>
     <dd class="tag-source"><ul class="dummy"><li>
-        <a href="chromiumLaunchArgs.mjs.html">chromiumLaunchArgs.mjs</a>, <a href="chromiumLaunchArgs.mjs.html#line24">line 24</a>
+        <a href="chromiumLaunchArgs.mjs.html">chromiumLaunchArgs.mjs</a>, <a href="chromiumLaunchArgs.mjs.html#line27">line 27</a>
     </li></ul></dd>
     
 
@@ -439,13 +442,16 @@ launchBrowser不帶本陣列之--lang，最終命令列之語系以呼叫端者�
 
 
 <div class="description usertext">
-    <p>確定性渲染之Chromium啟動旗標(六旗標＋語系旗標，共七項)，供像素比對之截圖使用</p>
+    <p>確定性渲染之Chromium啟動旗標(六旗標＋語系旗標＋關閉平滑捲動旗標，共八項)，供像素比對之截圖使用</p>
 <p>headless Chromium預設GPU光柵化與次像素字形反鋸齒，於像素比對下非決定性(拉丁字偶發散落差異，CJK灰階反鋸齒較穩故常只英文語系出錯)。
 本組關閉GPU(改走CPU Skia)、固定sRGB色彩、關閉LCD與次像素字形定位、關閉Skia執行期最佳化與部分光柵化(以上六旗標)，
 四個web專案實測截圖自我一致(同態連拍)由裸啟動之2/4提升為5/5。
 另固定應用程式語系為zh-TW(--lang=zh-TW)：Chromium 159(headless shell revision 1255)起不再繼承主機系統語系(預設en-US)，
 generic字族(sans-serif與未指定字族)之字型隨語系改變(拉丁字由微軟正黑體變Arial、中文字由微軟正黑體變Microsoft YaHei簡體字形)，使截圖隨主機與Chromium版本而變；
 固定後字型不隨執行機器之系統語系而變，且與156(繼承zh-TW主機)之截圖逐位元相同(6種樣本頁實測，159加本旗標對156)。
+另以--disable-smooth-scrolling關閉平滑捲動動畫：鍵盤與滾輪之捲動改為即時到位，使「讀到目標位置後立即按鍵」不因動畫相位而時序競賽(動畫進行中之按鍵可能被吞)，
+結果不隨主機作業系統之動畫設定而變；不影響靜止畫面之光柵化。本機Chromium 159之headless shell預設已為非平滑(同一鍵盤捲動之位置序列於旗標有無下相同)，
+故既有標準圖不變(截圖皆於捲動靜止後取得)；旗標之作用在於使確定性不依賴預設值與主機設定。
 旗標組改動即全部標準圖須重產(對156時代之標準圖，159加本旗標於上述樣本頁逐位元相同，預期多數不必重產，仍以全量比對為準)</p>
 <p>陣列已凍結，需增加旗標時由launchBrowser之opt.args附加；呼叫端經launchBrowser自給語系(opt.args含--lang、opt.lang為語系字串或false)時，
 launchBrowser不帶本陣列之--lang，最終命令列之語系以呼叫端者為準</p>
@@ -462,7 +468,7 @@ launchBrowser不帶本陣列之--lang，最終命令列之語系以呼叫端者�
     <pre class="prettyprint"><code>import chromiumLaunchArgs from 'w-package-tools-e2e/src/chromiumLaunchArgs.mjs'
 
 console.log(chromiumLaunchArgs)
-// => ['--disable-gpu', '--force-color-profile=srgb', '--disable-lcd-text', '--disable-font-subpixel-positioning', '--disable-skia-runtime-opts', '--disable-partial-raster', '--lang=zh-TW']</code></pre>
+// => ['--disable-gpu', '--force-color-profile=srgb', '--disable-lcd-text', '--disable-font-subpixel-positioning', '--disable-skia-runtime-opts', '--disable-partial-raster', '--lang=zh-TW', '--disable-smooth-scrolling']</code></pre>
 
 
 
@@ -4669,7 +4675,7 @@ let buf2 = await captureStableWithBox(page, [page.locator('.ag-row').filter({ ha
     
     <dt class="tag-source">Source:</dt>
     <dd class="tag-source"><ul class="dummy"><li>
-        <a href="createCdnLocal.mjs.html">createCdnLocal.mjs</a>, <a href="createCdnLocal.mjs.html#line103">line 103</a>
+        <a href="createCdnLocal.mjs.html">createCdnLocal.mjs</a>, <a href="createCdnLocal.mjs.html#line111">line 111</a>
     </li></ul></dd>
     
 
@@ -4836,7 +4842,7 @@ console.log(cdnMimeOf('https://cdn.example.com/a/b.mjs?v=1'))
     
     <dt class="tag-source">Source:</dt>
     <dd class="tag-source"><ul class="dummy"><li>
-        <a href="createCdnLocal.mjs.html">createCdnLocal.mjs</a>, <a href="createCdnLocal.mjs.html#line156">line 156</a>
+        <a href="createCdnLocal.mjs.html">createCdnLocal.mjs</a>, <a href="createCdnLocal.mjs.html#line164">line 164</a>
     </li></ul></dd>
     
 
@@ -7008,26 +7014,40 @@ let { knownDefects } = gate.finalize() //有已知缺陷紀錄時, 同時以 log
 <p>瀏覽器端(routeBrowser)：對Playwright之browser、context或page之context掛上涵蓋全部網址之route(glob為雙星號加斜線加星號)，清單內之網址由本地副本回應(content-type、CORS)，
 清單外之http(s)請求中止並記錄違規，清單外之ws(s)連線以routeWebSocket關閉並記錄違規；回送位址(localhost、127.x.x.x、[::1])與opt.allow明列者不屬外部請求，原樣放行(fallback)；
 data:、blob:、file:等非網路請求不處理。清單內者優先於放行(清單內之網址即使為回送位址亦由本地副本回應)。對browser或直接傳入之context另包裝close()，關閉後若有違規即拋E_CDN_EXTERNAL。
-route只攔得到「經過route處理器」之請求：放行之回送位址回3xx導向外部、使用端於routeBrowser之後註冊之route以continue()放走者，route攔不到；
-另對context掛request事件之觀察者(涵蓋全部頁面之請求含重新導向之後續請求)，清單外且非放行者記為違規(只記錄，來不及中止)，同一請求兩處皆看到時依Request物件去重，只記一筆。
+route只攔得到「經過route處理器」之請求：放行之回送位址回3xx導向外部、使用端於routeBrowser之後註冊之route(後註冊者先執行)以continue()放走者，route攔不到；
+故另對context掛兩個觀察者(涵蓋全部頁面之請求含重新導向之後續請求，皆只記錄、來不及中止)：request事件——清單外且非放行者記為違規；
+requestfinished事件——清單內之網址之請求完成而不是由本處理器供應者(請求被使用端之route以continue()放走而直達來源、自行fulfill、fetch()後轉供，或重新導向至清單內網址之後續請求)亦記為違規
+(理由為「未由本地副本供應」；連網時頁面照常載入、測試照過，故不能只靠斷網才發現)。同一請求兩處皆看到時依Request物件去重，只記一筆。
+直達來源而連線失敗者發requestfailed，與使用端自己abort分不出，不記(斷網時頁面載入失敗，測試本身即紅)。
 SharedWorker之請求、任何Worker內之WebSocket、context.request(APIRequestContext)不經route亦無request事件，攔不到(見README限制)。
 Node端(patchFetch)：覆寫全域fetch，http(s)網址(依fetch自己之解析規則正規化：去前後空白與tab、主機小寫、預設埠省略)只回本地副本，清單外拋E_CDN_EXTERNAL並記錄，回送位址與opt.allow明列者放行，非http(s)原樣放行；回傳還原函數。
 只覆寫全域fetch：先於patchFetch保存之fetch參考、http／https模組、undici、全域WebSocket等其他出口不攔。清單之網址亦先正規化再比對，故不因寫法不同(大小寫主機、預設埠)而漏判。
 兩者不綁定w-playwright之內部接縫，只用Playwright公開之route；已用w-playwright者可於其啟動browser之處(例如setBrowserTypeForTest之launch替身內)呼叫routeBrowser；isRouted(target)供使用端之啟動出口斷言「沒有漏接」。</p>
+<p>本機檔來源(opt.sources)與空腳本(opt.stubs)：清單內之網址可改取自本機檔(不下載)，未釘版之外部腳本可改以0位元組之空內容供應。
+本機檔照清單之sha256與大小校驗後才入內容定址快取(邊讀邊算、與清單不符即拒收並清除暫存檔，E_CDN_SOURCE，不改走下載)，故不產生「清單有、檔來自他處而不校驗」之缺口；
+已備妥之快取不讀本機檔，快取損毀時自本機檔重補；有本機來源者離線照常補齊(不連網)，同內容(sha256相同)之多個網址只要有一個有本機來源即不下載，
+同內容有多個本機來源時全部逐一校驗、任一不符即拒收(不因順序擇一)；stats().sourced計自本機來源補入之內容數。
+空腳本併入有效清單(stats().files與stubs計入)，內容為空檔(sha256固定)，網址已在清單內者須同為空檔，否則拋錯(清單與opt.stubs不得各說各話)。</p>
+<p>啟動出口之接線：routeLaunch(next, ...args)呼叫next(...args)啟動瀏覽器，啟動後掛routeBrowser並斷言已掛(isRouted)，掛失敗時先關閉已啟動之瀏覽器再拋原錯誤
+(啟動函數之替身內拋出之錯誤常被改寫為固定訊息而隱藏原因，故失敗時先把原因經maskDiagText遮蔽後印到stderr，並發'route-launch-failed'事件)；
+useMocha(opt)於mocha之describe內註冊before(this.timeout對齊hookTimeoutMs並ensure)、beforeEach／afterEach(每案前取違規標記、案後斷言自標記起無新增違規)，
+opt.install(routeLaunch)於取得之後呼叫、其回傳之函數於after還原(例如安裝w-playwright之setBrowserTypeForTest替身)，使各使用端免自寫接線。</p>
 <p>違規之判定：violationMark()於測試前取標記、assertNoViolation(mark)於測試後斷言「自標記起無新增違規」，涵蓋close()未被呼叫或其錯誤被呼叫端吞掉者；
 以事件(onTrace)而非延時同步。事件(凍結物件{ type, ... }，同wsemi getTrace)：'lock-acquired'(取得鎖)、'lock-wait'(首次發現鎖被占用)、'lock-poll'(每輪等候)、'lock-stale-judged'(判定鎖殘留，尚未回收，
-此時同步呼叫之回調可進行檔案操作以重現交錯)、'lock-stale-reclaimed'、'swept'(含n，清除之殘留項數)、'downloaded'(含url)、'ready'、'served'(含kind、url)、'violation'(含kind、url、reason)。</p>
-<p>錯誤(皆帶code)：E_CDN_ARG(參數無效：未給manifest、cacheDir或allow無效、routeBrowser與assertNoViolation之參數不符)、E_CDN_MANIFEST(清單不合法，或正規化後相同之網址內容矛盾)、
-E_CDN_OFFLINE_MISSING(離線缺檔，err.missing為[{url,sha256,size,cachePath}]，訊息只含檔名)、E_CDN_ACQUIRE_TIMEOUT(下載逾預算或等候他行程逾時)、E_CDN_VERIFY(回驗仍缺)、
-E_CDN_EXTERNAL(清單外之外部請求，err.violations為違規陣列)、E_CDN_UNAVAILABLE(清單內之網址而本地副本不可用，Node端fetch)、E_CDN_DOWNLOAD(無可用之fetch等)，
+此時同步呼叫之回調可進行檔案操作以重現交錯)、'lock-stale-reclaimed'、'swept'(含n，清除之殘留項數)、'downloaded'(含url)、'sourced'(含kind、url，自本機來源補入之一個內容，kind為'file'或'empty')、'ready'、'served'(含kind、url)、'violation'(含kind、url、reason)、
+'route-launch-failed'(含code，routeLaunch掛路由失敗)。</p>
+<p>錯誤(皆帶code)：E_CDN_ARG(參數無效：未給manifest、cacheDir、allow、sources、stubs或loopbackPorts無效或互相矛盾、routeLaunch與useMocha之參數不符、routeBrowser與assertNoViolation之參數不符)、E_CDN_MANIFEST(清單不合法，或正規化後相同之網址內容矛盾)、
+E_CDN_OFFLINE_MISSING(離線缺檔，err.missing為[{url,sha256,size,cachePath}]，只列須連網者，訊息只含檔名)、E_CDN_ACQUIRE_TIMEOUT(下載逾預算或等候他行程逾時)、E_CDN_VERIFY(回驗仍缺)、
+E_CDN_SOURCE(opt.sources之本機檔或空腳本無法補入快取，err.reason為'missing'、'not-file'、'unreadable'、'size-mismatch'、'sha256-mismatch'、'cache-write'(寫入快取失敗，不是來源檔之問題，原錯誤置於err.cause)，訊息只含網址不含本機路徑與sha256)、
+E_CDN_ROUTE(routeLaunch：啟動之瀏覽器未掛路由)、E_CDN_EXTERNAL(清單外之外部請求，err.violations為違規陣列)、E_CDN_UNAVAILABLE(清單內之網址而本地副本不可用，Node端fetch)、E_CDN_DOWNLOAD(無可用之fetch等)，
 下載失敗沿用fsDownloadFileVerify之code(如E_HASH_MISMATCH、E_HTTP)。網址於訊息與違規紀錄中經maskDiagText遮蔽憑證與查詢秘密值。</p>
-<p>安全相關之opt(影響信任範圍或檔案落點者：manifest、cacheDir、allow)給了而無效即拋錯(fail-closed)，不改用預設；其餘opt非預期之輸入視為未給、改用預設(不報錯)。</p></li></ul></dd>
+<p>安全相關之opt(影響信任範圍、檔案落點或檔案來源者：manifest、cacheDir、allow、sources、stubs、loopbackPorts)給了而無效即拋錯(fail-closed)，不改用預設；其餘opt非預期之輸入視為未給、改用預設(不報錯)。</p></li></ul></dd>
     
 
     
     <dt class="tag-source">Source:</dt>
     <dd class="tag-source"><ul class="dummy"><li>
-        <a href="createCdnLocal.mjs.html">createCdnLocal.mjs</a>, <a href="createCdnLocal.mjs.html#line283">line 283</a>
+        <a href="createCdnLocal.mjs.html">createCdnLocal.mjs</a>, <a href="createCdnLocal.mjs.html#line307">line 307</a>
     </li></ul></dd>
     
 
@@ -7081,20 +7101,9 @@ let cdn = createCdnLocal({ manifest: './test/tools/cdn.manifest.json' })
 cdn.patchFetch() //Node端fetch
 
 describe('demo', function() {
-    let mark
-    before(async function() {
-        this.timeout(cdn.hookTimeoutMs) //首次需下載時之取得點，時限對齊下載預算
-        await cdn.ensure()
-    })
-    beforeEach(function() {
-        mark = cdn.violationMark()
-    })
-    afterEach(function() {
-        cdn.assertNoViolation(mark) //自標記起有清單外之外部請求即失敗
-    })
+    cdn.useMocha() //before取得(時限對齊下載預算)、每案前後夾violationMark／assertNoViolation(自標記起有清單外之外部請求即失敗)
     it('page', async function() {
-        let browser = await launchBrowser()
-        await cdn.routeBrowser(browser) //其newContext/newPage之頁面導向本地副本
+        let browser = await cdn.routeLaunch(() => launchBrowser()) //啟動後掛routeBrowser並斷言已掛，其newContext/newPage之頁面導向本地副本
         let page = await browser.newPage()
         await page.setContent('&lt;script src="https://cdn.example.com/lib.js">&lt;/script>')
         await browser.close() //有違規則於關閉後拋E_CDN_EXTERNAL
@@ -7680,7 +7689,125 @@ describe('demo', function() {
                 </td>
             
 
-            <td class="description last"><p>輸入是否放行回送位址之請求，預設true(測試之頁面多由本機伺服器提供)</p></td>
+            <td class="description last"><p>輸入是否放行回送位址之任何埠之請求(全有或全無)，預設true(測試之頁面多由本機伺服器提供)；頁面皆為setContent、不連本機服務者建議設false(預設拒絕)；
+只放行指定之埠請改給opt.loopbackPorts；明確給false又給非空之loopbackPorts為矛盾，拋E_CDN_ARG</p></td>
+        </tr>
+
+    
+
+        <tr>
+            
+                <td class="name"><code>loopbackPorts</code></td>
+            
+
+            <td class="type">
+            
+                
+<span class="param-type">Array</span>
+
+
+
+            
+            </td>
+
+            
+                <td class="attributes">
+                
+                    &lt;optional><br>
+                
+
+                
+
+                
+                </td>
+            
+
+            
+                <td class="default">
+                
+                </td>
+            
+
+            <td class="description last"><p>輸入只放行之回送埠陣列(元素為1至65535之整數，未寫埠之網址依協定之預設埠：http與ws為80、https與wss為443)，給了者以它為準(優先於allowLoopback之全放行)：
+只有埠在其內之回送位址請求放行，其餘回送位址之請求視為外部；[]為不放行任何回送位址；opt.allow明列者仍可另放行(聯集)；清單內之網址仍優先由本地副本回應；預設未給(沿用allowLoopback)；給了而無效即拋錯</p></td>
+        </tr>
+
+    
+
+        <tr>
+            
+                <td class="name"><code>sources</code></td>
+            
+
+            <td class="type">
+            
+                
+<span class="param-type">Object</span>
+
+
+
+            
+            </td>
+
+            
+                <td class="attributes">
+                
+                    &lt;optional><br>
+                
+
+                
+
+                
+                </td>
+            
+
+            
+                <td class="default">
+                
+                </td>
+            
+
+            <td class="description last"><p>輸入「網址 → 本機檔案路徑」之物件(路徑相對於process.cwd()解析)，使清單內之網址改取自本機檔而不下載，本機檔須與清單之sha256與大小相符(不符E_CDN_SOURCE)；
+網址須在清單內且不得同時列入opt.stubs，同網址正規化後不得重複；預設未給；給了而無效即拋錯</p></td>
+        </tr>
+
+    
+
+        <tr>
+            
+                <td class="name"><code>stubs</code></td>
+            
+
+            <td class="type">
+            
+                
+<span class="param-type">Array</span>
+
+
+
+            
+            </td>
+
+            
+                <td class="attributes">
+                
+                    &lt;optional><br>
+                
+
+                
+
+                
+                </td>
+            
+
+            
+                <td class="default">
+                
+                </td>
+            
+
+            <td class="description last"><p>輸入空腳本陣列(元素為http(s)網址字串，或{ url, type }，type為content-type，供副檔名無法判定類型之網址使用)，這些網址以0位元組之空內容供應並併入有效清單，
+供未釘版、測試不需其內容之外部腳本使用；網址已在清單內者須同為空檔；預設未給；給了而無效即拋錯</p></td>
         </tr>
 
     
@@ -7720,7 +7847,7 @@ describe('demo', function() {
                 </td>
             
 
-            <td class="description last"><p>輸入額外放行之外部請求，元素為RegExp(比對完整網址，須自行錨定)或函數(url)=&gt;Boolean(須恰回傳true才放行；async函數回傳Promise視為不放行，拋錯亦視為不放行)，預設[]；元素型別不符即拋錯</p></td>
+            <td class="description last"></td>
         </tr>
 
     
@@ -7793,10 +7920,14 @@ describe('demo', function() {
 
         
 <div class="param-desc">
-    <p>回傳物件{ensure,routeBrowser,isRouted,patchFetch,violationMark,assertNoViolation,getViolations,lookup,fileOf,stats,cacheDir,lockDir,journalFp,timeouts,hookTimeoutMs}；
-ensure()回傳Promise(本實例內只做一次)；routeBrowser(target,{failOnClose})回傳Promise，resolve為傳入之browser或context，傳入page者為其context；isRouted(target)回傳該browser、context或page之context是否已經本實例routeBrowser；
+    <p>回傳物件{ensure,routeBrowser,routeLaunch,useMocha,isRouted,patchFetch,violationMark,assertNoViolation,getViolations,lookup,fileOf,stats,cacheDir,lockDir,journalFp,timeouts,hookTimeoutMs}；
+ensure()回傳Promise(本實例內只做一次)；routeBrowser(target,{failOnClose})回傳Promise，resolve為傳入之browser或context，傳入page者為其context；
+routeLaunch(next,...args)回傳Promise，resolve為next(...args)啟動並掛好路由之browser，掛失敗時先關閉瀏覽器再reject原錯誤；
+useMocha({hooks,ensure,guard,install})於mocha環境註冊掛鉤，無回傳(hooks為{before,beforeEach,afterEach,after}，預設取globalThis之mocha全域，缺掛鉤拋E_CDN_ARG；ensure與guard預設true，非布林值視為未給；install為函數，收routeLaunch，回傳還原函數)；
+isRouted(target)回傳該browser、context或page之context是否已經本實例routeBrowser；
 patchFetch()回傳還原函數；violationMark()回傳標記；assertNoViolation(mark)無違規無回傳、有違規拋E_CDN_EXTERNAL；
-getViolations()回傳全部違規之複本；lookup(url)回傳清單項目{sha256,size,type?}或null(網址先正規化並去片段)；fileOf(url)回傳快取檔路徑(不在清單即拋E_CDN_EXTERNAL)；stats()回傳{files,contents,ready,downloaded,served:{browser,fetch},violations,offline,cacheDir}之快照；
+getViolations()回傳全部違規之複本；lookup(url)回傳清單項目{sha256,size,type?}或null(網址先正規化並去片段)；fileOf(url)回傳快取檔路徑(不在清單即拋E_CDN_EXTERNAL)；
+stats()回傳{files,contents,ready,downloaded,sourced,stubs,served:{browser,fetch},violations,offline,cacheDir}之快照(sourced為自本機來源補入之內容數，stubs為空腳本網址數)；
 timeouts為{budgetMs,fileTimeoutMs,staleMs,waitMs,hookTimeoutMs}，hookTimeoutMs為建議之before時限</p>
 </div>
 
@@ -15820,12 +15951,13 @@ console.log(r)
     
     <dt class="tag-description">Description:</dt>
     <dd class="tag-description"><ul class="dummy"><li><p>以確定性渲染旗標啟動無頭Chromium，為e2e測試端、標準圖產製端與探測腳本之唯一啟動出口</p>
-<p>經自有套件w-playwright啟動(wpw.launchChromium)，不直接使用playwright：預設為無頭並帶chromiumLaunchArgs七旗標(六旗標＋--lang=zh-TW)，opt.args另附加於七旗標之後，
+<p>經自有套件w-playwright啟動(wpw.launchChromium)，不直接使用playwright：預設為無頭並帶chromiumLaunchArgs八旗標(六旗標＋--lang=zh-TW＋--disable-smooth-scrolling)，opt.args另附加於八旗標之後，
 並帶autoInstall與installDeps(受管瀏覽器缺檔時安裝一次再啟動，Linux缺系統相依時安裝相依；兩者給布林值可覆寫，非布林值改用預設true)；其餘鍵原樣交給wpw.launchChromium(亦可給其debug、funLog、onTrace)。
 w-playwright於args之末合併唯一之--disable-features(Playwright預設＋AutofillAiWalletPrivatePasses＋呼叫端自給者)，
 停用AutofillAiWalletPrivatePasses使Windows上Chromium 153起之瀏覽器不再以無效密碼替目前使用者呼叫LogonUser(錯誤密碼次數累計將鎖定帳號)。
 opt.args任一元素無效(如不以-開頭)或連同旗標組逾10000項時w-playwright視整個args為<a href="%E6%97%97%E6%A8%99%E7%B5%84%E4%B8%80%E4%BD%B5%E5%A4%B1%E5%8E%BB%EF%BC%8C%E5%90%AB--lang=zh-TW%EF%BC%8C%E5%8F%AA%E7%95%99%E5%AE%88%E9%96%80%E4%B9%8B%E4%B8%80%E4%B8%B2%E8%88%87w-playwright%E8%A3%9C%E5%85%A5%E4%B9%8B%E4%B8%BB%E6%A9%9F%E8%AA%9E%E7%B3%BB"></a>，故只給合法旗標。
 語系：預設以--lang=zh-TW固定應用程式語系(Chromium 159起不再繼承主機系統語系，字型隨語系而變，見chromiumLaunchArgs)，不隨執行機器之系統語系而變；
+另以--disable-smooth-scrolling關閉平滑捲動(鍵盤與滾輪之捲動即時到位，不因動畫相位而時序競賽)；呼叫端欲開平滑捲動者於opt.args另給--enable-smooth-scrolling(附加於旗標組之後，實測可開啟，見e2e-launchBrowserScroll [SS02])。
 呼叫端自給語系者(opt.args含語系開關，如--lang=en-US、-lang=en-US、--LANG=en-US、--lang；或opt.lang為語系字串或false)以呼叫端者為準，launchBrowser不帶旗標組之--lang，
 故最終命令列之語系開關恰為呼叫端所給者(opt.args與opt.lang並存時以opt.args為準，opt.lang被w-playwright忽略；opt.lang為false則不帶任何--lang)；opt.lang為無效值時視為未給，仍用zh-TW。
 啟動與安裝之失敗reject w-playwright之固定詞彙錯誤(帶code，如E_LAUNCH、E_BROWSER_MISSING、E_INSTALL、E_ENV)，不附Playwright原錯誤(原錯誤只交opt.funLog)；
@@ -15835,7 +15967,7 @@ opt須為物件(null於讀opt.args時即reject原生TypeError，與改版前相�
     
     <dt class="tag-source">Source:</dt>
     <dd class="tag-source"><ul class="dummy"><li>
-        <a href="launchBrowser.mjs.html">launchBrowser.mjs</a>, <a href="launchBrowser.mjs.html#line52">line 52</a>
+        <a href="launchBrowser.mjs.html">launchBrowser.mjs</a>, <a href="launchBrowser.mjs.html#line53">line 53</a>
     </li></ul></dd>
     
 
@@ -16057,7 +16189,7 @@ await browser.close()</code></pre>
                 </td>
             
 
-            <td class="description last"><p>輸入附加於七旗標後之旗標字串陣列，非陣列時忽略；含語系開關時不帶七旗標之--lang，預設[]</p></td>
+            <td class="description last"><p>輸入附加於旗標組(八旗標)後之旗標字串陣列，非陣列時忽略；含語系開關時不帶旗標組之--lang，預設[]</p></td>
         </tr>
 
     
@@ -16098,7 +16230,7 @@ await browser.close()</code></pre>
                 </td>
             
 
-            <td class="description last"><p>輸入啟動語系(語系字串如'en-US'，或false表不帶任何--lang)，由w-playwright處理；有效值時launchBrowser不帶七旗標之--lang，無效值視為未給，預設未給(用zh-TW)</p></td>
+            <td class="description last"><p>輸入啟動語系(語系字串如'en-US'，或false表不帶任何--lang)，由w-playwright處理；有效值時launchBrowser不帶旗標組之--lang，無效值視為未給，預設未給(用zh-TW)</p></td>
         </tr>
 
     
@@ -34950,7 +35082,7 @@ console.log(r) //{ written: false, reason: 'same', numDiff: 0 }</code></pre>
 <br class="clear">
 
 <footer>
-    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 4.0.5</a> on Wed Nov 25 2026 13:50:07 GMT+0800 (台北標準時間) using the <a href="https://github.com/clenemt/docdash">docdash</a> theme.
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 4.0.5</a> on Thu Nov 26 2026 00:56:08 GMT+0800 (台北標準時間) using the <a href="https://github.com/clenemt/docdash">docdash</a> theme.
 </footer>
 
 <script>prettyPrint();</script>
