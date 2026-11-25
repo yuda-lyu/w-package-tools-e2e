@@ -2,6 +2,7 @@ import fs from 'fs'
 import path from 'path'
 import assert from 'assert'
 import { fileURLToPath } from 'url'
+import { spawn } from 'child_process'
 import { sha, waitUntil, deferred, makeFixture, startServer, spawnChild } from './tools/cdnLocalFixture.mjs'
 
 
@@ -180,6 +181,89 @@ describe('api-createCdnLocal', function() {
             for (let p of Object.keys(fx.bodies)) {
                 assert.strictEqual(srv.hits[p], 1)
             }
+        }
+        finally {
+            await srv.close()
+        }
+    })
+
+    it('[CA05] useMocha(R-CL-14)於真實 mocha 子行程: before 取得並安裝(install)、after 還原恰一次; 有清單外請求之 describe 於案後之 afterEach 掛鉤失敗(帶 E_CDN_EXTERNAL), 其後另一 describe 之標記重取不受連累', async function() {
+        let dir = dirOf('useMocha')
+        let spec = path.join(dir, 'spec.mjs')
+        let srcUrl = new URL('../src/createCdnLocal.mjs', import.meta.url).href
+        fs.writeFileSync(spec, `import createCdnLocal from ${JSON.stringify(srcUrl)}
+let cdn = createCdnLocal({ manifest: { schema: 1, files: {} }, cacheDir: ${JSON.stringify(path.join(dir, 'cache'))}, stubs: ['https://cdn.fixture.invalid/stub.js'] })
+let restoreFetch = cdn.patchFetch()
+let installed = 0
+let restored = 0
+describe('ok-suite', function() {
+    cdn.useMocha({ install: (rl) => { installed += (typeof rl === 'function' ? 1 : 100); return () => { restored++ } } })
+    it('ensured and installed', function() {
+        if (!cdn.stats().ready || installed !== 1) { throw new Error('before 未取得或未安裝: ' + JSON.stringify({ ready: cdn.stats().ready, installed })) }
+    })
+})
+describe('violating-suite', function() {
+    cdn.useMocha()
+    it('makes an external request', async function() { await fetch('https://example.invalid/a.js').catch(() => {}) })
+})
+describe('after-violation-suite', function() {
+    cdn.useMocha({ ensure: false })
+    it('passes with a fresh mark', function() {})
+})
+after(function() {
+    restoreFetch()
+    if (restored !== 1) { throw new Error('install 之還原未於 after 呼叫恰一次: ' + restored) }
+})
+`)
+        let mocha = fileURLToPath(new URL('../node_modules/mocha/bin/mocha.js', import.meta.url))
+        let r = await new Promise((resolve) => {
+            let p = spawn(process.execPath, [mocha, spec, '--reporter', 'json', '--timeout', '60000'], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
+            let out = ''
+            let err = ''
+            p.stdout.on('data', (d) => {
+                out += d
+            })
+            p.stderr.on('data', (d) => {
+                err += d
+            })
+            p.on('close', (code) => resolve({ code, out, err }))
+        })
+        let j = JSON.parse(r.out.slice(r.out.indexOf('{')))
+        assert.deepStrictEqual(j.passes.map((t) => t.title).sort(), ['ensured and installed', 'makes an external request', 'passes with a fresh mark'].sort(), r.err)
+        assert.strictEqual(j.failures.length, 1, JSON.stringify(j.failures.map((f) => f.fullTitle)))
+        assert.ok(/"after each" hook/.test(j.failures[0].title), j.failures[0].title)
+        assert.strictEqual(j.failures[0].err.code, 'E_CDN_EXTERNAL')
+        assert.strictEqual(r.code, 1, '有失敗之掛鉤, mocha 離開碼為 1')
+    })
+
+    it('[CA06] 本機檔來源(opt.sources)之多行程取得: 4 個行程同時首次取得, 內容全體只被補入快取 1 次(同一把鎖內檢查與寫入), 全部就緒、不連網、校驗相符', async function() {
+        let srv = await startServer(fx.bodies)
+        try {
+            let dir = dirOf('sources')
+            let mfp = writeManifest(dir, fx.manifest)
+            let cache = path.join(dir, 'cache')
+            let sources = {}
+            for (let [i, u] of Object.keys(fx.manifest.files).entries()) {
+                let fp = path.join(dir, `local-${i}.js`)
+                fs.writeFileSync(fp, fx.bodies[new URL(u).pathname])
+                sources[u] = fp
+            }
+            let extra = [JSON.stringify({ sources })]
+            let kids = Array.from({ length: 4 }, () => spawnChild(mfp, cache, srv.baseUrl, extra))
+            let rs = await Promise.all(kids.map((k) => k.done))
+            for (let r of rs) {
+                assert.strictEqual(r.code, 0, '子行程失敗: ' + r.out + r.err)
+            }
+            let ev = kids.flatMap((k) => k.events)
+            assert.strictEqual(ev.filter((e) => e.type === 'ready').length, 4)
+            assert.strictEqual(ev.filter((e) => e.type === 'sourced').length, 6, '全體每個內容只補入 1 次')
+            assert.strictEqual(new Set(ev.filter((e) => e.type === 'sourced').map((e) => e.pid)).size, 1, '全部由同一個行程補入')
+            assert.strictEqual(ev.filter((e) => e.type === 'downloaded').length, 0)
+            assert.deepStrictEqual(srv.hits, {}, '不連網')
+            for (let [url, e] of Object.entries(fx.manifest.files)) {
+                assert.strictEqual(sha(fs.readFileSync(path.join(cache, e.sha256))), e.sha256, url + ' 校驗')
+            }
+            assert.ok(!fs.existsSync(path.join(cache, '.lock')), '鎖應已釋放')
         }
         finally {
             await srv.close()

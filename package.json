@@ -1,6 +1,6 @@
 {
   "name": "w-package-tools-e2e",
-  "version": "1.0.53",
+  "version": "1.0.54",
   "dependencies": {
     "dotenv": "^18.0.10",
     "json5": "^2.2.3",
@@ -8,7 +8,7 @@
     "pngjs": "^7.0.0",
     "sharp": "^0.35.5",
     "w-playwright": "^1.0.5",
-    "wsemi": "^1.9.77"
+    "wsemi": "^1.9.78"
   },
   "devDependencies": {
     "w-package-tools": "^1.1.31"

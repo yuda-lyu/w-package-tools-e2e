@@ -5,9 +5,9 @@
 ## 1. 規則
 
 ### R-LB-1 唯一啟動出口
-- `src/launchBrowser.mjs` 為本套件唯一之瀏覽器啟動處:`wpw.launchChromium({ headless: true, autoInstall: true, installDeps: true, ...opt, args: [...base, ...opt.args] })`(`base` 為 `chromiumLaunchArgs` 七項;呼叫端自給語系時 `base` 去掉其 `--lang`,見 R-LB-6;`wpw` 為 `import wpw from 'w-playwright'` 之預設匯出;`opt.args` 非陣列時忽略;`opt.autoInstall`、`opt.installDeps` 非布林值〔含 `undefined`、`null`〕時改用預設 `true`——dspec〈輸入參數之檢測機制〉K3,否則 `...opt` 之 `undefined` 會使 w-playwright 改用其預設 `false`;外審 terra F1).
+- `src/launchBrowser.mjs` 為本套件唯一之瀏覽器啟動處:`wpw.launchChromium({ headless: true, autoInstall: true, installDeps: true, ...opt, args: [...base, ...opt.args] })`(`base` 為 `chromiumLaunchArgs` 全部〔2026-11-21 起七項,2026-11-25 起八項,見 R-LB-7〕;呼叫端自給語系時 `base` 去掉其 `--lang`,見 R-LB-6;`wpw` 為 `import wpw from 'w-playwright'` 之預設匯出;`opt.args` 非陣列時忽略;`opt.autoInstall`、`opt.installDeps` 非布林值〔含 `undefined`、`null`〕時改用預設 `true`——dspec〈輸入參數之檢測機制〉K3,否則 `...opt` 之 `undefined` 會使 w-playwright 改用其預設 `false`;外審 terra F1).
 - 不提供 `launchChromium`、`launchChromiumCore`(2026-11-13 移除,不保留相容層;w-playwright 設計之約束 3、原則 14).使用端需不帶旗標組之啟動者直接用 `wpw.launchChromium`.
-- 旗標組(`src/chromiumLaunchArgs.mjs`:六旗標＋`--lang=zh-TW`,共七項;2026-11-21 起)不移入 w-playwright(截圖確定性屬本套件);改動即全量重產(不變;本次之意義見 R-LB-6 與 README §5 之 2026-11-21 條).
+- 旗標組(`src/chromiumLaunchArgs.mjs`:六旗標＋`--lang=zh-TW`〔2026-11-21 起〕＋`--disable-smooth-scrolling`〔2026-11-25 起,R-LB-7〕,共八項)不移入 w-playwright(截圖確定性屬本套件);改動即全量重產(不變;本次之意義見 R-LB-6 與 README §5 之 2026-11-21 條).
 
 ### R-LB-2 不直接依賴 playwright／playwright-core(w-playwright 帳本 R-PW-ONLY)
 - `package.json` 之 `dependencies`、`devDependencies` 不得有 `playwright`、`playwright-core`;`w-playwright` 列於 `dependencies`(`launchBrowser` 為執行期程式碼).
@@ -46,8 +46,8 @@ rg -n "(from\s+|import\(\s*|require\(\s*)['\"\`]playwright(-core)?['\"\`/]" <w-p
 
 | # | 規則 | 測試 |
 |---|---|---|
-| 01 | `chromiumLaunchArgs` 為七項:六旗標原序在前、`--lang=zh-TW` 在末;凍結;語系開關恰一個;其餘六旗標與順序不變 | `[LB00]`(獨立契約值 `SEVEN`)、`e2e-browserPrimitives` |
-| 02 | 預設(呼叫端未自給語系):送出之 args 為七旗標＋`opt.args`;w-playwright 見 args 已有語系開關即不補,命令列之語系開關恰一個且為 `--lang=zh-TW`,不隨主機語系 | `[LB01]`、`[LB02b]`、`[LB07]`(真命令列,模擬主機語系 en-US)、`e2e-launchBrowserLang` `[LL01]`、`[LL02]`(模擬主機 zh-TW、en-US、ja-JP、de-DE,結果逐項相同) |
+| 01 | `chromiumLaunchArgs` 為七項(2026-11-25 起增為八項,末尾加 `--disable-smooth-scrolling`,見 R-LB-7;前七項不變):六旗標原序在前、`--lang=zh-TW` 第七;凍結;語系開關恰一個;其餘六旗標與順序不變 | `[LB00]`(獨立契約值 `SEVEN`、`FULL`)、`e2e-browserPrimitives` |
+| 02 | 預設(呼叫端未自給語系):送出之 args 為旗標組(七項,R-LB-7 後八項)＋`opt.args`;w-playwright 見 args 已有語系開關即不補,命令列之語系開關恰一個且為 `--lang=zh-TW`,不隨主機語系 | `[LB01]`、`[LB02b]`、`[LB07]`(真命令列,模擬主機語系 en-US)、`e2e-launchBrowserLang` `[LL01]`、`[LL02]`(模擬主機 zh-TW、en-US、ja-JP、de-DE,結果逐項相同) |
 | 03 | 呼叫端自給語系:`opt.args` 含語系開關(辨識同 w-playwright:去前置 `-`、不分大小寫、取 `=` 之前為 `lang`;`--lang=…`、`-lang=…`、`--LANG=…`、`--lang`、`--lang=` 皆算),或 `opt.lang` 為 `false`、或 `opt.lang` 為有效語系字串(2～3 字母語言碼加以 `-` 相接之 1～8 字英數子標籤,總長 ≤ 35)時,**不帶旗標組之 `--lang`**,最終命令列之語系開關恰為呼叫端所給者;六旗標原序在前、呼叫端 args 緊隨其後 | `[LB09]`(9 種寫法含 `--lang=zh-TW` 本身)、`[LB10]`、`[LB11]`、`[LB12]`、`[LB07c]`(真命令列,呼叫端 en-US、模擬主機 ja-JP)、`[LL03]`、`[LL04]` |
 | 04 | 優先序:`opt.args` 之語系開關優先於 `opt.lang`(w-playwright 忽略 `opt.lang`);`opt.lang:false` 不帶任何 `--lang`;`opt.lang` 無效值(非字串、不合語法、逾長)視為未給,仍用 `zh-TW`;`opt.args` 非陣列時忽略(不算自給);`opt.lang` 之原值照送 w-playwright | `[LB10]`、`[LB11]`、`[LB12]` |
 | 05 | 不相近誤判:`--language=`、`--lang-x=`、`--no-lang` 不算語系開關 | `[LB09c]` |
@@ -60,11 +60,17 @@ rg -n "(from\s+|import\(\s*|require\(\s*)['\"\`]playwright(-core)?['\"\`/]" <w-p
 - 已知限制:`opt.args` 任一元素無效使整個 `args` 被 w-playwright 捨棄時(R-LB-4),`--lang=zh-TW` 隨旗標組一併失去,w-playwright 改補主機語系(`[LB03]`);未驗真 Chrome、Edge、完整 Chromium、有頭、非 Windows.
 - 變異(`./tmp` 副本,2026-11-21;腳本與結果見本輪報告):不去重、辨識只認 `--lang=`、不處理 `opt.lang`、不處理 `false`、`isLangStr` 放寬／無長度上限／允許底線、辨識放寬為前綴、捨棄整個旗標組、語系旗標置首、語系值改 en-US、args 非陣列仍判自給、就地改寫呼叫端陣列、旗標組不含語系(修前);須各有案例轉紅.
 
+### R-LB-7 旗標組加 `--disable-smooth-scrolling`(排程第 636 項 ⑦,2026-11-25;需求出處:使用端回報)
+- 背景:使用端 e2e 於「讀到捲動位置後 1～3ms 內按 PageDown」時,Chromium 之鍵盤捲動若為平滑動畫,動畫進行中之按鍵可能被吞(時序競賽,使用端已自行處理);關閉平滑捲動使鍵盤與滾輪之捲動即時到位,結果不依賴預設值與主機作業系統之動畫設定.
+- 規則:`chromiumLaunchArgs` 為八項:前七項(六旗標、`--lang=zh-TW`)與順序不變,**`--disable-smooth-scrolling` 附於末尾**(恰一個);`launchBrowser` 呼叫端未自給語系時送出之 args 為八旗標＋`opt.args`;呼叫端自給語系時為「六旗標＋`--disable-smooth-scrolling`＋`opt.args`」(旗標組去語系之七項);呼叫端以 `opt.args` 給 `--enable-smooth-scrolling`(附加於旗標組之後)可開啟.
+- 實測(本機 Chromium 159、headless shell):預設即非平滑(Ctrl+End、Ctrl+Home、PageDown、滾輪、`scrollTo({behavior:'smooth'})`、CSS `scroll-behavior:smooth` 皆即時到位,有無本旗標之位置序列相同);加 `--enable-smooth-scrolling` 才出現中間位置(同 `e2e-launchBrowserScroll` 之對照組).故於本機**無行為差異**,標準圖預期 0 改變;旗標之作用是使確定性不依賴預設值與主機設定(使用端環境曾實測動畫為開).
+- 測試:`[LB00]`(契約值 `FULL`、順序、恰一個、凍結)、`[LB01]`、`[LB02]`、`[LB02b]`、`[LB02d]`、`[LB07]`(真命令列含該旗標)、`[LB07c]`、`[LB09]`、`[LB09c]`、`[LB10]`、`[LB12]`;`e2e-launchBrowserScroll` `[SS01]`(預設啟動之鍵盤捲動無中間位置)、`[SS02]`(對照組:開啟平滑捲動時量測得到中間位置,證明 `[SS01]` 之量測有鑑別力).**`[SS01]` 於旗標有無下皆綠(本機預設已為非平滑),旗標之存在由 `[LB00]`、`[LB07]` 守住**——不宣稱 `[SS01]` 為此旗標之修前紅.
+
 ## 2. 改動範圍 → 測試檔
 
 | 改動範圍 | 受影響之測試檔 |
 |---|---|
-| `src/launchBrowser.mjs`、`src/chromiumLaunchArgs.mjs`、`package.json` 之 w-playwright 版本 | `api-launchBrowserWiring`、全部 e2e 檔(`e2e-browserPrimitives`、`e2e-captureEquivalence`、`e2e-itemsUnionBoxGraphics`、`e2e-launchBrowserLang`、`e2e-portInImage`、`e2e-probeStuckTooltip`、`e2e-waitDrawerReady`;皆經 `launchBrowser`)、`unit-WPackageToolsE2e`;輔助 `test/tools/withHostLang.mjs`、`test/tools/launchBrowserCmdline.mjs` |
+| `src/launchBrowser.mjs`、`src/chromiumLaunchArgs.mjs`、`package.json` 之 w-playwright 版本 | `api-launchBrowserWiring`、全部 e2e 檔(`e2e-browserPrimitives`、`e2e-captureEquivalence`、`e2e-itemsUnionBoxGraphics`、`e2e-launchBrowserLang`、`e2e-launchBrowserScroll`、`e2e-portInImage`、`e2e-probeStuckTooltip`、`e2e-waitDrawerReady`;皆經 `launchBrowser`)、`unit-WPackageToolsE2e`;輔助 `test/tools/withHostLang.mjs`、`test/tools/launchBrowserCmdline.mjs` |
 | `src/WPackageToolsE2e.mjs`(入口之鍵) | `unit-WPackageToolsE2e` |
 | 截圖、量框、等待類原語 | 對應之 e2e 檔(見 `README.md` §6) |
 | 埠、行程、分組多開 | `unit-*`、`api-*` 之對應檔(`rulebook_port.md`、`rulebook_shard.md`) |

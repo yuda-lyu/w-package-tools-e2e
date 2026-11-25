@@ -62,8 +62,20 @@ let SIX = [
 let LANG_SW = '--lang=zh-TW'
 
 
-//SEVEN, 旗標組全體(六旗標原序在前, 語系旗標在末); launchBrowser 於呼叫端未自給語系時送出之 args 前綴
+//SEVEN, 六旗標＋語系旗標(第 585 項時之旗標組全體; 排程第 636 項 ⑦ 於其後附加 SMOOTH, 故為旗標組之前七項)
 let SEVEN = [...SIX, LANG_SW]
+
+
+//SMOOTH, 關閉平滑捲動之旗標(排程第 636 項 ⑦: 鍵盤與滾輪之捲動即時到位, 測試不因動畫相位而時序競賽; 附於旗標組之末, 獨立於 src/chromiumLaunchArgs.mjs)
+let SMOOTH = '--disable-smooth-scrolling'
+
+
+//FULL, 旗標組全體(八項: 六旗標、語系旗標、SMOOTH); launchBrowser 於呼叫端未自給語系時送出之 args 前綴
+let FULL = [...SEVEN, SMOOTH]
+
+
+//BASE, 旗標組去掉語系旗標之七項(六旗標、SMOOTH); launchBrowser 於呼叫端自給語系時送出之 args 前綴
+let BASE = [...SIX, SMOOTH]
 
 
 //isLangArg, 是否為語系開關(去前置連字號、轉小寫、取等號之前為 lang; 同 w-playwright 之辨識, 獨立實作供斷言用)
@@ -159,22 +171,25 @@ describe('launchBrowser 經 w-playwright(接線)', function() {
         pending.clear()
     })
 
-    it('[LB00] 旗標組之內容為確定性渲染之契約值: 六旗標原序在前、語系旗標--lang=zh-TW在末、凍結(不以受測陣列自比)', function() {
-        //R-LB-6: 旗標組為七項(六旗標＋語系旗標), 其餘六旗標與順序不變, 語系旗標恰一個
-        assert.strict.deepEqual([...chromiumLaunchArgs], SEVEN)
+    it('[LB00] 旗標組之內容為確定性渲染之契約值: 六旗標原序在前、語系旗標--lang=zh-TW第七、--disable-smooth-scrolling在末、凍結(不以受測陣列自比)', function() {
+        //R-LB-6、R-LB-7: 旗標組為八項(六旗標＋語系旗標＋關閉平滑捲動), 前七項與順序不變, 語系旗標恰一個、關閉平滑捲動恰一個且為最後一項
+        assert.strict.deepEqual([...chromiumLaunchArgs], FULL)
         assert.strict.deepEqual([...chromiumLaunchArgs].slice(0, 6), SIX)
-        assert.strict.equal(chromiumLaunchArgs.length, 7)
+        assert.strict.deepEqual([...chromiumLaunchArgs].slice(0, 7), SEVEN)
+        assert.strict.equal(chromiumLaunchArgs.length, 8)
+        assert.strict.equal(chromiumLaunchArgs[chromiumLaunchArgs.length - 1], SMOOTH)
+        assert.strict.deepEqual(chromiumLaunchArgs.filter((a) => switchName(a) === 'disable-smooth-scrolling'), [SMOOTH])
         assert.strict.equal(Object.isFrozen(chromiumLaunchArgs), true)
         assert.strict.deepEqual(chromiumLaunchArgs.filter(isLangArg), [LANG_SW])
     })
 
-    it('[LB01] 未給opt: 呼叫wpw.launchChromium恰1次(headless、autoInstall、installDeps為true, args為七旗標); 替身恰1次, 合併後args為七旗標＋唯一之--disable-features(含Playwright預設與守門功能), ignoreDefaultArgs去掉Playwright預設串', async function() {
+    it('[LB01] 未給opt: 呼叫wpw.launchChromium恰1次(headless、autoInstall、installDeps為true, args為八旗標); 替身恰1次, 合併後args為八旗標＋唯一之--disable-features(含Playwright預設與守門功能), ignoreDefaultArgs去掉Playwright預設串', async function() {
         await withSpy(async (raw) => {
             await withFake(async () => stub, async (calls) => {
                 let r = await launchBrowser()
 
-                //R-LB-1: launchBrowser 之唯一啟動為 wpw.launchChromium, 選項為 { headless:true, autoInstall:true, installDeps:true, ...opt, args:[...七旗標, ...opt.args] }
-                assert.strict.deepEqual(raw, [{ headless: true, autoInstall: true, installDeps: true, args: [...SEVEN] }])
+                //R-LB-1: launchBrowser 之唯一啟動為 wpw.launchChromium, 選項為 { headless:true, autoInstall:true, installDeps:true, ...opt, args:[...八旗標, ...opt.args] }
+                assert.strict.deepEqual(raw, [{ headless: true, autoInstall: true, installDeps: true, args: [...FULL] }])
 
                 //R-LB-2: 經 w-playwright 之 BrowserType(替身被呼叫, 依賴樹僅一份 w-playwright)
                 assert.strict.equal(calls.length, 1)
@@ -182,10 +197,10 @@ describe('launchBrowser 經 w-playwright(接線)', function() {
                 let o = calls[0]
                 assert.strict.equal(o.headless, true)
 
-                //R-LB-2、R-LB-6: 七旗標原序在前(語系旗標已在, w-playwright 不另補第二個 --lang), 合併之 --disable-features 為最後一個元素且唯一
-                assert.strict.deepEqual(o.args.slice(0, 7), [...SEVEN])
+                //R-LB-2、R-LB-6、R-LB-7: 八旗標原序在前(語系旗標已在, w-playwright 不另補第二個 --lang), 合併之 --disable-features 為最後一個元素且唯一
+                assert.strict.deepEqual(o.args.slice(0, 8), [...FULL])
                 assert.strict.deepEqual(o.args.filter(isLangArg), [LANG_SW])
-                assert.strict.equal(o.args.length, 8)
+                assert.strict.equal(o.args.length, 9)
                 let dis = disableArgs(o.args)
                 assert.strict.equal(dis.length, 1)
                 assert.strict.equal(o.args[o.args.length - 1], dis[0])
@@ -200,19 +215,19 @@ describe('launchBrowser 經 w-playwright(接線)', function() {
         })
     })
 
-    it('[LB02] opt.args附加於六旗標之後、呼叫端之--disable-features吸收進同一串; 其餘鍵原樣; opt.autoInstall可覆寫', async function() {
+    it('[LB02] opt.args附加於旗標組之後(自給語系者旗標組去語系)、呼叫端之--disable-features吸收進同一串; 其餘鍵原樣; opt.autoInstall可覆寫', async function() {
         await withSpy(async (raw) => {
             await withFake(async () => stub, async (calls) => {
                 await launchBrowser({ args: ['--lang=en-US', '--disable-features=Translate,SomeCallerFeature'], timeout: 12345, autoInstall: false })
 
-                //R-LB-1: ...opt 在預設之後(呼叫端可覆寫 autoInstall), args 為六旗標＋opt.args
-                assert.strict.deepEqual(raw, [{ headless: true, autoInstall: false, installDeps: true, timeout: 12345, args: [...SIX, '--lang=en-US', '--disable-features=Translate,SomeCallerFeature'] }])
+                //R-LB-1: ...opt 在預設之後(呼叫端可覆寫 autoInstall), args 為七旗標(六旗標＋關閉平滑捲動; 呼叫端自給語系故不帶旗標組之語系)＋opt.args
+                assert.strict.deepEqual(raw, [{ headless: true, autoInstall: false, installDeps: true, timeout: 12345, args: [...BASE, '--lang=en-US', '--disable-features=Translate,SomeCallerFeature'] }])
 
                 //R-LB-2: 呼叫端之功能開關被吸收, 命令列仍只有一串
                 assert.strict.equal(calls.length, 1)
                 let o = calls[0]
                 assert.strict.equal(o.timeout, 12345)
-                assert.strict.deepEqual(o.args.slice(0, 7), [...SIX, '--lang=en-US'])
+                assert.strict.deepEqual(o.args.slice(0, 8), [...BASE, '--lang=en-US'])
                 let dis = disableArgs(o.args)
                 assert.strict.equal(dis.length, 1)
                 assert.strict.equal(o.args[o.args.length - 1], dis[0])
@@ -224,13 +239,13 @@ describe('launchBrowser 經 w-playwright(接線)', function() {
         })
     })
 
-    it('[LB02b] opt.args非陣列時忽略, 只帶七旗標(行為不變; 非陣列之--lang字串不算呼叫端自給語系, 仍用--lang=zh-TW)', async function() {
+    it('[LB02b] opt.args非陣列時忽略, 只帶八旗標(行為不變; 非陣列之--lang字串不算呼叫端自給語系, 仍用--lang=zh-TW)', async function() {
         await withSpy(async (raw) => {
             await withFake(async () => stub, async (calls) => {
                 await launchBrowser({ args: '--lang=en-US' })
-                assert.strict.deepEqual(raw[0].args, [...SEVEN])
+                assert.strict.deepEqual(raw[0].args, [...FULL])
                 assert.strict.equal(calls.length, 1)
-                assert.strict.deepEqual(calls[0].args.slice(0, 7), [...SEVEN])
+                assert.strict.deepEqual(calls[0].args.slice(0, 8), [...FULL])
                 assert.strict.deepEqual(calls[0].args.filter(isLangArg), [LANG_SW])
                 assert.strict.equal(disableArgs(calls[0].args).length, 1)
             })
@@ -265,7 +280,7 @@ describe('launchBrowser 經 w-playwright(接線)', function() {
             let r = await launchBrowser({ headless: false, channel: 'chrome', executablePath: 'C:\\x\\chrome.exe', autoInstall: false, installDeps: false, timeout: 5000, args: ['--lang=en-US'] })
             assert.strict.equal(r, stub)
             //R-LB-1: ...opt 在預設之後, 有效值原樣送出
-            assert.strict.deepEqual(raw, [{ headless: false, channel: 'chrome', executablePath: 'C:\\x\\chrome.exe', autoInstall: false, installDeps: false, timeout: 5000, args: [...SIX, '--lang=en-US'] }])
+            assert.strict.deepEqual(raw, [{ headless: false, channel: 'chrome', executablePath: 'C:\\x\\chrome.exe', autoInstall: false, installDeps: false, timeout: 5000, args: [...BASE, '--lang=en-US'] }])
         }, false)
     })
 
@@ -288,7 +303,7 @@ describe('launchBrowser 經 w-playwright(接線)', function() {
             assert.strict.equal(calls.length, 1)
             let o = calls[0]
             //R-LB-4(行為變更): 原為 Playwright 拋錯; 現為整個 args 視為 [](守門照加); 七旗標皆不在
-            assert.strict.deepEqual(SIX.filter((a) => o.args.includes(a)), [])
+            assert.strict.deepEqual(BASE.filter((a) => o.args.includes(a)), [], '六旗標與關閉平滑捲動皆隨整個 args 捨棄')
             //R-LB-6: --lang=zh-TW 隨整個 args 捨棄(此時失去確定性語系, README §5); w-playwright 之預設語系(R-PW-LANG: 呼叫端 args 無語系開關時補主機系統語系)補入主機語系
             assert.strict.equal(o.args.includes(LANG_SW), false)
             assert.strict.deepEqual(o.args.filter(isLangArg), ['--lang=de-DE'])
@@ -365,15 +380,15 @@ describe('launchBrowser 經 w-playwright(接線)', function() {
         return { r, toks }
     }
 
-    it('[LB07] 不掛替身之真路徑(子行程; 模擬主機系統語系為en-US): 實際執行檔為headless shell; 實際命令列恰一個--disable-features, 其功能集合＝Playwright預設∪守門; 七旗標皆在命令列, 語系開關恰一個且為--lang=zh-TW(不隨主機語系)', async function() {
+    it('[LB07] 不掛替身之真路徑(子行程; 模擬主機系統語系為en-US): 實際執行檔為headless shell; 實際命令列恰一個--disable-features, 其功能集合＝Playwright預設∪守門; 八旗標皆在命令列, 語系開關恰一個且為--lang=zh-TW(不隨主機語系)', async function() {
         let { r, toks } = await runCmdline(undefined, 'en-US')
 
-        //R-LB-3: 實際命令列恰一個 --disable-features, 其集合＝Playwright 預設∪守門; 七旗標皆在
+        //R-LB-3、R-LB-7: 實際命令列恰一個 --disable-features, 其集合＝Playwright 預設∪守門; 八旗標(含 --disable-smooth-scrolling)皆在
         let dis = disableArgs(toks)
         assert.strict.equal(dis.length, 1)
         let feats = featuresOf(dis[0])
         assert.strict.deepEqual([...new Set(feats)].sort(), [...new Set([...info.defaultDisableFeatures, GUARD])].sort())
-        assert.strict.deepEqual(SEVEN.filter((a) => !toks.includes(a)), [])
+        assert.strict.deepEqual(FULL.filter((a) => !toks.includes(a)), [])
 
         //R-LB-6: 實際命令列之語系開關恰一個、為 --lang=zh-TW(不因 w-playwright 之主機語系預設而多一個或換值), 頁面 navigator.language 為 zh-TW
         assert.strict.deepEqual(toks.filter(isLangArg), [LANG_SW])
@@ -386,7 +401,7 @@ describe('launchBrowser 經 w-playwright(接線)', function() {
         //R-LB-6: 恰一個 --lang, 值為呼叫端所給; 旗標組之 --lang=zh-TW 不在
         assert.strict.deepEqual(toks.filter(isLangArg), ['--lang=en-US'])
         assert.strict.equal(toks.includes(LANG_SW), false)
-        assert.strict.deepEqual(SIX.filter((a) => !toks.includes(a)), [])
+        assert.strict.deepEqual(BASE.filter((a) => !toks.includes(a)), [])
         assert.strict.equal(disableArgs(toks).length, 1)
         assert.strict.equal(r.lang, 'en-US')
     })
@@ -483,14 +498,14 @@ describe('launchBrowser 經 w-playwright(接線)', function() {
             let args = await finalArgs({ args: [s] })
             //R-LB-6: 語系開關恰一個、為呼叫端所給(以呼叫端為準); 同名開關不因旗標組而重複
             assert.strict.deepEqual(args.filter(isLangArg), [s], `spelling ${s}`)
-            //R-LB-6: 六旗標原序在前, 呼叫端 args 緊隨其後(w-playwright 不移動呼叫端之語系開關)
-            assert.strict.deepEqual(args.slice(0, 7), [...SIX, s], `order for ${s}`)
+            //R-LB-6、R-LB-7: 六旗標與關閉平滑捲動原序在前(旗標組去語系), 呼叫端 args 緊隨其後(w-playwright 不移動呼叫端之語系開關)
+            assert.strict.deepEqual(args.slice(0, 8), [...BASE, s], `order for ${s}`)
             assert.strict.equal(disableArgs(args).length, 1)
         }
 
         //呼叫端 args 夾其他旗標時, 順序原樣(六旗標 → 呼叫端 args), 語系開關仍唯一
         let args = await finalArgs({ args: ['--window-size=800,600', '--lang=en-US', '--mute-audio'] })
-        assert.strict.deepEqual(args.slice(0, 9), [...SIX, '--window-size=800,600', '--lang=en-US', '--mute-audio'])
+        assert.strict.deepEqual(args.slice(0, 10), [...BASE, '--window-size=800,600', '--lang=en-US', '--mute-audio'])
         assert.strict.deepEqual(args.filter(isLangArg), ['--lang=en-US'])
     })
 
@@ -502,7 +517,7 @@ describe('launchBrowser 經 w-playwright(接線)', function() {
     it('[LB09c] 非語系開關之相近旗標(--language=、--lang-x=)不算呼叫端自給語系: 旗標組之--lang=zh-TW照帶, 呼叫端旗標原樣保留', async function() {
         for (let s of ['--language=en-US', '--lang-x=1', '--no-lang']) {
             let args = await finalArgs({ args: [s] })
-            assert.strict.deepEqual(args.slice(0, 8), [...SEVEN, s], `near-miss ${s}`)
+            assert.strict.deepEqual(args.slice(0, 9), [...FULL, s], `near-miss ${s}`)
             assert.strict.deepEqual(args.filter(isLangArg), [LANG_SW], `near-miss ${s}`)
         }
     })
@@ -538,12 +553,12 @@ describe('launchBrowser 經 w-playwright(接線)', function() {
             if (valid) {
                 //R-LB-6: 呼叫端之 opt.lang 為準, 旗標組之 --lang=zh-TW 不帶, 命令列恰一個
                 assert.strict.deepEqual(langArgs({ args }), [`--lang=${v}`], `opt.lang ${v}`)
-                assert.strict.deepEqual(args.slice(0, 6), [...SIX])
+                assert.strict.deepEqual(args.slice(0, 7), [...BASE])
             }
             else {
                 //R-LB-6: 無效值視為未給, 仍用旗標組之 --lang=zh-TW(不退回主機語系)
                 assert.strict.deepEqual(langArgs({ args }), [LANG_SW], `invalid opt.lang ${JSON.stringify(v)}`)
-                assert.strict.deepEqual(args.slice(0, 7), [...SEVEN])
+                assert.strict.deepEqual(args.slice(0, 8), [...FULL])
             }
         }
 
@@ -556,8 +571,8 @@ describe('launchBrowser 經 w-playwright(接線)', function() {
         //false: 不帶任何 --lang(呼叫端明示不要; 與改版前之 opt.lang:false 行為相同)
         let a = await finalArgs({ lang: false })
         assert.strict.deepEqual(langArgs({ args: a }), [])
-        assert.strict.deepEqual(a.slice(0, 6), [...SIX])
-        assert.strict.equal(a.length, 7)
+        assert.strict.deepEqual(a.slice(0, 7), [...BASE])
+        assert.strict.equal(a.length, 8)
     })
 
     it('[LB11] 優先序: opt.args之語系開關優先於opt.lang(opt.lang被w-playwright忽略), opt.lang為false時opt.args之語系開關仍保留; opt.args非陣列時不算自給語系', async function() {
@@ -574,7 +589,7 @@ describe('launchBrowser 經 w-playwright(接線)', function() {
         assert.strict.deepEqual(langArgs({ args: a4 }), [LANG_SW])
     })
 
-    it('[LB12] 送給wpw.launchChromium之原始選項: 呼叫端自給語系時args不含旗標組之--lang(opt.lang原樣保留於選項), 未自給時為七旗標; 不改動呼叫端之args陣列與凍結之旗標組', async function() {
+    it('[LB12] 送給wpw.launchChromium之原始選項: 呼叫端自給語系時args不含旗標組之--lang(opt.lang原樣保留於選項), 未自給時為八旗標; 不改動呼叫端之args陣列與凍結之旗標組', async function() {
         await withSpy(async (raw) => {
             let mine = ['--lang=en-US']
             await launchBrowser({ args: mine })
@@ -585,18 +600,18 @@ describe('launchBrowser 經 w-playwright(接線)', function() {
             assert.strict.equal(raw.length, 5)
 
             //R-LB-1、R-LB-6
-            assert.strict.deepEqual(raw[0].args, [...SIX, '--lang=en-US'])
-            assert.strict.deepEqual(raw[1].args, [...SIX])
+            assert.strict.deepEqual(raw[0].args, [...BASE, '--lang=en-US'])
+            assert.strict.deepEqual(raw[1].args, [...BASE])
             assert.strict.equal(raw[1].lang, 'ja-JP')
-            assert.strict.deepEqual(raw[2].args, [...SIX])
+            assert.strict.deepEqual(raw[2].args, [...BASE])
             assert.strict.equal(raw[2].lang, false)
-            assert.strict.deepEqual(raw[3].args, [...SEVEN])
+            assert.strict.deepEqual(raw[3].args, [...FULL])
             assert.strict.equal(raw[3].lang, 'bad lang')
-            assert.strict.deepEqual(raw[4].args, [...SEVEN, '--window-size=800,600'])
+            assert.strict.deepEqual(raw[4].args, [...FULL, '--window-size=800,600'])
 
             //呼叫端之陣列與旗標組不被改動
             assert.strict.deepEqual(mine, ['--lang=en-US'])
-            assert.strict.deepEqual([...chromiumLaunchArgs], SEVEN)
+            assert.strict.deepEqual([...chromiumLaunchArgs], FULL)
             assert.strict.equal(Object.isFrozen(chromiumLaunchArgs), true)
         }, false)
     })

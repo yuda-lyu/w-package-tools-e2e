@@ -18,7 +18,7 @@ To view documentation or get support, visit [docs](https://yuda-lyu.github.io/w-
 
 npm i w-package-tools-e2e
 
-//launchBrowser: e2e測試端、標準圖產製端與探測腳本之唯一啟動出口(經w-playwright啟動無頭Chromium＋確定性渲染旗標組〔六旗標＋--lang=zh-TW〕; 瀏覽器缺檔時先安裝一次)
+//launchBrowser: e2e測試端、標準圖產製端與探測腳本之唯一啟動出口(經w-playwright啟動無頭Chromium＋確定性渲染旗標組〔六旗標＋--lang=zh-TW＋--disable-smooth-scrolling，共八項〕; 瀏覽器缺檔時先安裝一次)
 import launchBrowser from 'w-package-tools-e2e/src/launchBrowser.mjs'
 let browser = await launchBrowser()
 
@@ -61,7 +61,7 @@ let browser2 = await wpte.launchBrowser()
 
 | 檔 | 用途 | 狀態 |
 |---|---|---|
-| `chromiumLaunchArgs` | 確定性渲染旗標組：六旗標＋語系旗標 `--lang=zh-TW`（共七項，凍結陣列，C1；語系旗標 2026-11-21 起，見 §5） | sso 實跑；`api-launchBrowserWiring`（`[LB00]`）、`e2e-launchBrowserLang` |
+| `chromiumLaunchArgs` | 確定性渲染旗標組：六旗標＋語系旗標 `--lang=zh-TW`＋`--disable-smooth-scrolling`（共八項，凍結陣列，C1；語系旗標 2026-11-21 起、關閉平滑捲動 2026-11-25 起，見 §5） | sso 實跑；`api-launchBrowserWiring`（`[LB00]`）、`e2e-launchBrowserLang`、`e2e-launchBrowserScroll` |
 | `launchBrowser(opt)` | 唯一 launch 出口（2026-11-13 起經 w-playwright）：`wpw.launchChromium({ headless:true, autoInstall:true, installDeps:true, ...opt, args:[...旗標組, ...opt.args] })`（`opt.autoInstall`／`installDeps` 非布林值時用預設 true）；**語系（2026-11-21 起）**：預設命令列恰一個 `--lang=zh-TW`；呼叫端自給語系者（`opt.args` 含語系開關，如 `--lang=en-US`、`-lang=en-US`、`--LANG=en-US`、`--lang`；或 `opt.lang` 為語系字串或 `false`）以呼叫端為準，不帶旗標組之 `--lang`，最終命令列之語系開關恰為呼叫端所給者（`opt.args` 與 `opt.lang` 並存時以 `opt.args` 為準；`opt.lang:false` 則不帶任何 `--lang`；`opt.lang` 無效值視為未給）；w-playwright 於 args 之末合併唯一之 `--disable-features`（Playwright 預設＋守門功能 `AutofillAiWalletPrivatePasses`＋呼叫端自給者），受管瀏覽器缺檔時安裝一次再啟動；錯誤為帶 `code` 之固定詞彙錯誤（見〈Installation〉與 §5 之 2026-11-13 條） | sso 實跑、接線（`api-launchBrowserWiring`：替身與 `next()` 真啟動） |
 | `captureStable(page, opt)` | 標準圖截圖唯一入口（C6），序列見 §2.3；**2026-11-24 起**截圖前等 `<link rel=stylesheet>` 載入（`waitStyles`，預設開；逾時仍載入中或同源載入失敗時 strict 拋錯、否則印 `[style-not-ready]`；見 §5 之 2026-11-24 條） | sso 實跑、瀏覽器、`e2e-readyWaits` |
 | `waitStyleSheets(page, { timeout })` | 截圖就緒條件之一（排程第 529 項）：等 `<link rel=stylesheet>` 載入完成（`sheet` 為 null 即載入中；不含 disabled、`alternate`、無 href 者），回傳 `{ pending, failed, waitedMs }`、不拋錯；`failed`：`sheet` 留為 null 之失敗（SRI 不符等：等待中收到 error，或取回已結束而 1 秒寬限後仍 null）不論來源，`sheet` 非 null 者只判 http(s) 同源（Resource Timing 之 `responseStatus` 為 0 或 ≥ 400），跨來源與 `file:` 無從判定；已載入之頁面只多一次 `page.evaluate` | 瀏覽器（2026-11-24 新增，`e2e-readyWaits` `[RS-*]`） |
@@ -141,7 +141,7 @@ let browser2 = await wpte.launchBrowser()
 
 | 檔 | 用途 | 狀態 |
 |---|---|---|
-| `createCdnLocal(opt)` | 依清單（網址 → `{ sha256, size }`）取得外部函式庫一次、校驗、內容定址快取、跨行程只下載一次；`routeBrowser(browser\|context\|page)` 把頁面之外部網址導到本地副本、`patchFetch()` 把 Node 端 `fetch` 導到本地副本，清單以外之外部請求一律中止並記錄、`assertNoViolation(mark)` 斷言自標記起無違規（§2.13）；具名匯出時限常數 `CDN_BUDGET_MS`、`CDN_FILE_TOTAL_MS`、`CDN_LOCK_STALE_MS`、`CDN_WAIT_MS`、`CDN_HOOK_TIMEOUT_MS`、`cdnMimeOf`、`cdnNativeFetch` | 單元、真實多行程、真瀏覽器（2026-11-25 新增） |
+| `createCdnLocal(opt)` | 依清單（網址 → `{ sha256, size }`）取得外部函式庫一次、校驗、內容定址快取、跨行程只下載一次；`routeBrowser(browser\|context\|page)` 把頁面之外部網址導到本地副本、`patchFetch()` 把 Node 端 `fetch` 導到本地副本，清單以外之外部請求一律中止並記錄、`assertNoViolation(mark)` 斷言自標記起無違規；`routeLaunch(next)` 啟動出口接線、`useMocha()` mocha 接線、`opt.sources` 本機檔來源、`opt.stubs` 空腳本、`opt.loopbackPorts` 只放行指定回送埠（2026-11-25，§2.13）；具名匯出時限常數 `CDN_BUDGET_MS`、`CDN_FILE_TOTAL_MS`、`CDN_LOCK_STALE_MS`、`CDN_WAIT_MS`、`CDN_HOOK_TIMEOUT_MS`、`cdnMimeOf`、`cdnNativeFetch` | 單元、真實多行程、真瀏覽器（2026-11-25 新增） |
 | `loadCdnManifest(input)` | 讀取並檢核清單（物件或 JSON 檔路徑），回傳正規化之新物件；不合法即拋 `E_CDN_MANIFEST`（fail-closed） | 單元（2026-11-25 新增） |
 | `genCdnManifest(opt)`／`diffCdnManifest(a, b)` | 依根網址清單下載並求「相對匯入之閉包」（ESM 之 `import`／`export from`／`import()`；CSS 之 `@import`／`url()`），算 sha256 與大小產生清單；`diffCdnManifest` 比對兩份清單（`--check` 用） | 單元（夾具伺服器）、真實子行程（2026-11-25 新增） |
 | `tools/genCdnManifest.mjs`（CLI） | `node node_modules/w-package-tools-e2e/tools/genCdnManifest.mjs --roots <roots.json\|.mjs> --out <manifest.json> [--check]`（亦可重複給 `--url <網址>`）：產生清單；`--check` 重新下載並與現行清單比對，不同則列出並以離開碼 1 結束（不寫檔）；參數錯誤離開碼 2（§2.13） | 真實子行程（2026-11-25 新增） |
@@ -529,10 +529,16 @@ assert.strictEqual(await page.textContent('#url'), `http://127.0.0.1:${resolveE2
 | 跨行程只下載一次 | `<cacheDir>/.lock` 資料夾鎖（`createDirLock`）：多個 worker 同時首次取得時只有一個行程下載，其餘輪詢等候後直接採用其成果；殘留鎖（持有者行程不存在，或心跳逾 `staleMs`）由等候者原子回收並核對 token；持鎖後先清除逾 `staleMs` 之殘留暫存檔（`.part`）與墓碑資料夾 |
 | 頁面導到本地副本 | `routeBrowser(browser)`：其 `newContext`／`newPage` 建立之 context 與已存在之 context 皆掛涵蓋全部網址之路由；清單內之網址以本地副本回應（`content-type`、CORS），清單外之 http(s) 中止（`blockedbyclient`）並記錄，ws(s) 以 `routeWebSocket` 關閉並記錄；也可直接傳 context 或 page（回傳其 context）；掛失敗者還原包裝與標記，可重試；`isRouted(target)` 供使用端之啟動出口斷言「沒有漏接」 |
 | Node 端 `fetch` | `patchFetch()` 覆寫全域 `fetch`：http(s) 網址（依 fetch 自己之規則正規化：`' https://…'`、`'ht\ttps://…'`、主機大小寫皆不能繞過判定）只回本地副本，清單外拋 `E_CDN_EXTERNAL` 並記錄，清單內而本地副本不可用拋 `E_CDN_UNAVAILABLE`；回傳還原函數（可重複呼叫；被他人包在其上而無法還原時改為直通） |
-| 表外一律拋錯 | 違規記錄於實例；`browser.close()`（`routeBrowser(browser)`）與直接傳入之 `context.close()` 於關閉後有違規即拋 `E_CDN_EXTERNAL`（`failOnClose:false` 可關）；`violationMark()` 於測試前取標記、`assertNoViolation(mark)` 於測試後斷言「自標記起無新增違規」（涵蓋 `close()` 未被呼叫或其錯誤被呼叫端吞掉者）；**route 攔不到者另由 context 之 `request` 事件觀察者揭露**（放行之回送位址回 3xx 導向外部、使用端於 `routeBrowser` 之後才註冊之 `route` 以 `continue()` 放走者）——只記錄、來不及中止，測試仍因違規而失敗 |
+| 表外一律拋錯 | 違規記錄於實例；`browser.close()`（`routeBrowser(browser)`）與直接傳入之 `context.close()` 於關閉後有違規即拋 `E_CDN_EXTERNAL`（`failOnClose:false` 可關）；`violationMark()` 於測試前取標記、`assertNoViolation(mark)` 於測試後斷言「自標記起無新增違規」（涵蓋 `close()` 未被呼叫或其錯誤被呼叫端吞掉者）；**route 攔不到者另由 context 之兩個事件觀察者揭露**——`request`：清單外且非放行者（放行之回送位址回 3xx 導向外部、使用端於 `routeBrowser` 之後才註冊之 `route` 以 `continue()` 放走者）；`requestfinished`（2026-11-25 起）：**清單內之網址**之請求完成而不是由本地副本供應者（被使用端之 `route` `continue()` 放走而直達來源、自行 `fulfill` 或 `fetch()` 後轉供、重新導向至清單內網址之後續請求），理由為「未由本地副本供應」——連網時頁面照常載入、測試照過，過去只有斷網才紅——只記錄、來不及中止，測試仍因違規而失敗 |
+| 本機檔來源與空腳本 | `opt.sources`（`{ 網址: 本機檔路徑 }`）：清單內之網址改取自本機檔而不下載；**本機檔照清單之 sha256 與大小校驗後才入快取**（邊讀邊算，不符即拒收並清暫存檔，`E_CDN_SOURCE`，`err.reason` 為 `missing`〔缺檔〕、`not-file`、`unreadable`〔無法讀取：權限、占用〕、`size-mismatch`、`sha256-mismatch`、`cache-write`〔寫入快取失敗，不是來源檔之問題，原錯誤置於 `err.cause`〕；不改走下載、訊息不含路徑與 sha256）；快取已備妥者不讀本機檔，快取損毀時自本機檔重補；有本機來源者離線照常補齊；`stats().sourced` 計入。`opt.stubs`（網址字串或 `{ url, type }` 之陣列）：未釘版、測試不需其內容之外部腳本以 0 位元組之空內容供應並併入有效清單（`stats().files`、`stubs` 計入；網址已在清單內者須同為空檔，否則拋錯）——不必再預置快取檔並手補清單 |
+| 啟動出口接線 | `routeLaunch(next, ...args)`：呼叫 `next(...args)` 啟動瀏覽器，啟動後掛 `routeBrowser` 並以 `isRouted` 斷言已掛，**掛失敗時先關閉已啟動之瀏覽器再拋原錯誤**（啟動函數之替身內拋出之錯誤常被改寫為固定訊息而隱藏原因，故失敗時先把原因〔經遮蔽〕印到 stderr）；`useMocha({ install })`：於 `describe` 內註冊 `before`（`this.timeout(hookTimeoutMs)` ＋ `ensure()`，並於取得之後呼叫 `install(routeLaunch)`，其回傳之函數於 `after` 還原）、`beforeEach`／`afterEach`（每案前取標記、案後斷言無新增違規） |
 | 時限對齊 | 預設下載預算 15 分鐘（`budgetMs`）、單檔 120 秒（`fileTimeoutMs`）、殘留判定 150 秒、等候上限 17.5 分鐘（預算 ＋ 單檔上限 ＋ 30 秒收尾餘裕）；`before` 取得點須掛 `this.timeout(cdn.hookTimeoutMs)`（預設 35.5 分鐘 ＝ 等候上限 ＋ 接手為持鎖者之預算 ＋ 單檔上限 ＋ 1 分鐘），不沿用 mocha 全域之 180 秒；常數具名匯出 |
 
-**放行**：回送位址（`localhost`、`*.localhost`、`127.x.x.x`、`[::1]`）之請求不屬外部請求，原樣放行（`route.fallback()`，故使用端先註冊之 `route` 照常生效；頁面多由本機伺服器提供，不放行則連頁面本身都載不進）；`allowLoopback:false` 關閉；`allow` 明列額外放行者（RegExp，須自行錨定完整網址；或函數，**須恰回傳 `true` 才放行**——async 函數回傳之 Promise、回傳 `'yes'` 等真值、拋錯皆不放行）。`data:`、`blob:`、`file:`、`about:` 等非網路請求不處理。**清單內者優先於放行**（清單列了回送位址之網址時由本地副本回應）。
+**放行**：回送位址（`localhost`、`*.localhost`、`127.x.x.x`、`[::1]`）之請求不屬外部請求，原樣放行（`route.fallback()`，故使用端先註冊之 `route` 照常生效；頁面多由本機伺服器提供，不放行則連頁面本身都載不進）；`allow` 明列額外放行者（RegExp，須自行錨定完整網址；或函數，**須恰回傳 `true` 才放行**——async 函數回傳之 Promise、回傳 `'yes'` 等真值、拋錯皆不放行）。`data:`、`blob:`、`file:`、`about:` 等非網路請求不處理。**清單內者優先於放行**（清單列了回送位址之網址時由本地副本回應）。
+
+**`allowLoopback`（選用；預設放行任何回送位址之任何埠）**：預設放行是為了「頁面由本機伺服器提供」之常見情形，代價是頁面誤連本機其他服務時不會被記違規。依「預設拒絕」之原則，**頁面皆為 `setContent`、不連本機服務者請設 `allowLoopback:false`**（回送位址亦視為外部；需要者以 `allow` 明列）；**頁面由本機伺服器提供者請改給 `loopbackPorts: [埠…]` 只放行該些埠**（HTTP 與 ws 同一判定；網址未寫埠者依協定之預設埠：http、ws 為 80，https、wss 為 443；其餘回送位址之請求視為外部）。兩者同時給時：**`loopbackPorts` 優先**（給了者以它為準，不再看 `allowLoopback` 之「全放行」；`[]` 即不放行任何回送位址；`allow` 明列者仍另放行，取聯集）；明確給 `allowLoopback:false` 又給非空之 `loopbackPorts` 為互相矛盾，拋 `E_CDN_ARG`（不靜默擇一）；給 `allowLoopback:true` 與 `loopbackPorts` 不矛盾（仍只放行列入之埠）。`loopbackPorts` 須於啟動測試伺服器、確知埠之後才建立實例（埠自動換位之專案，其基準埠經 `reserveE2ePorts` 保留後之實際埠，見 §2.12）。
+
+**警示：本套件之 `launchBrowser` 不掛本地副本之路由。** `launchBrowser`（及 `launchChromium` 之後繼者）只負責以確定性旗標組啟動瀏覽器，不認得 `createCdnLocal`；直接用它開出來之瀏覽器**其外部請求不被攔也不被記錄**（等於漏接，限制⑥）。須於每個啟動瀏覽器之處改走 `cdn.routeLaunch(() => launchBrowser())`（或啟動後自行 `cdn.routeBrowser(browser)`），並以 `cdn.isRouted(browser)` 斷言。
 
 **用法**：
 
@@ -544,26 +550,52 @@ let cdn = createCdnLocal({ manifest: './test/tools/cdn.manifest.json' }) //cache
 cdn.patchFetch() //Node 端 fetch(測試檔載入時一次)
 
 describe('demo', function() {
-    let mark
-    before(async function() {
-        this.timeout(cdn.hookTimeoutMs) //首次需下載時之取得點
-        await cdn.ensure()
-    })
-    beforeEach(function() {
-        mark = cdn.violationMark()
-    })
-    afterEach(function() {
-        cdn.assertNoViolation(mark) //自標記起有清單外之外部請求即失敗
-    })
+    cdn.useMocha() //before 取得(時限對齊下載預算)、每案前後夾 violationMark／assertNoViolation(自標記起有清單外之外部請求即失敗)
     it('page', async function() {
-        let browser = await launchBrowser()
-        await cdn.routeBrowser(browser) //於啟動瀏覽器之處呼叫；已用 w-playwright 之 setBrowserTypeForTest 者，於其 launch 替身內呼叫
+        let browser = await cdn.routeLaunch(() => launchBrowser()) //啟動後掛路由並斷言已掛; 掛失敗時先關閉瀏覽器再拋
         let page = await browser.newPage()
         await page.setContent('<script src="https://cdn.example.com/lib@1.0.0/lib.min.js"></script>')
         await browser.close() //有違規則於關閉後拋 E_CDN_EXTERNAL
     })
 })
 ```
+
+**橋接檔範本**（使用端以 w-playwright 之 `setBrowserTypeForTest` 為單一啟動出口者；放 `test/tools/cdn.mjs`，測試檔只 `import { cdn } from './tools/cdn.mjs'`；範本之接線與「替換而非疊放」經真 w-playwright 接縫驗證，本庫 `[CE16b]`）：
+
+```js
+import path from 'path'
+import { fileURLToPath } from 'url'
+import wpw from 'w-playwright'
+import createCdnLocal from 'w-package-tools-e2e/src/createCdnLocal.mjs'
+
+const __dir = path.dirname(fileURLToPath(import.meta.url))
+
+export const cdn = createCdnLocal({
+    manifest: path.join(__dir, 'cdn.manifest.json'), //由 tools/genCdnManifest.mjs 產生並入版控
+    cacheDir: path.join(__dir, '../_cache/cdn'), //以檔案位置定位(不隨工作目錄)，各 worker 共用同一個快取與鎖；列入 .gitignore 與 .npmignore
+    allowLoopback: false, //頁面皆為 setContent 者建議關閉；頁面由本機伺服器提供者改給 loopbackPorts: [埠]
+    // sources: { '<清單內之網址>': '<本機檔路徑>' }, //該網址改取自本機檔(照清單之 sha256 校驗)
+    // stubs: ['<未釘版之外部腳本網址>'], //以空腳本供應
+})
+// cdn.patchFetch() //產品或測試有 Node 端對外 fetch 者才需要
+
+//單一啟動出口：之後任何 wpw.launchChromium() 皆經 routeLaunch。
+//  注意 setBrowserTypeForTest 為「替換」而非疊放(w-playwright 之替身堆疊以堆疊頂生效)：生效者為最後設定之替身，其內之 next() 直達真正之 BrowserType、不經先前之替身；
+//  故測試內另設之替身須各自以 cdn.routeLaunch(next) 取得瀏覽器（取代直接 next()），否則該啟動不經路由（漏接）。
+export const restoreLaunch = wpw.setBrowserTypeForTest({ launch: (o, next) => cdn.routeLaunch(next) })
+```
+
+```js
+// 測試檔: describe 內一行即得 before 取得(時限對齊下載預算)、每案前後之違規斷言
+import { cdn } from './tools/cdn.mjs'
+describe('xxx', function() {
+    cdn.useMocha()
+    it('…', async function() { /* 任何 wpw.launchChromium() 之瀏覽器皆已掛路由 */ })
+})
+// 不想於載入時設全域替身者: cdn.useMocha({ install: (routeLaunch) => wpw.setBrowserTypeForTest({ launch: (o, next) => routeLaunch(next) }) })
+```
+
+（`routeLaunch(next, ...args)` 把後續引數原樣交給 `next`——替身內以 `next(o2)` 啟動者寫 `routeLaunch(next, o2)`；漏接之盤點可在單一啟動出口以 `cdn.isRouted(browser)` 斷言，並以接線測試掃描「各測試檔之啟動替身皆經 `routeLaunch`」。）
 
 **清單之產生**（需連網，不屬 `npm test`）：
 
@@ -574,11 +606,13 @@ node node_modules/w-package-tools-e2e/tools/genCdnManifest.mjs --roots test/tool
 
 `cdn.roots.json` 為 `{ "dagre": "https://cdn.jsdelivr.net/npm/dagre@0.8.5/dist/dagre.min.js", … }`（或網址陣列；亦可用 `.mjs` 之 `default`／具名匯出 `roots`，讓產品之 CDN 網址表成為單一事實來源）。產生器對 `.mjs` 之根網址求相對匯入之閉包（chunk 式 ESM 常有上百檔）、對 `.css` 求 `@import` 與 `url()` 之相對引用；**絕對網址與協定相對網址（`//host/x`）之匯入不自動納入**（未列入 roots 即拋 `E_CDN_GEN`，請把它列入 roots）；經典（UMD）`.js` 內動態載入之資源不解析，測試時由違規紀錄揭露後補列 roots；副檔名無法判定內容類型之網址（如 `…/css2?family=…`）另記伺服器回應之 content-type 於 `type` 欄。sha256 為首次取得時之釘選值，其後之下載一律以其校驗；網址或版本改變後須重新產生並審視差異（`--check` 不寫檔）。建議使用端另寫一案核對「產品之 CDN 網址表 ＝ 清單之 roots」，使產品改版而清單未更新時測試轉紅。
 
-**選項**（K3：非預期之輸入視為未給、改用預設；**`manifest`、`cacheDir`、`allow` 為安全相關，給了而無效即拋錯**：清單不合法 `E_CDN_MANIFEST`，`cacheDir`、`allow` 無效或未給 `manifest` 為 `E_CDN_ARG`）：`manifest`（必給，物件或路徑）、`cacheDir`、`offline`（未給時看環境變數 `W_CDN_OFFLINE`＝`1`／`true`；離線缺檔不連網，直接拋 `E_CDN_OFFLINE_MISSING`，`err.missing` 為 `[{ url, sha256, size, cachePath }]`，訊息只含檔名）、`budgetMs`、`fileTimeoutMs`、`staleMs`、`waitMs`、`pollMs`、`concurrency`、`maxAttempts`、`retryDelayMs`、`fetch`（下載用，供測試以夾具伺服器驗取得流程）、`allowLoopback`、`allow`、`onTrace`（凍結之事件物件 `{ type, … }`：`lock-acquired`、`lock-wait`、`lock-poll`、`lock-stale-judged`〔判定殘留、尚未回收；同步呼叫之回調可於此重現交錯〕、`lock-stale-reclaimed`、`swept`、`downloaded`、`ready`、`served`、`violation`，規格同 wsemi `getTrace`）。網址於訊息與違規紀錄中經 wsemi `maskDiagText` 遮蔽憑證與查詢秘密值。
+**選項**（K3：非預期之輸入視為未給、改用預設；**`manifest`、`cacheDir`、`allow`、`sources`、`stubs`、`loopbackPorts` 為安全相關（影響信任範圍、檔案落點或檔案來源），給了而無效即拋錯**：清單不合法 `E_CDN_MANIFEST`，其餘無效或未給 `manifest` 為 `E_CDN_ARG`）：`manifest`（必給，物件或路徑）、`cacheDir`、`sources`、`stubs`、`loopbackPorts`、`offline`（未給時看環境變數 `W_CDN_OFFLINE`＝`1`／`true`；離線缺檔不連網，直接拋 `E_CDN_OFFLINE_MISSING`，`err.missing` 為 `[{ url, sha256, size, cachePath }]`，訊息只含檔名）、`budgetMs`、`fileTimeoutMs`、`staleMs`、`waitMs`、`pollMs`、`concurrency`、`maxAttempts`、`retryDelayMs`、`fetch`（下載用，供測試以夾具伺服器驗取得流程）、`allowLoopback`、`allow`、`onTrace`（凍結之事件物件 `{ type, … }`：`lock-acquired`、`lock-wait`、`lock-poll`、`lock-stale-judged`〔判定殘留、尚未回收；同步呼叫之回調可於此重現交錯〕、`lock-stale-reclaimed`、`swept`、`downloaded`、`sourced`〔自本機來源補入一個內容，`kind` 為 `file` 或 `empty`〕、`ready`、`served`、`violation`、`route-launch-failed`〔`routeLaunch` 掛路由失敗，含 `code`〕，規格同 wsemi `getTrace`）。`stats()` 另含 `sourced`（自本機來源補入之內容數）與 `stubs`（空腳本網址數）。網址於訊息與違規紀錄中經 wsemi `maskDiagText` 遮蔽憑證與查詢秘密值。
 
 **限制**（攔不到或只能記錄者；標有測試編號者為本庫之真瀏覽器測試，其餘為獨立審查者以真瀏覽器與本機伺服器之實測或讀碼）：
 ①取得（`ensure`）於實例內只做一次，失敗亦記住（不讓每個請求重跑整個預算）。
-②**只記錄、來不及中止**：放行之回送位址回 3xx 導向外部（`[CE12]`）、使用端於 `routeBrowser` 之後才註冊之 `route` 以 `continue()` 放走者（`[CE13]`）——由 `request` 事件之觀察者記為違規，請求本身已送出，測試因違規而失敗；使用端自己之 `route` 請在 `routeBrowser` 之前註冊（`fallback()` 才串得起來，`[CE10]`）。
+②**只記錄、來不及中止**：放行之回送位址回 3xx 導向外部（`[CE12]`）、使用端於 `routeBrowser` 之後才註冊之 `route` 以 `continue()` 放走者（清單外之網址 `[CE13]`；**清單內之網址 `[CE15a]`、page 層 `route` `[CE15d]`、自行 `fulfill` `[CE15e]`**，2026-11-25 起由 `requestfinished` 之觀察者記為「未由本地副本供應」）——請求本身已送出，測試因違規而失敗；使用端自己之 **context 層** `route` 請在 `routeBrowser` 之前註冊（先註冊者晚執行，本處理器先 `fulfill`、其 `continue()` 不會被執行，`[CE15c]`；於其後註冊者須 `fallback()` 才串得起來，`[CE15b]`、`[CE10]`）；**page 層** `page.route` 恆先於 context 層（不論註冊先後），對清單內之網址只能 `fallback()`（`continue()` 即直達來源，`[CE15d]`）。直達來源而連線失敗者（斷網）只發 `requestfailed`，分不出「使用端自己 abort」，不記（頁面載入失敗，測試本身即紅）。
+②之一 **故障模擬不誤報**：使用端為驗證載入失敗之處理而對清單內之腳本 `abort()`、或 `fulfill` HTTP 錯誤狀態（404、503 等，含自訂標頭）時，Chromium 對 `<script>`／`<link>` 子資源發 `requestfailed`（非完成），不記違規（`[CE15g]`，Playwright 1.65.1／Chromium 159 之實測）；`fulfill` 200 之自有內容與 `route.fetch()` 後轉供（`[CE15e]`、`[CE15h]`）會被記——前者讀到之內容不是清單釘選者，後者實際連了來源。對 `fetch()`／XHR 發出、被 `fulfill` 錯誤狀態之請求，Chromium 視為完成（非失敗），**會被記**（`[CE15i]`；故障模擬若走 `fetch`／XHR，於該 `describe` 以 `useMocha({ guard: false })` 暫不夾斷言，自行承擔）。
+②之二 **違規於請求完成時才記**（`requestfinished` 型）：`request` 型違規於請求發出時即記，`requestfinished` 型須待該請求完成；測試於 `page.goto`、`setContent`（`waitUntil: 'load'`）返回時，載入階段之 `<script>`／`<link>` 子資源已完成，但 `evaluate` 中未 `await` 之 `fetch()`、圖片等非阻塞請求之完成事件可能晚於 `assertNoViolation`（`useMocha` 之 `afterEach` 同）——須驗證此類請求者，測試內先等該請求完成（例如 `page.waitForResponse`）再斷言；`browser.close()` 時尚未完成者亦不記。
 ③**攔不到亦無事件**：SharedWorker 之請求、任何 Worker 內之 WebSocket（頁面自己之 WebSocket 會被攔，`[CE07]`）、`context.request`（`APIRequestContext`）之請求；專用 Worker 之 HTTP 請求會被攔（`[CE11]`）。頁面會用到者請使用端自行避免或以 `allow` 外之方式驗證。
 ④Service Worker 處理之請求：Playwright 文件註明不經 `route`；獨立審查者於 Playwright 1.65 實測 Service Worker 內之 `fetch` 仍被攔下、`serviceWorkers: 'block'` 有效（本庫無測試）；不作保證，頁面會註冊 Service Worker 者建 context 時傳 `serviceWorkers: 'block'`。
 ⑤**Node 端只覆寫全域 `fetch`**：先於 `patchFetch()` 保存之 `fetch` 參考、`http`／`https` 模組、`undici`、全域 `WebSocket`／`EventSource` 等其他出口不攔；放行之回送位址回 3xx 導向外部時，其後續請求由 undici 內部處理，不經補丁（瀏覽器端有 `request` 事件觀察者，Node 端沒有）。
@@ -586,7 +620,8 @@ node node_modules/w-package-tools-e2e/tools/genCdnManifest.mjs --roots test/tool
 ⑦ws(s) 之攔截需 Playwright 之 `routeWebSocket`（較舊之版本只掛 HTTP 路由）。
 ⑧判定回收鎖與改名之間有極小空窗，其後果至多為持有新鎖者失去鎖而重複下載（內容仍經 sha256 校驗與原子更名，不會損檔）；以持有者行程（PID）與心跳判定殘留：PID 重用者只會使判定偏向「仍存活」，心跳逾時後仍會被回收；PID 命名空間不同者（WSL、容器共用快取資料夾）可能把活鎖判為已結束（未測）。
 ⑨快取資料夾須各行程相同才能共用（預設相對 `process.cwd()`，測試一律以專案根為 cwd 執行）。
-⑩`allowLoopback` 預設放行代表本機伺服器之回應不受清單約束，需要連本機服務也禁止者設 `allowLoopback:false` 並以 `allow` 明列。
+⑩`allowLoopback` 預設放行代表本機伺服器之回應不受清單約束（任何埠）；只放行自己之服務者改給 `loopbackPorts`，需要連本機服務也禁止者設 `allowLoopback:false` 並以 `allow` 明列（優先序與矛盾之處置見上〈`allowLoopback`〉）。
+⑪`opt.sources` 之本機檔只在「快取缺或損毀」時才讀（快取已備妥者不讀，故本機檔其後被改不影響測試，亦不會被偵測）；同內容（sha256 相同）有多個本機來源者，補入時**全部逐一校驗**、任一不符即拒收（不因宣告順序擇一，`[CS06b]`）；`routeLaunch` 只管「經它啟動者」，未經它啟動者仍屬漏接（限制⑥）。
 
 ## 3. 採用步驟（以 w-web-sso 為例）
 
@@ -637,6 +672,13 @@ let captureStableWithBox = (page, target, opts = {}) => pkgCaptureStableWithBox(
 
 ## 5. 改版須知：哪些變更會動到使用端之標準圖
 
+### 行為變更（2026-11-25，`createCdnLocal` 偵測清單內網址被使用端 route 放走；`opt.sources`、`opt.stubs`、`opt.loopbackPorts`、`routeLaunch`、`useMocha`；旗標組加 `--disable-smooth-scrolling`）
+
+- **破壞性（偵測變嚴；原通過之使用端可能轉紅）**：`createCdnLocal` 之觀察者過去只記「清單外」之外部請求，**清單內之網址被使用端自設之 `route` 以 `continue()` 放走**（請求直達真實來源；連網時頁面照常載入、測試照過，斷網才紅）不被偵測。現於請求完成時（`requestfinished`）核對：清單內之網址之請求若不是由本地副本供應，記為違規（理由「清單內之網址未由本地副本供應」），`assertNoViolation` 與 `close()` 照常拋 `E_CDN_EXTERNAL`。**受影響者**：使用端之 `route`（context 層或 page 層）對清單內之網址 `continue()`、自行 `fulfill`、或 `fetch()` 後轉供者——改為 `fallback()`（交還本處理器）；context 層之 `route` 亦可於 `routeBrowser` 之前註冊（後註冊者先執行，先註冊者看不到已被本處理器 `fulfill` 之請求），page 層 `page.route` 恆先於 context 層、只能 `fallback()`。**不受影響**：未自設 `route`、其 `route` 不涵蓋清單內網址、對清單內之腳本／樣式表 `abort()` 或 `fulfill` HTTP 錯誤狀態之故障模擬（Chromium 發 `requestfailed`，見 §2.13 限制②之一）。偵測方式：搜測試端之 `route(` 處理器中之 `.continue(`、`.fulfill(`（200 之自有內容）、`.fetch(`。不提供關閉之選項（不做向後相容）；確須對清單內網址 `continue()` 者，改於測試內以 `fallback()` 並以 `opt.sources`／`opt.stubs` 供應所需內容，或在該 describe 以 `useMocha({ guard: false })` 暫不夾斷言（自行承擔）。
+- **新增（不改既有行為）**：`createCdnLocal` 之 `opt.sources`（清單內之網址取自本機檔，照清單校驗）、`opt.stubs`（空腳本）、`opt.loopbackPorts`（只放行指定回送埠；與 `allowLoopback` 之優先序見 §2.13）、實例方法 `routeLaunch(next, ...args)`、`useMocha(opt)`；`stats()` 增 `sourced`、`stubs` 兩鍵（以 `deepStrictEqual` 比對整個 `stats()` 者須增列）。`E_CDN_SOURCE`、`E_CDN_ROUTE` 兩個錯誤碼。純新增者不接線即與改版前相同。
+- **旗標組**：`chromiumLaunchArgs` 由七項增為八項，末尾加 `--disable-smooth-scrolling`（前七項與順序不變；`launchBrowser` 呼叫端自給語系時送出之 `args` 為「前六旗標＋`--disable-smooth-scrolling`＋呼叫端 `args`」，即旗標組去語系後之七項）。**對標準圖之影響：預期 0**——本機 Chromium 159 之 headless shell 預設已為非平滑（同一鍵盤捲動之位置序列於旗標有無下逐位相同，`e2e-launchBrowserScroll`；加 `--enable-smooth-scrolling` 才出現中間位置），截圖皆於捲動靜止後取得；旗標之作用是使「鍵盤與滾輪之捲動即時到位」不依賴預設值與主機作業系統之動畫設定（動畫進行中之按鍵可能被吞，測試讀到目標位置後立即按鍵會時序競賽）。確屬需要平滑捲動者於 `opt.args` 給 `--enable-smooth-scrolling`（附加於旗標組之後，實測可開啟）。使用端有以固定下標取 `chromiumLaunchArgs`（如 `args[6]`）者不受影響（前七項不變）。
+- **新增依賴**：無（`package.json` 之 `version` 與 `dependencies` 未動）。
+
 ### 新增（2026-11-25，測試不連 CDN：`createCdnLocal`、`genCdnManifest`、`loadCdnManifest`、`createDirLock`、`tools/genCdnManifest.mjs`）
 
 - **純新增**：不改既有公開函式與行為，不改 `package.json` 之依賴（沿用 wsemi `fsDownloadFileVerify`、`getTrace`、`maskDiagText`）；使用端不接線即與改版前完全相同。**對標準圖無影響**（只改測試端取得外部資源之來源；清單依 sha256 釘選，頁面載入之位元組與 CDN 現行檔相同）。
@@ -672,7 +714,7 @@ let captureStableWithBox = (page, target, opts = {}) => pkgCaptureStableWithBox(
 - **移除 `launchChromium`、`launchChromiumCore`**（模組 `src/launchChromium.mjs`、`src/launchChromiumCore.mjs` 與 `WPackageToolsE2e` 入口之兩鍵），不保留相容層。深層引用 `w-package-tools-e2e/src/launchChromium.mjs` 者改為 `import wpw from 'w-playwright'` 並呼叫 `wpw.launchChromium({ ...原選項, autoInstall: true, installDeps: true })`（`autoInstall` 維持缺檔自動安裝；`installDeps` 維持舊版於 Linux 缺系統相依時之 install-deps，限制見〈Installation〉第 2 點；不改用 `launchBrowser`，以免多六旗標而改變像素），`devDependencies` 加 `w-playwright`。其單元與全新環境下載之測試移由 w-playwright 涵蓋（`unit-ensureChromium`、`api-autoInstall`）；差異：舊之並發案以下載輸出計「三行程合計只下載一次」，w-playwright 之並發案斷言「各行程至多安裝一次、全部啟動成功」，合計下載次數未再斷言。
 - **`launchBrowser` 改呼叫 `wpw.launchChromium({ headless: true, autoInstall: true, installDeps: true, ...opt, args: [...六旗標, ...opt.args] })`**（原經本套件之 `launchChromium` 直呼 playwright 之 `chromium.launch`）；`opt.autoInstall`、`opt.installDeps` 非布林值（含 `undefined`、`null`）時改用本函數之預設 `true`（不交由 w-playwright 之預設 `false`）。呼叫端可見之差異：
   - 命令列之 `--disable-features` 由 Playwright 預設串改為 w-playwright 合併之一串（預設＋`AutofillAiWalletPrivatePasses`＋呼叫端自給者），恆為 `args` 之最後一個元素；呼叫端於 `opt.args` 自給之 `--disable-features` 吸收進此串（原為兩串並存，Chromium 只取最後一串，使 Playwright 預設串失效）。呼叫端自給之 `--enable-features` 另合併為唯一之一串（Playwright 預設啟用項＋呼叫端項），其中屬守門功能、或同時被呼叫端停用之項目剔除。
-  - **`opt.args` 任一元素無效**（非字串、前後有空白、不以 `-` 開頭、等於 `--`、`--single-argument`、含控制字元、功能項非 ASCII 等，全表見 w-playwright README），或連同六旗標之元素數逾 10000（即附加逾 9994 項）時，**整個 `args`（含六旗標）視為 `[]`**，只留守門之一串而照常啟動（原為 Playwright 拋錯或原樣傳入）——截圖將失去確定性旗標；呼叫端只給合法旗標。`ignoreDefaultArgs: true` 不支援（視為 `[]`）。`headless`、`channel`、`executablePath`、`ignoreDefaultArgs` 由 w-playwright 檢測，非預期之值視為未給（`debug: true` 時提示）。
+  - **`opt.args` 任一元素無效**（非字串、前後有空白、不以 `-` 開頭、等於 `--`、`--single-argument`、含控制字元、功能項非 ASCII 等，全表見 w-playwright README），或連同旗標組之元素數逾 10000（改版當時旗標組為六項，附加逾 9994 項；2026-11-25 起旗標組為八項，附加逾 9992 項，呼叫端自給語系時為去語系之七項，附加逾 9993 項）時，**整個 `args`（含旗標組）視為 `[]`**，只留守門之一串而照常啟動（原為 Playwright 拋錯或原樣傳入）——截圖將失去確定性旗標；呼叫端只給合法旗標。`ignoreDefaultArgs: true` 不支援（視為 `[]`）。`headless`、`channel`、`executablePath`、`ignoreDefaultArgs` 由 w-playwright 檢測，非預期之值視為未給（`debug: true` 時提示）。
   - **錯誤改為 w-playwright 之固定詞彙錯誤**（帶 `code`：`E_LAUNCH`、`E_LAUNCH_TIMEOUT`、`E_BROWSER_MISSING`、`E_INSTALL`、`E_ENV`、`E_PW_VERSION`、`E_LOGON_GUARD`），不附 Playwright 原錯誤（原錯誤只交呼叫端自給之 `opt.funLog('launch-error', …)`）；依 Playwright 訊息文字判讀者改判 `err.code`。
   - 環境變數 `PWDEBUG` 為 inspector 模式之值、`SELENIUM_REMOTE_URL` 有值時拒絕啟動（`E_ENV`；細節見〈Installation〉第 6 點）；`W_PLAYWRIGHT_LOGON_GUARD` 開啟時，非 headless shell 之啟動先讀錯誤密碼次數，≥1、帳號已鎖定或讀不到即 `E_LOGON_GUARD`（非 Windows 一律拒絕）；依賴樹之 playwright-core 非 1.64.1（如以 overrides 換版）即拒絕（`E_PW_VERSION`）。
   - 自動安裝：原以 playwright 之 `cli.js install --only-shell|--no-shell chromium` 安裝（輸出繼承主控台、未隱藏視窗、安裝失敗訊息只含離開碼），改由 w-playwright 安裝（隱藏視窗、`--no-remove`；安裝輸出交 `opt.funLog`，不再印到主控台；失敗為 `E_INSTALL`）；安裝種類同前（無頭且未給通道為 headless shell，其餘受管者為完整 Chromium），`channel: 'chrome-for-testing'` 亦列為受管。Linux 之 install-deps 原可於主控台互動輸入 sudo 密碼，現不接主控台輸入（見〈Installation〉第 2 點）。

@@ -130,6 +130,56 @@ export function spawnChild(manifestFp, cacheDir, baseUrl, extra = []) {
     return { events, done, kill: () => p.kill(), pid: p.pid }
 }
 
+//Playwright 替身(unit-createCdnLocal 與 unit-createCdnSources 共用, 同一 helper 只定義一次): 只實作 routeBrowser 會用到之介面, 讓每個分支確定性地走到
+//  mkCtx: context 替身(route／routeWebSocket 只記錄處理器, on／off 記錄監聽器); mkBrowser: browser 替身(newContext／newPage 建立 context 替身);
+//  mkReq: Request 替身; mkRoute: Route 替身(記錄 fulfill／abort／fallback 之呼叫)
+export let mkCtx = () => {
+    let ctx = { routes: [], wsRoutes: [], listeners: [], closed: 0 }
+    ctx.on = (ev, fn) => ctx.listeners.push([ev, fn])
+    ctx.off = (ev, fn) => {
+        ctx.listeners = ctx.listeners.filter(([e, f]) => !(e === ev && f === fn))
+    }
+    ctx.route = async (pattern, handler) => ctx.routes.push([pattern, handler])
+    ctx.unroute = async (pattern, handler) => {
+        ctx.routes = ctx.routes.filter(([p, h]) => !(p === pattern && (handler === undefined || h === handler)))
+    }
+    ctx.routeWebSocket = async (matcher, handler) => ctx.wsRoutes.push([matcher, handler])
+    ctx.newPage = async () => ({ context: () => ctx })
+    ctx.close = async () => {
+        ctx.closed++
+    }
+    return ctx
+}
+
+export let mkBrowser = () => {
+    let b = { made: [], closed: 0 }
+    b.contexts = () => b.made.slice()
+    b.newContext = async () => {
+        let c = mkCtx()
+        b.made.push(c)
+        return c
+    }
+    b.newPage = async () => {
+        let c = await b.newContext()
+        return { context: () => c }
+    }
+    b.close = async () => {
+        b.closed++
+    }
+    return b
+}
+
+export let mkReq = (url, redirected = false) => ({ url: () => url, redirectedFrom: () => (redirected ? {} : null) })
+
+export let mkRoute = (url, req = mkReq(url)) => {
+    let r = { calls: [] }
+    r.request = () => req
+    r.fulfill = async (o) => r.calls.push(['fulfill', o])
+    r.abort = async (c) => r.calls.push(['abort', c])
+    r.fallback = async () => r.calls.push(['fallback'])
+    return r
+}
+
 //取得一個確實已結束(行程不存在)之 pid: 結束後再以 process.kill(pid, 0) 確認, 避免 pid 被重新配發
 export function deadPid() {
     for (let i = 0; i < 20; i++) {

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url'
 import createCdnLocal, { cdnMimeOf, cdnNativeFetch, CDN_BUDGET_MS, CDN_FILE_TOTAL_MS, CDN_LOCK_STALE_MS, CDN_WAIT_MS, CDN_HOOK_TIMEOUT_MS } from '../src/createCdnLocal.mjs'
 import loadCdnManifest from '../src/loadCdnManifest.mjs'
 import createDirLock from '../src/createDirLock.mjs'
-import { HOST, sha, waitUntil, deferred, makeFixture, startServer, deadPid, realFetch } from './tools/cdnLocalFixture.mjs'
+import { HOST, sha, waitUntil, deferred, makeFixture, startServer, deadPid, realFetch, mkCtx, mkBrowser, mkReq, mkRoute } from './tools/cdnLocalFixture.mjs'
 
 
 //規則帳本 sgud/rule/rulebook_cdn.md(R-CL-1～R-CL-9): 取得流程(夾具伺服器, 不連外網)、鎖之交錯、離線、違規判定、Node 端 fetch 補丁、路由處理器之各分支(替身)
@@ -176,7 +176,7 @@ describe('unit-createCdnLocal', function() {
                 assert.strictEqual(cdn.lookup('https://nope.invalid/x.js'), null)
                 assert.deepStrictEqual(evs.map((e) => e.type).filter((t) => t !== 'downloaded'), ['lock-acquired', 'ready'])
                 assert.ok(evs.every((e) => Object.isFrozen(e)), '事件物件應為凍結(wsemi getTrace 規格)')
-                assert.deepStrictEqual(cdn.stats(), { files: 6, contents: 6, ready: true, downloaded: 6, served: { browser: 0, fetch: 0 }, violations: 0, offline: false, cacheDir: cache })
+                assert.deepStrictEqual(cdn.stats(), { files: 6, contents: 6, ready: true, downloaded: 6, sourced: 0, stubs: 0, served: { browser: 0, fetch: 0 }, violations: 0, offline: false, cacheDir: cache })
 
                 //第二個實例(同快取): 備妥即就緒, 不取鎖、不連網
                 let evs2 = []
@@ -939,47 +939,7 @@ describe('unit-createCdnLocal', function() {
 
     describe('路由處理器之各分支(替身, R-CL-4)', function() {
 
-        //替身: 只實作 routeBrowser 會用到之 Playwright 介面, 讓每個分支(清單內、清單外、放行、非網路、本地副本不可用)確定性地走到
-        let mkCtx = () => {
-            let ctx = { routes: [], wsRoutes: [], listeners: [], closed: 0 }
-            ctx.on = (ev, fn) => ctx.listeners.push([ev, fn])
-            ctx.off = (ev, fn) => {
-                ctx.listeners = ctx.listeners.filter(([e, f]) => !(e === ev && f === fn))
-            }
-            ctx.route = async (pattern, handler) => ctx.routes.push([pattern, handler])
-            ctx.routeWebSocket = async (matcher, handler) => ctx.wsRoutes.push([matcher, handler])
-            ctx.newPage = async () => ({ context: () => ctx })
-            ctx.close = async () => {
-                ctx.closed++
-            }
-            return ctx
-        }
-        let mkBrowser = () => {
-            let b = { made: [], closed: 0 }
-            b.contexts = () => b.made.slice()
-            b.newContext = async () => {
-                let c = mkCtx()
-                b.made.push(c)
-                return c
-            }
-            b.newPage = async () => {
-                let c = await b.newContext()
-                return { context: () => c }
-            }
-            b.close = async () => {
-                b.closed++
-            }
-            return b
-        }
-        let mkReq = (url, redirected = false) => ({ url: () => url, redirectedFrom: () => (redirected ? {} : null) })
-        let mkRoute = (url, req = mkReq(url)) => {
-            let r = { calls: [] }
-            r.request = () => req
-            r.fulfill = async (o) => r.calls.push(['fulfill', o])
-            r.abort = async (c) => r.calls.push(['abort', c])
-            r.fallback = async () => r.calls.push(['fallback'])
-            return r
-        }
+        //替身(mkCtx、mkBrowser、mkReq、mkRoute 於 test/tools/cdnLocalFixture.mjs): 只實作 routeBrowser 會用到之 Playwright 介面, 讓每個分支(清單內、清單外、放行、非網路、本地副本不可用)確定性地走到
         let cdnOf = async (extra = {}) => {
             let srv = await startServer(fx.bodies)
             let cdn = createCdnLocal({ manifest: fx.manifest, cacheDir: dirOf('route'), fetch: srv.fetch, retryDelayMs: 10, ...extra })
@@ -1176,13 +1136,41 @@ describe('unit-createCdnLocal', function() {
                 throw new Error('context closed')
             }
             await assert.rejects(() => cdn.routeBrowser(ctx), /context closed/)
-            assert.strictEqual(ctx.listeners.length, 0, '失敗時已掛之 request 觀察者一併移除')
+            assert.strictEqual(ctx.listeners.length, 0, '失敗時已掛之 request、requestfinished 觀察者一併移除')
             assert.strictEqual(cdn.isRouted(ctx), false)
             ctx.route = ok
             await cdn.routeBrowser(ctx)
             assert.strictEqual(ctx.routes.length, 1)
-            assert.strictEqual(ctx.listeners.length, 1)
+            assert.deepStrictEqual(ctx.listeners.map(([e]) => e), ['request', 'requestfinished'], 'request 與 requestfinished 兩個觀察者各掛一次')
             assert.strictEqual(cdn.isRouted(ctx), true)
+        })
+
+        it('[CL34b] 路由已掛而 routeWebSocket 失敗時: 已掛之路由處理器一併移除(unroute)、觀察者移除、不留已掛標記, 重試成功後只有一層路由', async function() {
+            let cdn = await cdnOf()
+            let ctx = mkCtx()
+            let okWs = ctx.routeWebSocket
+            ctx.routeWebSocket = async () => {
+                throw new Error('websocket route failed')
+            }
+            await assert.rejects(() => cdn.routeBrowser(ctx), /websocket route failed/)
+            assert.strictEqual(ctx.routes.length, 0, '已掛之路由處理器被移除')
+            assert.strictEqual(ctx.listeners.length, 0)
+            assert.strictEqual(cdn.isRouted(ctx), false)
+            ctx.routeWebSocket = okWs
+            await cdn.routeBrowser(ctx)
+            assert.strictEqual(ctx.routes.length, 1, '重試後只有一層路由(不疊兩層)')
+            assert.strictEqual(ctx.wsRoutes.length, 1)
+            assert.strictEqual(cdn.isRouted(ctx), true)
+
+            //unroute 本身失敗不蓋掉原錯誤
+            let ctx2 = mkCtx()
+            ctx2.routeWebSocket = async () => {
+                throw new Error('ws failed 2')
+            }
+            ctx2.unroute = async () => {
+                throw new Error('unroute failed')
+            }
+            await assert.rejects(() => cdn.routeBrowser(ctx2), /ws failed 2/)
         })
 
         it('[CL39] 對 browser 掛路由失敗(已存在之 context 掛不上)時還原 newContext／newPage 之包裝與標記, 可重試; 重試成功後其後建立者皆掛路由', async function() {
@@ -1264,7 +1252,7 @@ describe('unit-createCdnLocal', function() {
             let cdn = await cdnOf({ allow: [/^https:\/\/api\.example\.test\//] })
             let ctx = mkCtx()
             await cdn.routeBrowser(ctx)
-            assert.strictEqual(ctx.listeners.length, 1)
+            assert.deepStrictEqual(ctx.listeners.map(([e]) => e), ['request', 'requestfinished'])
             assert.strictEqual(ctx.listeners[0][0], 'request')
             let obs = ctx.listeners[0][1]
             let h = ctx.routes[0][1]
@@ -1346,6 +1334,274 @@ describe('unit-createCdnLocal', function() {
             }
             finally {
                 restore()
+            }
+        })
+
+        it('[CL43] requestfinished 之觀察者(R-CL-12): 清單內之網址之請求完成而不是由本處理器供應者(使用端之 route 以 continue() 等放走)記為違規; 已由本處理器 fulfill 者不記(含 fulfill 之 Promise 尚未解決時事件已到); 清單外、放行、非網路者不在此重複記; 同一請求只記一筆', async function() {
+            let cdn = await cdnOf({ allow: [/^https:\/\/api\.example\.test\//] })
+            let ctx = mkCtx()
+            await cdn.routeBrowser(ctx)
+            let fin = ctx.listeners.find(([e]) => e === 'requestfinished')[1]
+            let h = ctx.routes[0][1]
+            let u0 = HOST + '/pkg-0@1.0.0/dist/f0.js'
+            let u1 = HOST + '/pkg-1@1.0.1/dist/f1.js'
+            let mark = cdn.violationMark()
+
+            //本處理器已 fulfill: 完成時不記
+            let r0 = mkReq(u0)
+            await h(mkRoute(u0, r0))
+            fin(r0)
+            cdn.assertNoViolation(mark)
+
+            //fulfill 之 Promise 尚未解決時 requestfinished 已到(標記先於 fulfill): 不記
+            let r1 = mkReq(u1)
+            let route1 = mkRoute(u1, r1)
+            route1.fulfill = async (o) => {
+                fin(r1)
+                route1.calls.push(['fulfill', o])
+            }
+            await h(route1)
+            cdn.assertNoViolation(mark)
+            assert.strictEqual(route1.calls[0][0], 'fulfill')
+
+            //本處理器未見到該請求(使用端之 route 先於本處理器執行並 continue() 放走): 完成時記違規, 理由指明未由本地副本供應
+            let r2 = mkReq(u0)
+            fin(r2)
+            let vs = cdn.getViolations()
+            assert.strictEqual(vs.length, 1)
+            assert.deepStrictEqual([vs[0].kind, vs[0].url], ['browser', u0])
+            assert.ok(/未由本地副本供應/.test(vs[0].reason), vs[0].reason)
+            assert.throws(() => cdn.assertNoViolation(mark), (err) => err.code === 'E_CDN_EXTERNAL' && err.violations.length === 1)
+
+            //同一請求再完成: 只記一筆(依 Request 物件去重)
+            fin(r2)
+            assert.strictEqual(cdn.getViolations().length, 1)
+
+            //片段不計(同一網址); 另一個請求物件為另一個請求, 各記一筆
+            fin(mkReq(u1 + '#frag'))
+            assert.strictEqual(cdn.getViolations().length, 2)
+
+            //不在此記: 清單外(由 request 觀察者記)、放行(回送位址、allow)、非網路請求
+            let n = cdn.getViolations().length
+            fin(mkReq('https://example.invalid/a.js'))
+            fin(mkReq(u0 + '?v=2'))
+            fin(mkReq('http://127.0.0.1:8080/x'))
+            fin(mkReq('https://api.example.test/x'))
+            fin(mkReq('data:text/plain,x'))
+            fin(mkReq('blob:http://x/1'))
+            assert.strictEqual(cdn.getViolations().length, n)
+
+            //觀察者之內部錯誤不外洩
+            assert.doesNotThrow(() => fin({
+                url: () => {
+                    throw new Error('boom')
+                }
+            }))
+            assert.doesNotThrow(() => fin(null))
+        })
+
+        it('[CL43b] requestfinished 之觀察者: 清單列了回送位址之網址(清單優先於放行)而請求未由本處理器供應者亦記違規; 本處理器因本地副本不可用已記之請求, 完成事件不重複記', async function() {
+            let body = Buffer.from('loop-body')
+            let loop = 'http://127.0.0.1:8123/lib.js'
+            let cdn = createCdnLocal({ manifest: { schema: 1, files: { [loop]: { sha256: sha(body), size: body.length } } }, cacheDir: dirOf('finloop'), fetch: async () => new Response(body), retryDelayMs: 10 })
+            await cdn.ensure()
+            let ctx = mkCtx()
+            await cdn.routeBrowser(ctx)
+            let fin = ctx.listeners.find(([e]) => e === 'requestfinished')[1]
+            fin(mkReq(loop))
+            let vs = cdn.getViolations()
+            assert.strictEqual(vs.length, 1)
+            assert.strictEqual(vs[0].url, loop)
+            assert.ok(/未由本地副本供應/.test(vs[0].reason))
+            fin(mkReq('http://127.0.0.1:8123/other.js')) //清單外之回送位址: 放行, 不記
+            assert.strictEqual(cdn.getViolations().length, 1)
+
+            //本地副本不可用(離線缺檔)之請求: 處理器已記並中止, 其完成事件(若有)不重複記
+            let off = createCdnLocal({ manifest: fx.manifest, cacheDir: dirOf('finoff'), offline: true })
+            let ctx2 = mkCtx()
+            await off.routeBrowser(ctx2)
+            let u = HOST + '/pkg-0@1.0.0/dist/f0.js'
+            let r = mkReq(u)
+            await ctx2.routes[0][1](mkRoute(u, r))
+            assert.strictEqual(off.getViolations().length, 1)
+            ctx2.listeners.find(([e]) => e === 'requestfinished')[1](r)
+            assert.strictEqual(off.getViolations().length, 1)
+        })
+
+        it('[CL44] routeLaunch(next, ...args)(R-CL-14): 啟動後掛路由並回傳同一個 browser, 引數原樣傳給 next; next 非函數拋 E_CDN_ARG; next 拋錯原樣傳出且不掛路由', async function() {
+            let cdn = await cdnOf()
+            let b = mkBrowser()
+            let seen = null
+            let got = await cdn.routeLaunch(async (...a) => {
+                seen = a
+                return b
+            }, 1, 'x', { y: 2 })
+            assert.strictEqual(got, b)
+            assert.deepStrictEqual(seen, [1, 'x', { y: 2 }])
+            assert.strictEqual(cdn.isRouted(b), true)
+            await b.newContext()
+            assert.strictEqual(b.made[0].routes.length, 1, '其後建立之 context 亦掛路由')
+
+            for (let bad of [undefined, null, 'x', 5, {}]) {
+                await assert.rejects(() => cdn.routeLaunch(bad), (err) => err.code === 'E_CDN_ARG', String(bad))
+            }
+
+            let boom = new Error('start failed')
+            let b2 = mkBrowser()
+            await assert.rejects(() => cdn.routeLaunch(async () => {
+                throw boom
+            }), (err) => err === boom)
+            assert.strictEqual(cdn.isRouted(b2), false)
+        })
+
+        it('[CL45] routeLaunch: 掛路由失敗(browser 替身拋錯)時先關閉已啟動之瀏覽器、原錯誤原樣拋出、原因(經遮蔽)印到 stderr、發 route-launch-failed 事件; close 本身失敗或無 close 不蓋掉原錯誤', async function() {
+            let events = []
+            let cdn = await cdnOf({ onTrace: (e) => events.push(e) })
+            let lines = []
+            let orig = console.error
+            console.error = (...a) => lines.push(a.join(' '))
+            try {
+                //已存在之 context 掛不上: routeBrowser 拋錯
+                let b = mkBrowser()
+                let bad = await b.newContext()
+                let secret = 'https://x.invalid/a.js?token=SECRETVALUE123'
+                bad.route = async () => {
+                    let err = new Error('route failed ' + secret)
+                    err.code = 'E_BOOM'
+                    throw err
+                }
+                await assert.rejects(() => cdn.routeLaunch(async () => b), (err) => err.code === 'E_BOOM')
+                assert.strictEqual(b.closed, 1, '失敗時關閉已啟動之瀏覽器')
+                assert.strictEqual(cdn.isRouted(b), false)
+                assert.strictEqual(lines.length, 1)
+                assert.ok(/routeLaunch: 掛路由失敗\(code E_BOOM\)/.test(lines[0]), lines[0])
+                assert.ok(!lines[0].includes('SECRETVALUE123'), '原因經 maskDiagText 遮蔽查詢秘密值: ' + lines[0])
+                assert.deepStrictEqual(events.filter((e) => e.type === 'route-launch-failed').map((e) => e.code), ['E_BOOM'])
+
+                //close 本身拋錯: 仍拋原錯誤
+                let b2 = mkBrowser()
+                let bad2 = await b2.newContext()
+                bad2.route = async () => {
+                    throw new Error('route failed 2')
+                }
+                b2.close = async () => {
+                    throw new Error('close failed')
+                }
+                await assert.rejects(() => cdn.routeLaunch(async () => b2), /route failed 2/)
+
+                //非 Playwright 物件(無 close): routeBrowser 拋 E_CDN_ARG, 不因缺 close 而改拋 TypeError
+                await assert.rejects(() => cdn.routeLaunch(async () => ({})), (err) => err.code === 'E_CDN_ARG')
+                assert.strictEqual(lines.length, 3)
+            }
+            finally {
+                console.error = orig
+            }
+        })
+
+        //useMocha 之替身: 收集各掛鉤之函數, 由測試依序呼叫(以含 timeout 之物件為 this), 不依賴 mocha 全域
+        let mkHooks = () => {
+            let h = { before: [], beforeEach: [], afterEach: [], after: [] }
+            let api = {}
+            for (let k of Object.keys(h)) {
+                api[k] = (fn) => h[k].push(fn)
+            }
+            return { h, api }
+        }
+
+        it('[CL46] useMocha(R-CL-14): 預設註冊 before(this.timeout 對齊下載預算並取得)、beforeEach／afterEach(每案前取標記、案後斷言自標記起無新增違規, 前一案之違規不連累下一案)', async function() {
+            let srv = await startServer(fx.bodies)
+            try {
+                let cdn = createCdnLocal({ manifest: fx.manifest, cacheDir: dirOf('um'), fetch: srv.fetch, retryDelayMs: 10 })
+                let { h, api } = mkHooks()
+                cdn.useMocha({ hooks: api })
+                assert.deepStrictEqual([h.before.length, h.beforeEach.length, h.afterEach.length, h.after.length], [1, 1, 1, 0])
+                let timeouts = []
+                await h.before[0].call({ timeout: (ms) => timeouts.push(ms) })
+                assert.deepStrictEqual(timeouts, [cdn.hookTimeoutMs], 'before 之時限對齊 hookTimeoutMs')
+                assert.strictEqual(cdn.stats().ready, true, 'before 內已取得')
+
+                //案 1: 有違規 → afterEach 拋 E_CDN_EXTERNAL
+                h.beforeEach[0]()
+                let ctx = mkCtx()
+                await cdn.routeBrowser(ctx)
+                await ctx.routes[0][1](mkRoute('https://example.invalid/a.js'))
+                assert.throws(() => h.afterEach[0](), (err) => err.code === 'E_CDN_EXTERNAL' && err.violations.length === 1)
+
+                //案 2: 無新違規 → 不拋(標記每案重取, 案 1 之違規不計)
+                h.beforeEach[0]()
+                assert.doesNotThrow(() => h.afterEach[0]())
+
+                //before 之 this 無 timeout 函數(非 mocha 環境之替身)時不拋
+                let { h: h2, api: api2 } = mkHooks()
+                cdn.useMocha({ hooks: api2 })
+                await assert.doesNotReject(() => h2.before[0].call({}))
+            }
+            finally {
+                await srv.close()
+            }
+        })
+
+        it('[CL47] useMocha 之選項: ensure:false 不取得、guard:false 不夾違規斷言、install 於取得之後以 routeLaunch 呼叫並於 after 還原一次(含回傳 Promise 之函數、回傳非函數), 缺掛鉤拋 E_CDN_ARG', async function() {
+            let srv = await startServer(fx.bodies)
+            try {
+                let mk = () => createCdnLocal({ manifest: fx.manifest, cacheDir: dirOf('um2'), fetch: srv.fetch, retryDelayMs: 10 })
+
+                //ensure:false、guard:false: 無任何掛鉤
+                let c1 = mk()
+                let a = mkHooks()
+                c1.useMocha({ hooks: a.api, ensure: false, guard: false })
+                assert.deepStrictEqual([a.h.before.length, a.h.beforeEach.length, a.h.afterEach.length, a.h.after.length], [0, 0, 0, 0])
+
+                //只 guard: 有 beforeEach／afterEach, 無 before; 非布林之 ensure／guard 視為未給(取預設 true)
+                let c2 = mk()
+                let b = mkHooks()
+                c2.useMocha({ hooks: b.api, ensure: false })
+                assert.deepStrictEqual([b.h.before.length, b.h.beforeEach.length, b.h.afterEach.length], [0, 1, 1])
+                let c2b = mk()
+                let b2 = mkHooks()
+                c2b.useMocha({ hooks: b2.api, ensure: 'no', guard: 0 })
+                assert.deepStrictEqual([b2.h.before.length, b2.h.beforeEach.length, b2.h.afterEach.length], [1, 1, 1])
+
+                //install: 取得後呼叫, 收到之 routeLaunch 即本實例之 routeLaunch(呼叫之會掛路由); 還原一次
+                let c3 = mk()
+                let c = mkHooks()
+                let order = []
+                let restored = 0
+                let gotLaunch = null
+                c3.useMocha({
+                    hooks: c.api,
+                    install: async (rl) => {
+                        order.push('install:' + c3.stats().ready)
+                        gotLaunch = rl
+                        return () => {
+                            restored++
+                        }
+                    },
+                })
+                assert.deepStrictEqual([c.h.before.length, c.h.after.length], [1, 1])
+                await c.h.before[0].call({ timeout() {} })
+                assert.deepStrictEqual(order, ['install:true'], '取得(ready)之後才安裝')
+                let br = mkBrowser()
+                assert.strictEqual(await gotLaunch(async () => br), br)
+                assert.strictEqual(c3.isRouted(br), true)
+                c.h.after[0]()
+                c.h.after[0]()
+                assert.strictEqual(restored, 1, '還原只呼叫一次')
+
+                //install 回傳非函數: 不當還原函數, after 不拋
+                let c4 = mk()
+                let d = mkHooks()
+                c4.useMocha({ hooks: d.api, ensure: false, install: () => 'not a function' })
+                await d.h.before[0].call({})
+                assert.doesNotThrow(() => d.h.after[0]())
+
+                //缺掛鉤(非 mocha 環境且未給 hooks): E_CDN_ARG 並指明缺哪個
+                for (let [opt, miss] of [[{ hooks: {} }, 'before'], [{ hooks: { before() {} } }, 'beforeEach'], [{ hooks: { before() {}, beforeEach() {} } }, 'afterEach'], [{ hooks: { before() {}, beforeEach() {}, afterEach() {} }, install: () => {} }, 'after']]) {
+                    assert.throws(() => mk().useMocha(opt), (err) => err.code === 'E_CDN_ARG' && err.message.includes(miss), miss)
+                }
+            }
+            finally {
+                await srv.close()
             }
         })
 
