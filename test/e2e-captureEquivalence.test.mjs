@@ -1,6 +1,6 @@
 import assert from 'assert'
 import sharp from 'sharp'
-import launchBrowser from '../src/launchBrowser.mjs'
+import launchBrowser, { LAUNCH_HOOK_TIMEOUT_MS } from '../src/launchBrowser.mjs'
 import captureStable from '../src/captureStable.mjs'
 import captureStableWithBox from '../src/captureStableWithBox.mjs'
 import gridContentBox from '../src/gridContentBox.mjs'
@@ -362,6 +362,7 @@ describe('截圖管線與各專案現行實作逐位元等價(無伺服器)', fu
     let prevStrict = process.env.E2E_STRICT_CAPTURE
 
     before(async function() {
+        this.timeout(LAUNCH_HOOK_TIMEOUT_MS) //啟動可能遇首次瀏覽器安裝, 不沿用 describe 層之 180 秒
         browser = await launchBrowser()
     })
     after(async function() {
@@ -595,6 +596,7 @@ describe('量測型目標: gridContentBox、itemsUnionBox(無伺服器)', functi
     let fast = { maxRetries: 2, intervalMs: 50, initialWaitMs: 0, preWaitMs: 0, scrollTimeoutMs: 500 }
 
     before(async function() {
+        this.timeout(LAUNCH_HOOK_TIMEOUT_MS) //啟動可能遇首次瀏覽器安裝, 不沿用 describe 層之 120 秒
         browser = await launchBrowser()
     })
     after(async function() {

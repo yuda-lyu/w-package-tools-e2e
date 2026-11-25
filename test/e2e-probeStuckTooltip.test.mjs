@@ -1,5 +1,5 @@
 import assert from 'assert'
-import launchBrowser from '../src/launchBrowser.mjs'
+import launchBrowser, { LAUNCH_HOOK_TIMEOUT_MS } from '../src/launchBrowser.mjs'
 import probeStuckTooltip from '../src/probeStuckTooltip.mjs'
 
 
@@ -42,6 +42,7 @@ describe('probeStuckTooltip(無伺服器)', function() {
     let page = null
 
     before(async function() {
+        this.timeout(LAUNCH_HOOK_TIMEOUT_MS) //啟動可能遇首次瀏覽器安裝, 不沿用 describe 層之 120 秒
         browser = await launchBrowser()
     })
     after(async function() {

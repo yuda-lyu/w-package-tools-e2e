@@ -227,7 +227,13 @@ let canonOf = (u) => {
  * SharedWorker之請求、任何Worker內之WebSocket、context.request(APIRequestContext)不經route亦無request事件，攔不到(見README限制)。
  * Node端(patchFetch)：覆寫全域fetch，http(s)網址(依fetch自己之解析規則正規化：去前後空白與tab、主機小寫、預設埠省略)只回本地副本，清單外拋E_CDN_EXTERNAL並記錄，回送位址與opt.allow明列者放行，非http(s)原樣放行；回傳還原函數。
  * 只覆寫全域fetch：先於patchFetch保存之fetch參考、http／https模組、undici、全域WebSocket等其他出口不攔。清單之網址亦先正規化再比對，故不因寫法不同(大小寫主機、預設埠)而漏判。
- * 兩者不綁定w-playwright之內部接縫，只用Playwright公開之route；已用w-playwright者可於其啟動browser之處(例如setBrowserTypeForTest之launch替身內)呼叫routeBrowser；isRouted(target)供使用端之啟動出口斷言「沒有漏接」。
+ * 兩者不綁定w-playwright之內部接縫，只用Playwright公開之route(本模組與createDirLock、loadCdnManifest、genCdnManifest只依wsemi，不依賴w-playwright，故可獨立抽出)；isRouted(target)供使用端之啟動出口斷言「沒有漏接」。
+ *
+ * 啟動出口之接線(首選)：已用w-playwright(1.0.6起)者於測試共用處一行掛上其啟動後鉤子：wpw.onBrowserCreated((t) => cdn.routeBrowser(t))(wpw為import wpw from 'w-playwright'；回傳還原函數，於after呼叫)。
+ * 鉤子套在「最終回傳給呼叫端之瀏覽器」上(Browser或launchChromiumPersistent之持久BrowserContext，routeBrowser皆接受)，與setBrowserTypeForTest(替換、非疊放)正交：不論各處如何啟動(含使用端自設之setBrowserTypeForTest替身內直接next())皆生效，
+ * 使用端不必在各替身內自行包路由。鉤子失敗(routeBrowser拋錯)時w-playwright先關閉該瀏覽器再reject E_LAUNCH_HOOK(固定詞彙，原錯誤只交其funLog)；
+ * 鉤子套在替身之回傳值上，替身若回傳非Playwright物件(測試用假瀏覽器)，routeBrowser拋E_CDN_ARG而啟動reject E_LAUNCH_HOOK，故載入時即全域掛鉤子者，以假物件替身驗接線之測試須先還原鉤子(或只在需要路由之describe內才掛)。
+ * 不依w-playwright者(或要在單一啟動出口以斷言保證)用下列選項：routeLaunch(next)與useMocha({ install })，或啟動後自行routeBrowser。
  *
  * 本機檔來源(opt.sources)與空腳本(opt.stubs)：清單內之網址可改取自本機檔(不下載)，未釘版之外部腳本可改以0位元組之空內容供應。
  * 本機檔照清單之sha256與大小校驗後才入內容定址快取(邊讀邊算、與清單不符即拒收並清除暫存檔，E_CDN_SOURCE，不改走下載)，故不產生「清單有、檔來自他處而不校驗」之缺口；
@@ -235,10 +241,14 @@ let canonOf = (u) => {
  * 同內容有多個本機來源時全部逐一校驗、任一不符即拒收(不因順序擇一)；stats().sourced計自本機來源補入之內容數。
  * 空腳本併入有效清單(stats().files與stubs計入)，內容為空檔(sha256固定)，網址已在清單內者須同為空檔，否則拋錯(清單與opt.stubs不得各說各話)。
  *
- * 啟動出口之接線：routeLaunch(next, ...args)呼叫next(...args)啟動瀏覽器，啟動後掛routeBrowser並斷言已掛(isRouted)，掛失敗時先關閉已啟動之瀏覽器再拋原錯誤
+ * 啟動出口之接線(不依w-playwright之選項)：routeLaunch(next, ...args)呼叫next(...args)啟動瀏覽器，啟動後掛routeBrowser並斷言已掛(isRouted)，掛失敗時先關閉已啟動之瀏覽器再拋原錯誤
  * (啟動函數之替身內拋出之錯誤常被改寫為固定訊息而隱藏原因，故失敗時先把原因經maskDiagText遮蔽後印到stderr，並發'route-launch-failed'事件)；
  * useMocha(opt)於mocha之describe內註冊before(this.timeout對齊hookTimeoutMs並ensure)、beforeEach／afterEach(每案前取違規標記、案後斷言自標記起無新增違規)，
  * opt.install(routeLaunch)於取得之後呼叫、其回傳之函數於after還原(例如安裝w-playwright之setBrowserTypeForTest替身)，使各使用端免自寫接線。
+ *
+ * before之時限：useMocha之before與使用端自掛之取得點，時限為hookTimeoutMs(＝CDN_HOOK_TIMEOUT_MS，不沿用mocha全域之180秒)；其內只含cdn.ensure()，不啟動瀏覽器。
+ * (hookTimeoutMs未自給budgetMs等時限者等於CDN_HOOK_TIMEOUT_MS，自給者為實例之實際值)同一個before還要啟動瀏覽器(可能遇首次瀏覽器安裝，其建議時限為w-playwright之LAUNCH_HOOK_TIMEOUT_MS，launchBrowser.mjs亦具名轉出)者：
+ * 串行(先await cdn.ensure()再啟動)兩段最壞時間相加，掛this.timeout(cdn.hookTimeoutMs + LAUNCH_HOOK_TIMEOUT_MS)；Promise.all並行者取兩者較大者；分在兩個before者各掛各自之時限。mocha之時限上限為2147483647毫秒。
  *
  * 違規之判定：violationMark()於測試前取標記、assertNoViolation(mark)於測試後斷言「自標記起無新增違規」，涵蓋close()未被呼叫或其錯誤被呼叫端吞掉者；
  * 以事件(onTrace)而非延時同步。事件(凍結物件{ type, ... }，同wsemi getTrace)：'lock-acquired'(取得鎖)、'lock-wait'(首次發現鎖被占用)、'lock-poll'(每輪等候)、'lock-stale-judged'(判定鎖殘留，尚未回收，
@@ -287,6 +297,7 @@ let canonOf = (u) => {
  * timeouts為{budgetMs,fileTimeoutMs,staleMs,waitMs,hookTimeoutMs}，hookTimeoutMs為建議之before時限
  * @example
  *
+ * import wpw from 'w-playwright'
  * import createCdnLocal from 'w-package-tools-e2e/src/createCdnLocal.mjs'
  * import launchBrowser from 'w-package-tools-e2e/src/launchBrowser.mjs'
  *
@@ -295,13 +306,22 @@ let canonOf = (u) => {
  *
  * describe('demo', function() {
  *     cdn.useMocha() //before取得(時限對齊下載預算)、每案前後夾violationMark／assertNoViolation(自標記起有清單外之外部請求即失敗)
+ *     let restoreHook = null
+ *     before(function() {
+ *         restoreHook = wpw.onBrowserCreated((t) => cdn.routeBrowser(t)) //首選：一行，其後任何經w-playwright啟動之瀏覽器(含launchBrowser、使用端自設setBrowserTypeForTest之替身)皆已掛路由
+ *     })
+ *     after(function() {
+ *         restoreHook()
+ *     })
  *     it('page', async function() {
- *         let browser = await cdn.routeLaunch(() => launchBrowser()) //啟動後掛routeBrowser並斷言已掛，其newContext/newPage之頁面導向本地副本
+ *         let browser = await launchBrowser() //經鉤子掛好routeBrowser，其newContext/newPage之頁面導向本地副本
  *         let page = await browser.newPage()
  *         await page.setContent('<script src="https://cdn.example.com/lib.js"></script>')
  *         await browser.close() //有違規則於關閉後拋E_CDN_EXTERNAL
  *     })
  * })
+ *
+ * //不依w-playwright者：let browser = await cdn.routeLaunch(() => launchBrowser()) //啟動後掛routeBrowser並斷言已掛
  *
  */
 function createCdnLocal(opt) {

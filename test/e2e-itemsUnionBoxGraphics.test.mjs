@@ -2,7 +2,7 @@
 //斷言之真理源為「無圖形內容時之量框」(blank 基線)與「框線外緣 <= 內容近緣」之幾何關係, 不引用實作之內部數值;
 //框線 = 量測矩形各邊外擴 BOX_PAD(6)px、描邊寬 BOX_STROKE(5)px, 故框線帶 = 矩形邊外 1 至 6px
 import assert from 'assert'
-import launchBrowser from '../src/launchBrowser.mjs'
+import launchBrowser, { LAUNCH_HOOK_TIMEOUT_MS } from '../src/launchBrowser.mjs'
 import itemsUnionBox from '../src/itemsUnionBox.mjs'
 
 //浮層: fixed, 左 300 上 150 寬 120(右 420), 兩項文字(padding 7px 8px); 下緣 POP_BOTTOM 由頁面實量(見下)
@@ -26,6 +26,7 @@ describe('itemsUnionBox 圖形內容(svg 圖形、canvas 像素、graphicAreas)'
     let browser = null
     let page = null
     before(async function() {
+        this.timeout(LAUNCH_HOOK_TIMEOUT_MS) //啟動可能遇首次瀏覽器安裝, 不沿用 describe 層之 120 秒
         browser = await launchBrowser()
         page = await (await browser.newContext({ viewport: { width: 800, height: 420 } })).newPage()
         await page.setContent(`<body style="margin:0">${popHtml()}</body>`)

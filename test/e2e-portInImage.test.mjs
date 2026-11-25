@@ -3,7 +3,7 @@ import path from 'path'
 import assert from 'assert'
 import { PNG } from 'pngjs'
 import pixelmatch from 'pixelmatch'
-import launchBrowser from '../src/launchBrowser.mjs'
+import launchBrowser, { LAUNCH_HOOK_TIMEOUT_MS } from '../src/launchBrowser.mjs'
 import captureStable from '../src/captureStable.mjs'
 import overlayRegions from '../src/overlayRegions.mjs'
 import assertBaselineMatch from '../src/assertBaselineMatch.mjs'
@@ -11,7 +11,7 @@ import pixelmatchOpt from '../src/pixelmatchOpt.mjs'
 import { assertE2eBasePort } from '../src/reserveE2ePorts.mjs'
 
 
-//畫面含埠之流程(規格 C:/opensrcOper/dspec/e2e埠與多套件同跑.md E7): 比對端覆蓋該處, 或標記只能在基準埠跑。真實 Chromium、真實截圖; 頁面以 setContent 模擬畫面顯示網址, 不需任何服務。
+//畫面含埠之流程(跨套件規格「e2e 埠與多套件同跑」E7): 比對端覆蓋該處, 或標記只能在基準埠跑。真實 Chromium、真實截圖; 頁面以 setContent 模擬畫面顯示網址, 不需任何服務。
 //標準圖只存在 test/_tmp/portInImage/(本檔自產自比, 不入 test/pics, 不動任何既有標準圖)。
 
 
@@ -56,6 +56,7 @@ describe('畫面含埠之流程', function() {
     }
 
     before(async function() {
+        this.timeout(LAUNCH_HOOK_TIMEOUT_MS) //啟動可能遇首次瀏覽器安裝, 不沿用 describe 層之 120 秒
         fs.rmSync(fd, { recursive: true, force: true })
         fs.mkdirSync(fd, { recursive: true })
         browser = await launchBrowser()

@@ -67,6 +67,7 @@ describe('e2e-createCdnLocal', function() {
     let browser = null
     let site = null
     let mark = null
+    let hookRestore = null
 
     //夾具伺服器只供一次性取得(其後關閉): 證明其後之頁面請求皆來自本地副本而非連網
     before(async function() {
@@ -91,6 +92,11 @@ describe('e2e-createCdnLocal', function() {
             await browser.close().catch(() => {})
         }
         browser = null
+        //[CE16c] 之啟動後鉤子為全域清單(同一 mocha 行程內之後續檔案亦受影響): 案卡住逾時時其 finally 尚未執行, 於此兜底還原(還原函數可重複呼叫)
+        if (hookRestore) {
+            hookRestore()
+            hookRestore = null
+        }
     })
 
     after(async function() {
@@ -691,6 +697,62 @@ describe('e2e-createCdnLocal', function() {
         finally {
             restore1()
         }
+    })
+
+    it('[CE16c] README 首選寫法 wpw.onBrowserCreated((t) => cdn.routeBrowser(t)) 經真 w-playwright(排程第 636 項 ⑤): launchBrowser() 啟動者已掛路由並由本地副本供應; 自設之 setBrowserTypeForTest 替身直呼 next() 亦生效(鉤子與替身正交, 不同於 [CE16b] 之替換漏接); 持久入口之 BrowserContext 亦然; restore() 後不再掛', async function() {
+        let restoreHook = wpw.onBrowserCreated((t) => cdn.routeBrowser(t))
+        hookRestore = restoreHook
+        try {
+            //1. 無替身: launchBrowser() 啟動者已掛路由, 頁面由本地副本供應
+            browser = await launchBrowser()
+            assert.strictEqual(cdn.isRouted(browser), true, '鉤子應使 launchBrowser() 啟動者掛路由')
+            let page = await browser.newPage()
+            await page.setContent(`<script src="${HOST}/pkg-1@1.0.1/dist/f1.js"></script>`, { waitUntil: 'load' })
+            assert.strictEqual(await page.evaluate(() => window.__fx1), 'v1', '由本地副本供應')
+            cdn.assertNoViolation(mark)
+            await page.setContent('<script src="https://example.invalid/x.js"></script>', { waitUntil: 'load' })
+            assert.throws(() => cdn.assertNoViolation(mark), (err) => err.code === 'E_CDN_EXTERNAL', '清單外之請求中止並記違規')
+            let bro = browser
+            browser = null
+            await assert.rejects(() => bro.close(), (err) => err.code === 'E_CDN_EXTERNAL')
+
+            //2. 使用端自設之替身直呼 next()(不經 routeLaunch): 鉤子套在最終回傳者上, 仍生效(正交; [CE16b] 之 routeLaunch 範本在此情形漏接)
+            let mark2 = cdn.violationMark()
+            let restoreFake = wpw.setBrowserTypeForTest({ launch: (o, next) => next() })
+            try {
+                browser = await launchBrowser()
+                assert.strictEqual(cdn.isRouted(browser), true, '自設替身直呼 next() 亦應掛路由')
+                let p2 = await browser.newPage()
+                await p2.setContent(`<script src="${HOST}/pkg-2@1.0.2/dist/f2.js"></script>`, { waitUntil: 'load' })
+                assert.strictEqual(await p2.evaluate(() => window.__fx2), 'v2')
+                cdn.assertNoViolation(mark2)
+                await browser.close()
+                browser = null
+            }
+            finally {
+                restoreFake()
+            }
+
+            //3. 持久入口: 鉤子之 target 為持久 BrowserContext(routeBrowser 接受 context)
+            let persistent = await wpw.launchChromiumPersistent('', { headless: true })
+            try {
+                assert.strictEqual(cdn.isRouted(persistent), true, '持久入口之 BrowserContext 應掛路由')
+                let p3 = await persistent.newPage()
+                await p3.setContent(`<script src="${HOST}/pkg-3@1.0.3/dist/f3.js"></script>`, { waitUntil: 'load' })
+                assert.strictEqual(await p3.evaluate(() => window.__fx3), 'v3')
+            }
+            finally {
+                await persistent.close().catch(() => {})
+            }
+        }
+        finally {
+            restoreHook()
+        }
+
+        //4. restore() 後不再掛(重複呼叫無作用)
+        restoreHook()
+        browser = await launchBrowser()
+        assert.strictEqual(cdn.isRouted(browser), false, '還原後啟動者不再經鉤子掛路由')
     })
 
     it('[CE17] opt.sources 與 opt.stubs(R-CL-13)經真瀏覽器: 本機檔來源之腳本(校驗後)由本地副本供應並執行、空腳本載入成功(onload)且不連網; 未列之未釘版網址仍中止並記違規', async function() {

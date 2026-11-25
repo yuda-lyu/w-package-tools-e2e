@@ -3,7 +3,7 @@ import assert from 'assert'
 import { fileURLToPath } from 'url'
 import wpte from '../src/WPackageToolsE2e.mjs'
 import chromiumLaunchArgs from '../src/chromiumLaunchArgs.mjs'
-import launchBrowser from '../src/launchBrowser.mjs'
+import launchBrowser, { INSTALL_BUDGET_MS, LAUNCH_HOOK_TIMEOUT_MS } from '../src/launchBrowser.mjs'
 import captureStable from '../src/captureStable.mjs'
 import captureStableWithBox from '../src/captureStableWithBox.mjs'
 import itemsUnionBox from '../src/itemsUnionBox.mjs'
@@ -90,6 +90,8 @@ describe('WPackageToolsE2e', function() {
         let rr = [
             'chromiumLaunchArgs',
             'launchBrowser',
+            'INSTALL_BUDGET_MS',
+            'LAUNCH_HOOK_TIMEOUT_MS',
             'captureStable',
             'captureStableWithBox',
             'itemsUnionBox',
@@ -183,9 +185,9 @@ describe('WPackageToolsE2e', function() {
         assert.strict.deepEqual(r, rr)
     })
 
-    it('各鍵值型別正確(chromiumLaunchArgs為凍結陣列, pixelmatchOpt為凍結物件, 三個框幾何常數與五個CDN時限常數為數字, 其餘為函數)', function() {
+    it('各鍵值型別正確(chromiumLaunchArgs為凍結陣列, pixelmatchOpt為凍結物件, 三個框幾何常數、兩個啟動時限常數與五個CDN時限常數為數字, 其餘為函數)', function() {
         let r = Object.keys(wpte).filter((k) => typeof wpte[k] !== 'function').map((k) => [k, Array.isArray(wpte[k]) ? 'array' : typeof wpte[k]])
-        let rr = [['chromiumLaunchArgs', 'array'], ['INK_PAD', 'number'], ['BOX_PAD', 'number'], ['BOX_STROKE', 'number'], ['pixelmatchOpt', 'object'], ['CDN_BUDGET_MS', 'number'], ['CDN_FILE_TOTAL_MS', 'number'], ['CDN_LOCK_STALE_MS', 'number'], ['CDN_WAIT_MS', 'number'], ['CDN_HOOK_TIMEOUT_MS', 'number']]
+        let rr = [['chromiumLaunchArgs', 'array'], ['INSTALL_BUDGET_MS', 'number'], ['LAUNCH_HOOK_TIMEOUT_MS', 'number'], ['INK_PAD', 'number'], ['BOX_PAD', 'number'], ['BOX_STROKE', 'number'], ['pixelmatchOpt', 'object'], ['CDN_BUDGET_MS', 'number'], ['CDN_FILE_TOTAL_MS', 'number'], ['CDN_LOCK_STALE_MS', 'number'], ['CDN_WAIT_MS', 'number'], ['CDN_HOOK_TIMEOUT_MS', 'number']]
         assert.strict.deepEqual(r, rr)
         assert.strict.equal(Object.isFrozen(wpte.chromiumLaunchArgs), true)
         assert.strict.equal(Object.isFrozen(wpte.pixelmatchOpt), true)
@@ -195,6 +197,8 @@ describe('WPackageToolsE2e', function() {
         let mods = {
             chromiumLaunchArgs,
             launchBrowser,
+            INSTALL_BUDGET_MS,
+            LAUNCH_HOOK_TIMEOUT_MS,
             captureStable,
             captureStableWithBox,
             itemsUnionBox,

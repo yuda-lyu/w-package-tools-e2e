@@ -1,13 +1,13 @@
 {
   "name": "w-package-tools-e2e",
-  "version": "1.0.54",
+  "version": "1.0.55",
   "dependencies": {
     "dotenv": "^18.0.10",
     "json5": "^2.2.3",
     "pixelmatch": "^8.0.0",
     "pngjs": "^7.0.0",
     "sharp": "^0.35.5",
-    "w-playwright": "^1.0.5",
+    "w-playwright": "^1.0.6",
     "wsemi": "^1.9.78"
   },
   "devDependencies": {

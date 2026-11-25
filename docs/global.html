@@ -7022,16 +7022,24 @@ requestfinished事件——清單內之網址之請求完成而不是由本處�
 SharedWorker之請求、任何Worker內之WebSocket、context.request(APIRequestContext)不經route亦無request事件，攔不到(見README限制)。
 Node端(patchFetch)：覆寫全域fetch，http(s)網址(依fetch自己之解析規則正規化：去前後空白與tab、主機小寫、預設埠省略)只回本地副本，清單外拋E_CDN_EXTERNAL並記錄，回送位址與opt.allow明列者放行，非http(s)原樣放行；回傳還原函數。
 只覆寫全域fetch：先於patchFetch保存之fetch參考、http／https模組、undici、全域WebSocket等其他出口不攔。清單之網址亦先正規化再比對，故不因寫法不同(大小寫主機、預設埠)而漏判。
-兩者不綁定w-playwright之內部接縫，只用Playwright公開之route；已用w-playwright者可於其啟動browser之處(例如setBrowserTypeForTest之launch替身內)呼叫routeBrowser；isRouted(target)供使用端之啟動出口斷言「沒有漏接」。</p>
+兩者不綁定w-playwright之內部接縫，只用Playwright公開之route(本模組與createDirLock、loadCdnManifest、genCdnManifest只依wsemi，不依賴w-playwright，故可獨立抽出)；isRouted(target)供使用端之啟動出口斷言「沒有漏接」。</p>
+<p>啟動出口之接線(首選)：已用w-playwright(1.0.6起)者於測試共用處一行掛上其啟動後鉤子：wpw.onBrowserCreated((t) =&gt; cdn.routeBrowser(t))(wpw為import wpw from 'w-playwright'；回傳還原函數，於after呼叫)。
+鉤子套在「最終回傳給呼叫端之瀏覽器」上(Browser或launchChromiumPersistent之持久BrowserContext，routeBrowser皆接受)，與setBrowserTypeForTest(替換、非疊放)正交：不論各處如何啟動(含使用端自設之setBrowserTypeForTest替身內直接next())皆生效，
+使用端不必在各替身內自行包路由。鉤子失敗(routeBrowser拋錯)時w-playwright先關閉該瀏覽器再reject E_LAUNCH_HOOK(固定詞彙，原錯誤只交其funLog)；
+鉤子套在替身之回傳值上，替身若回傳非Playwright物件(測試用假瀏覽器)，routeBrowser拋E_CDN_ARG而啟動reject E_LAUNCH_HOOK，故載入時即全域掛鉤子者，以假物件替身驗接線之測試須先還原鉤子(或只在需要路由之describe內才掛)。
+不依w-playwright者(或要在單一啟動出口以斷言保證)用下列選項：routeLaunch(next)與useMocha({ install })，或啟動後自行routeBrowser。</p>
 <p>本機檔來源(opt.sources)與空腳本(opt.stubs)：清單內之網址可改取自本機檔(不下載)，未釘版之外部腳本可改以0位元組之空內容供應。
 本機檔照清單之sha256與大小校驗後才入內容定址快取(邊讀邊算、與清單不符即拒收並清除暫存檔，E_CDN_SOURCE，不改走下載)，故不產生「清單有、檔來自他處而不校驗」之缺口；
 已備妥之快取不讀本機檔，快取損毀時自本機檔重補；有本機來源者離線照常補齊(不連網)，同內容(sha256相同)之多個網址只要有一個有本機來源即不下載，
 同內容有多個本機來源時全部逐一校驗、任一不符即拒收(不因順序擇一)；stats().sourced計自本機來源補入之內容數。
 空腳本併入有效清單(stats().files與stubs計入)，內容為空檔(sha256固定)，網址已在清單內者須同為空檔，否則拋錯(清單與opt.stubs不得各說各話)。</p>
-<p>啟動出口之接線：routeLaunch(next, ...args)呼叫next(...args)啟動瀏覽器，啟動後掛routeBrowser並斷言已掛(isRouted)，掛失敗時先關閉已啟動之瀏覽器再拋原錯誤
+<p>啟動出口之接線(不依w-playwright之選項)：routeLaunch(next, ...args)呼叫next(...args)啟動瀏覽器，啟動後掛routeBrowser並斷言已掛(isRouted)，掛失敗時先關閉已啟動之瀏覽器再拋原錯誤
 (啟動函數之替身內拋出之錯誤常被改寫為固定訊息而隱藏原因，故失敗時先把原因經maskDiagText遮蔽後印到stderr，並發'route-launch-failed'事件)；
 useMocha(opt)於mocha之describe內註冊before(this.timeout對齊hookTimeoutMs並ensure)、beforeEach／afterEach(每案前取違規標記、案後斷言自標記起無新增違規)，
 opt.install(routeLaunch)於取得之後呼叫、其回傳之函數於after還原(例如安裝w-playwright之setBrowserTypeForTest替身)，使各使用端免自寫接線。</p>
+<p>before之時限：useMocha之before與使用端自掛之取得點，時限為hookTimeoutMs(＝CDN_HOOK_TIMEOUT_MS，不沿用mocha全域之180秒)；其內只含cdn.ensure()，不啟動瀏覽器。
+(hookTimeoutMs未自給budgetMs等時限者等於CDN_HOOK_TIMEOUT_MS，自給者為實例之實際值)同一個before還要啟動瀏覽器(可能遇首次瀏覽器安裝，其建議時限為w-playwright之LAUNCH_HOOK_TIMEOUT_MS，launchBrowser.mjs亦具名轉出)者：
+串行(先await cdn.ensure()再啟動)兩段最壞時間相加，掛this.timeout(cdn.hookTimeoutMs + LAUNCH_HOOK_TIMEOUT_MS)；Promise.all並行者取兩者較大者；分在兩個before者各掛各自之時限。mocha之時限上限為2147483647毫秒。</p>
 <p>違規之判定：violationMark()於測試前取標記、assertNoViolation(mark)於測試後斷言「自標記起無新增違規」，涵蓋close()未被呼叫或其錯誤被呼叫端吞掉者；
 以事件(onTrace)而非延時同步。事件(凍結物件{ type, ... }，同wsemi getTrace)：'lock-acquired'(取得鎖)、'lock-wait'(首次發現鎖被占用)、'lock-poll'(每輪等候)、'lock-stale-judged'(判定鎖殘留，尚未回收，
 此時同步呼叫之回調可進行檔案操作以重現交錯)、'lock-stale-reclaimed'、'swept'(含n，清除之殘留項數)、'downloaded'(含url)、'sourced'(含kind、url，自本機來源補入之一個內容，kind為'file'或'empty')、'ready'、'served'(含kind、url)、'violation'(含kind、url、reason)、
@@ -7047,7 +7055,7 @@ E_CDN_ROUTE(routeLaunch：啟動之瀏覽器未掛路由)、E_CDN_EXTERNAL(清�
     
     <dt class="tag-source">Source:</dt>
     <dd class="tag-source"><ul class="dummy"><li>
-        <a href="createCdnLocal.mjs.html">createCdnLocal.mjs</a>, <a href="createCdnLocal.mjs.html#line307">line 307</a>
+        <a href="createCdnLocal.mjs.html">createCdnLocal.mjs</a>, <a href="createCdnLocal.mjs.html#line327">line 327</a>
     </li></ul></dd>
     
 
@@ -7094,7 +7102,8 @@ E_CDN_ROUTE(routeLaunch：啟動之瀏覽器未掛路由)、E_CDN_EXTERNAL(清�
 
     <h5 class="h5-examples">Example</h5>
     
-    <pre class="prettyprint"><code>import createCdnLocal from 'w-package-tools-e2e/src/createCdnLocal.mjs'
+    <pre class="prettyprint"><code>import wpw from 'w-playwright'
+import createCdnLocal from 'w-package-tools-e2e/src/createCdnLocal.mjs'
 import launchBrowser from 'w-package-tools-e2e/src/launchBrowser.mjs'
 
 let cdn = createCdnLocal({ manifest: './test/tools/cdn.manifest.json' })
@@ -7102,13 +7111,22 @@ cdn.patchFetch() //Node端fetch
 
 describe('demo', function() {
     cdn.useMocha() //before取得(時限對齊下載預算)、每案前後夾violationMark／assertNoViolation(自標記起有清單外之外部請求即失敗)
+    let restoreHook = null
+    before(function() {
+        restoreHook = wpw.onBrowserCreated((t) => cdn.routeBrowser(t)) //首選：一行，其後任何經w-playwright啟動之瀏覽器(含launchBrowser、使用端自設setBrowserTypeForTest之替身)皆已掛路由
+    })
+    after(function() {
+        restoreHook()
+    })
     it('page', async function() {
-        let browser = await cdn.routeLaunch(() => launchBrowser()) //啟動後掛routeBrowser並斷言已掛，其newContext/newPage之頁面導向本地副本
+        let browser = await launchBrowser() //經鉤子掛好routeBrowser，其newContext/newPage之頁面導向本地副本
         let page = await browser.newPage()
         await page.setContent('&lt;script src="https://cdn.example.com/lib.js">&lt;/script>')
         await browser.close() //有違規則於關閉後拋E_CDN_EXTERNAL
     })
-})</code></pre>
+})
+
+//不依w-playwright者：let browser = await cdn.routeLaunch(() => launchBrowser()) //啟動後掛routeBrowser並斷言已掛</code></pre>
 
 
 
@@ -15952,7 +15970,7 @@ console.log(r)
     <dt class="tag-description">Description:</dt>
     <dd class="tag-description"><ul class="dummy"><li><p>以確定性渲染旗標啟動無頭Chromium，為e2e測試端、標準圖產製端與探測腳本之唯一啟動出口</p>
 <p>經自有套件w-playwright啟動(wpw.launchChromium)，不直接使用playwright：預設為無頭並帶chromiumLaunchArgs八旗標(六旗標＋--lang=zh-TW＋--disable-smooth-scrolling)，opt.args另附加於八旗標之後，
-並帶autoInstall與installDeps(受管瀏覽器缺檔時安裝一次再啟動，Linux缺系統相依時安裝相依；兩者給布林值可覆寫，非布林值改用預設true)；其餘鍵原樣交給wpw.launchChromium(亦可給其debug、funLog、onTrace)。
+並帶autoInstall與installDeps(受管瀏覽器缺檔時安裝一次再啟動，Linux缺系統相依時安裝相依；兩者給布林值可覆寫，非布林值改用預設true)；其餘鍵原樣交給wpw.launchChromium(亦可給其debug、funLog、onTrace、installTimeout)。
 w-playwright於args之末合併唯一之--disable-features(Playwright預設＋AutofillAiWalletPrivatePasses＋呼叫端自給者)，
 停用AutofillAiWalletPrivatePasses使Windows上Chromium 153起之瀏覽器不再以無效密碼替目前使用者呼叫LogonUser(錯誤密碼次數累計將鎖定帳號)。
 opt.args任一元素無效(如不以-開頭)或連同旗標組逾10000項時w-playwright視整個args為<a href="%E6%97%97%E6%A8%99%E7%B5%84%E4%B8%80%E4%BD%B5%E5%A4%B1%E5%8E%BB%EF%BC%8C%E5%90%AB--lang=zh-TW%EF%BC%8C%E5%8F%AA%E7%95%99%E5%AE%88%E9%96%80%E4%B9%8B%E4%B8%80%E4%B8%B2%E8%88%87w-playwright%E8%A3%9C%E5%85%A5%E4%B9%8B%E4%B8%BB%E6%A9%9F%E8%AA%9E%E7%B3%BB"></a>，故只給合法旗標。
@@ -15961,13 +15979,22 @@ opt.args任一元素無效(如不以-開頭)或連同旗標組逾10000項時w-pl
 呼叫端自給語系者(opt.args含語系開關，如--lang=en-US、-lang=en-US、--LANG=en-US、--lang；或opt.lang為語系字串或false)以呼叫端者為準，launchBrowser不帶旗標組之--lang，
 故最終命令列之語系開關恰為呼叫端所給者(opt.args與opt.lang並存時以opt.args為準，opt.lang被w-playwright忽略；opt.lang為false則不帶任何--lang)；opt.lang為無效值時視為未給，仍用zh-TW。
 啟動與安裝之失敗reject w-playwright之固定詞彙錯誤(帶code，如E_LAUNCH、E_BROWSER_MISSING、E_INSTALL、E_ENV)，不附Playwright原錯誤(原錯誤只交opt.funLog)；
-opt須為物件(null於讀opt.args時即reject原生TypeError，與改版前相同)</p></li></ul></dd>
+opt須為物件(null於讀opt.args時即reject原生TypeError，與改版前相同)</p>
+<p>安裝之整體上限：autoInstall(預設true)之安裝有真實上限opt.installTimeout(毫秒；預設INSTALL_BUDGET_MS，w-playwright 1.0.6起為15分鐘；0表不限，須明確給0才不限；
+受管瀏覽器與Linux系統相依兩次安裝共用)，逾時即結束安裝子行程樹並reject E_INSTALL。installTimeout與其他未宣告之鍵同樣原樣交給wpw.launchChromium(本函數不解讀、不補預設、不改寫；無效值由w-playwright依其規則改用預設)，
+多行程並行首次安裝時後到者等Playwright安裝目錄鎖之時間亦在此上限內(實際等候上限約7.8分鐘，較小者先到，見w-playwright README)。</p>
+<p>before時限：使用端之before(內含可能遇首次安裝之launchBrowser)請掛this.timeout(LAUNCH_HOOK_TIMEOUT_MS)，不沿用mocha全域之逾時(如180秒)；
+本檔自w-playwright轉出INSTALL_BUDGET_MS與LAUNCH_HOOK_TIMEOUT_MS(值以w-playwright為準，本檔不另定義；LAUNCH_HOOK_TIMEOUT_MS ＝ INSTALL_BUDGET_MS ＋ 結束安裝子行程樹之等待上限10秒 ＋ 啟動逾時預設3分鐘 ＋ 餘裕1分鐘)，
+呼叫端另給installTimeout者，時限以差額調整：LAUNCH_HOOK_TIMEOUT_MS − INSTALL_BUDGET_MS ＋ installTimeout(installTimeout給0即不限，此時before亦無有限之建議時限)；
+另給timeout(Playwright之啟動逾時，預設3分鐘)者，同理以其取代該項(再加上timeout與3分鐘之差額)。
+同一個before先後做「首次瀏覽器安裝」與「createCdnLocal之cdn.ensure()」者，兩段最壞時間相加：串行(先await cdn.ensure()再await launchBrowser())掛this.timeout(cdn.hookTimeoutMs + LAUNCH_HOOK_TIMEOUT_MS)(取兩者較大者不足以涵蓋兩段皆最壞)，
+以Promise.all並行者取兩者較大者，分在兩個before者各掛各自之時限(cdn.hookTimeoutMs與LAUNCH_HOOK_TIMEOUT_MS)；mocha之時限上限為2147483647毫秒。</p></li></ul></dd>
     
 
     
     <dt class="tag-source">Source:</dt>
     <dd class="tag-source"><ul class="dummy"><li>
-        <a href="launchBrowser.mjs.html">launchBrowser.mjs</a>, <a href="launchBrowser.mjs.html#line53">line 53</a>
+        <a href="launchBrowser.mjs.html">launchBrowser.mjs</a>, <a href="launchBrowser.mjs.html#line78">line 78</a>
     </li></ul></dd>
     
 
@@ -16014,12 +16041,18 @@ opt須為物件(null於讀opt.args時即reject原生TypeError，與改版前相�
 
     <h5 class="h5-examples">Example</h5>
     
-    <pre class="prettyprint"><code>import launchBrowser from 'w-package-tools-e2e/src/launchBrowser.mjs'
+    <pre class="prettyprint"><code>import launchBrowser, { LAUNCH_HOOK_TIMEOUT_MS } from 'w-package-tools-e2e/src/launchBrowser.mjs'
 
 let browser = await launchBrowser()
 let page = await browser.newPage()
 await page.goto('http://127.0.0.1:8080')
-await browser.close()</code></pre>
+await browser.close()
+
+//mocha之before內啟動瀏覽器(可能遇首次安裝)：時限不沿用全域180秒
+before(async function() {
+    this.timeout(LAUNCH_HOOK_TIMEOUT_MS)
+    browser = await launchBrowser()
+})</code></pre>
 
 
 
@@ -16311,6 +16344,47 @@ await browser.close()</code></pre>
             
 
             <td class="description last"><p>輸入Linux缺系統相依時是否安裝相依布林值(安裝子行程不接主控台輸入，須互動輸入密碼之sudo會失敗)，非布林值時用預設，預設true</p></td>
+        </tr>
+
+    
+
+        <tr>
+            
+                <td class="name"><code>installTimeout</code></td>
+            
+
+            <td class="type">
+            
+                
+<span class="param-type">Number</span>
+|
+
+<span class="param-type">String</span>
+
+
+
+            
+            </td>
+
+            
+                <td class="attributes">
+                
+                    &lt;optional><br>
+                
+
+                
+
+                
+                </td>
+            
+
+            
+                <td class="default">
+                
+                </td>
+            
+
+            <td class="description last"><p>輸入autoInstall之整體安裝上限毫秒(有效數字0~2147483647，數字字串轉值後使用；0表不限，須明確給0才不限)，原樣交給wpw.launchChromium，預設未給(由w-playwright採INSTALL_BUDGET_MS)，無效值時w-playwright改用其預設</p></td>
         </tr>
 
     
@@ -35082,7 +35156,7 @@ console.log(r) //{ written: false, reason: 'same', numDiff: 0 }</code></pre>
 <br class="clear">
 
 <footer>
-    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 4.0.5</a> on Thu Nov 26 2026 00:56:08 GMT+0800 (台北標準時間) using the <a href="https://github.com/clenemt/docdash">docdash</a> theme.
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 4.0.5</a> on Thu Nov 26 2026 04:20:55 GMT+0800 (台北標準時間) using the <a href="https://github.com/clenemt/docdash">docdash</a> theme.
 </footer>
 
 <script>prettyPrint();</script>

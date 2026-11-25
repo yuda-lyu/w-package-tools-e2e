@@ -32,12 +32,12 @@ rg -n "(from\s+|import\(\s*|require\(\s*)['\"\`]playwright(-core)?['\"\`/]" <w-p
 - `SELENIUM_REMOTE_URL` 有值即 `E_ENV`、不啟動:`[LB06]`.
 - `opt.args` 含無效元素時整個 `args`(含六旗標)視為 `[]`、只留守門之一串:`[LB03]`.
 - 呼叫端之 `--enable-features` 另合併為唯一一串,守門功能與被呼叫端停用之項剔除:`[LB02c]`.
-- `opt` 之有效鍵(`headless`、`channel`、`executablePath`、布林之 `autoInstall`／`installDeps`、`timeout`)原樣送出:`[LB02d]`(spy 不轉呼叫 w-playwright);非布林之 `autoInstall`／`installDeps` 用預設 `true`:`[LB08]`.
+- `opt` 之有效鍵(`headless`、`channel`、`executablePath`、布林之 `autoInstall`／`installDeps`、`timeout`)原樣送出:`[LB02d]`(spy 不轉呼叫 w-playwright);非布林之 `autoInstall`／`installDeps` 用預設 `true`:`[LB08]`;`installTimeout` 與自用鍵 `debug`／`funLog`／`onTrace` 原樣送出、未給不帶、不轉傳給 BrowserType:`[LB13]`(R-LB-8).
 - 旗標組之內容(六旗標原序＋`--lang=zh-TW`)以測試內之獨立契約值比對(`[LB00]`),不以受測陣列自比.
 - `opt.args` 含無效元素時整個 `args`(含旗標組之 `--lang=zh-TW`)被捨棄,w-playwright 改補主機語系:`[LB03]`(模擬主機語系 de-DE).
 
 ### R-LB-5 測試之啟動紀律
-- 本套件之測試只啟動 headless shell(無頭、未給通道);不得啟動真 Chrome、Edge、完整 Chromium.每個 e2e 檔以 `before` 起一個瀏覽器、`after` 關,案例各開 context/page.
+- 本套件之測試只啟動 headless shell(無頭、未給通道);不得啟動真 Chrome、Edge、完整 Chromium.每個 e2e 檔以 `before` 起一個瀏覽器、`after` 關,案例各開 context/page;`before` 起瀏覽器者掛 `this.timeout(LAUNCH_HOOK_TIMEOUT_MS)`(R-LB-8,`[LH06]` 盤點守門).
 - 本套件無「以真啟動探測可用性」或「改寫 `chromium.launch`」之測試(2026-11-13 盤點:`rg -n "channel|headless:\s*false|chromium\." test` 無啟動用之命中);新增時依 w-playwright 設計 §5.2 改用 `findSystemChrome`／`setBrowserTypeForTest`.
 
 ### R-LB-6 語系旗標 `--lang=zh-TW`(排程第 585 項,2026-11-21;使用者裁示「甲」)
@@ -66,10 +66,28 @@ rg -n "(from\s+|import\(\s*|require\(\s*)['\"\`]playwright(-core)?['\"\`/]" <w-p
 - 實測(本機 Chromium 159、headless shell):預設即非平滑(Ctrl+End、Ctrl+Home、PageDown、滾輪、`scrollTo({behavior:'smooth'})`、CSS `scroll-behavior:smooth` 皆即時到位,有無本旗標之位置序列相同);加 `--enable-smooth-scrolling` 才出現中間位置(同 `e2e-launchBrowserScroll` 之對照組).故於本機**無行為差異**,標準圖預期 0 改變;旗標之作用是使確定性不依賴預設值與主機設定(使用端環境曾實測動畫為開).
 - 測試:`[LB00]`(契約值 `FULL`、順序、恰一個、凍結)、`[LB01]`、`[LB02]`、`[LB02b]`、`[LB02d]`、`[LB07]`(真命令列含該旗標)、`[LB07c]`、`[LB09]`、`[LB09c]`、`[LB10]`、`[LB12]`;`e2e-launchBrowserScroll` `[SS01]`(預設啟動之鍵盤捲動無中間位置)、`[SS02]`(對照組:開啟平滑捲動時量測得到中間位置,證明 `[SS01]` 之量測有鑑別力).**`[SS01]` 於旗標有無下皆綠(本機預設已為非平滑),旗標之存在由 `[LB00]`、`[LB07]` 守住**——不宣稱 `[SS01]` 為此旗標之修前紅.
 
+### R-LB-8 安裝預算與 `before` 時限之轉出、`installTimeout` 之傳遞、本庫測試之 `before` 時限(排程第 636 項 ⑤,2026-11-26;w-playwright 1.0.6〔t636w〕提供 `INSTALL_BUDGET_MS`、`LAUNCH_HOOK_TIMEOUT_MS`、`installTimeout`、`onBrowserCreated`;需求出處:使用端)
+- 背景:w-playwright 1.0.6 起 `autoInstall` 之安裝有真實整體上限(`opt.installTimeout`,預設 `INSTALL_BUDGET_MS`＝15 分鐘,0 表不限;兩次安裝共用一個預算),並提供使用端 `before`(內含可能遇首次安裝之啟動)之建議時限 `LAUNCH_HOOK_TIMEOUT_MS`(＝預算＋結束安裝子行程樹之等待 10 秒＋啟動逾時預設 3 分鐘＋餘裕 1 分鐘,約 19.2 分鐘).本庫為使用端之測試啟動出口,轉出兩常數並以其校正本庫測試之 `before` 時限;常數只有 w-playwright 一份(主控已定).
+- 規則:
+
+| # | 規則 | 測試 |
+|---|---|---|
+| 01 | `src/launchBrowser.mjs` 具名匯出 `INSTALL_BUDGET_MS`、`LAUNCH_HOOK_TIMEOUT_MS`,值為 `wpw` 同名屬性(`export const X = wpw.X`);入口 `WPackageToolsE2e` 於 `launchBrowser` 之後增同名兩鍵、同值;兩者為 1～2147483647 之整數毫秒(mocha 時限上限);`LAUNCH_HOOK_TIMEOUT_MS` ＞ `INSTALL_BUDGET_MS` 且 ＞ 180000 | `unit-launchBudget` `[LH01]`、`unit-WPackageToolsE2e` |
+| 02 | **不自行定義第二份(不複製字面值、不設備援值)**:靜態——兩個轉出各為單行 `export const X = wpw.X`(行尾無備援 `??`／`\|\|`、無運算),且 `X` 於去註解後之程式碼只出現該行(不另有定義或使用);動態——鏡像證明:把整個 `src/` 複製到 `test/_tmp/` 之暫存夾、其 `node_modules` 放常數為不同值(123456、654321)之假 `w-playwright`,`launchBrowser.mjs` **與主檔 `WPackageToolsE2e`** 之轉出值隨之為假值且啟動呼叫走假套件(靜態規則看不到之複製——如另建 `wpw` 之副本再覆寫常數——由動態證明抓到:變異 M18 只有 `[LH03]` 擊殺、`[LH02]` 單獨存活;主檔寫成字面值之變異 M19 只有 `[LH03]` 擊殺);另一鏡像不放常數,轉出值須為 `undefined`(不得以 `??` 等補一個自有數值,變異 M21) | `[LH02]`、`[LH03]`、`[LH03b]` |
+| 03 | `installTimeout` 與 `debug`、`funLog`、`onTrace` 等其餘鍵**原樣**交給 `wpw.launchChromium`(同一物件參照;含 `0`、數字字串、負數、`'abc'`、`null`、`undefined`、`NaN`、`Infinity` 等值;本函數不解讀、不補預設、不改寫、不丟鍵);未給時**不帶該鍵**(預設由 w-playwright 採 `INSTALL_BUDGET_MS`);經 w-playwright 後 `installTimeout`、`autoInstall`、`installDeps`、`debug`、`funLog`、`onTrace` 不轉傳給 BrowserType(為自用鍵,以替身取合併後之選項驗) | `api-launchBrowserWiring` `[LB13]` |
+| 04 | **`createCdnLocal` 系列不得依賴 w-playwright**:`createCdnLocal`、`createDirLock`、`loadCdnManifest`、`genCdnManifest`、`tools/genCdnManifest.mjs` **及其相對匯入之閉包**去註解後無 `w-playwright` 之字串(其前後為引號或路徑分隔字元者:import、require、動態 import、`node_modules/w-playwright/…` 路徑皆不可;`w-playwright-xxx` 等相近套件名不算);只改文件與範例(`rulebook_cdn.md` R-CL-16) | `[LH04]`(含閉包走訪與字串判準之鑑別力、防空集合) |
+| 05 | **本庫測試中於 `before` 直接啟動瀏覽器者,時限掛 `this.timeout(LAUNCH_HOOK_TIMEOUT_MS)`**(啟動呼叫:`launchBrowser(`、`launchChromium(`、`launchChromiumPersistent(`,可帶接收者如 `wpte.launchBrowser(`、`wpw.launchChromium(`),不沿用 mocha 全域 180 秒或 describe 層之 120／180 秒;現有 7 處(`e2e-browserPrimitives`、`e2e-captureEquivalence` 兩處、`e2e-itemsUnionBoxGraphics`、`e2e-portInImage`、`e2e-probeStuckTooltip`、`e2e-waitDrawerReady`)皆掛;盤點器 `auditLaunchHooks`(`stripComments`／`matchParen` 於 `test/tools/srcScan.mjs`,與 `unit-childProcHide` 共用)只認 `before`(不含 `beforeEach`)、只及 hook 本體內直接呼叫者、`this.timeout(<運算式>)`(可跨行)須在第一個啟動呼叫**之前**且運算式含識別字 `LAUNCH_HOOK_TIMEOUT_MS`(單獨、與 `cdn.hookTimeoutMs`／`CDN_HOOK_TIMEOUT_MS` 相加或取較大者皆可);同一 `before` 另含 `cdn.ensure()` 者之建議值見 06 | `[LH05]`(盤點器鑑別力:未掛／他種時限／單獨相加較大者跨行／註解字串／時限在啟動之後／帶接收者／`beforeEach`／屬性取用／箭頭函數／多 hook 行號)、`[LH06]`(全庫盤點,至少 7 處以防空集合) |
+| 06 | **兩常數之關係(同一 `before` 同時含首次瀏覽器安裝與 CDN 取得)**:`cdn.hookTimeoutMs`(未自給 `budgetMs` 等時限者＝`CDN_HOOK_TIMEOUT_MS`,35.5 分;自給者以實例之實際值為準)為 `cdn.ensure()` 最壞時間之建議時限,`LAUNCH_HOOK_TIMEOUT_MS` 為啟動(含首次安裝)最壞時間之建議時限;**串行(先 `await cdn.ensure()` 再啟動)兩段最壞時間相加**,掛 `cdn.hookTimeoutMs + LAUNCH_HOOK_TIMEOUT_MS`(約 54.7 分),取較大者不足(只涵蓋一段為最壞);`Promise.all` 並行者取較大者;分在兩個 `before` 者各掛各自之時限;給 `installTimeout` 者以差額調整(`LAUNCH_HOOK_TIMEOUT_MS − INSTALL_BUDGET_MS ＋ installTimeout`,給 0 即無有限建議值;另給 `timeout` 者再加上它與 Playwright 啟動逾時預設 3 分鐘之差額).本庫測試無「同一 `before` 含 CDN 取得與真瀏覽器啟動」者(`e2e-createCdnLocal` 之 `before` 只對夾具伺服器取得,啟動在 `it`/`beforeEach` 內),故無案可掛;`createCdnLocal` 不內建此常數(不依賴 w-playwright,R-CL-16) | README〈Installation〉第 7 點、`launchBrowser` JSDoc、`rulebook_cdn.md` R-CL-16(文件) |
+
+- 行為變更(README §5 之 2026-11-26 條):`launchBrowser` 預設 `autoInstall: true` 之安裝由無時限改為受 `INSTALL_BUDGET_MS`(15 分鐘)限制,逾時 `E_INSTALL`;w-playwright 之 `ensureChromium` 之 `timeout` 預設由 0 改為 15 分鐘(屬 w-playwright).瀏覽器已備妥者不受影響.真實上限之行為(逾時結束子行程樹、兩次安裝共用預算、並行後到者等鎖)之測試在 w-playwright(`api-installBudget`、`unit-installBudget`),本庫不重複且**不實際下載瀏覽器**(`autoInstall` 之真安裝路徑本庫無測試,與 R-LB-5 一致).
+- 已知限制:①`[LH06]` 只及 `before` 內**直接**呼叫 `launchBrowser(` 者;經輔助函數間接啟動者、`beforeEach` 與 `it` 內之啟動(`e2e-readyWaits` 之 `beforeEach`、`e2e-createCdnLocal` 與 `api-launchBrowserWiring` 之 `it`、`e2e-launchBrowserLang`／`e2e-launchBrowserScroll` 之 `it`)不在盤點範圍,沿用 describe 層時限(首次安裝只落在第一個啟動者;本機已備妥瀏覽器)——若使用者要求 `beforeEach`／`it` 亦納入,另派.②`LAUNCH_HOOK_TIMEOUT_MS` 之 `before` 時限為「單一 hook」之上限,hook 內另含其他耗時工作(如 `e2e-portInImage` 之 `before` 另建暫存夾與截圖)須自行加計(現皆為秒級).
+- 變異(`./tmp` 鏡像,只複製檔案、無目錄連結,2026-11-26,37 個全數擊殺,另 2 個預期存活之對照,與預期不符 0):常數寫成字面值(`[LH02]`、`[LH03]` 各自單獨皆擊殺)、取錯屬性、備援值 `?? 9e5`(`[LH02]`、`[LH03b]` 各自單獨皆擊殺)、入口少一鍵、主檔寫成字面值(M19:僅 `[LH03]` 之主檔鏡像擊殺,M19a 對照:`unit-WPackageToolsE2e` 與 `[LH01]` 存活)、以計算屬性名改寫 `wpw` 副本(M18:靜態與同值比對皆不抓,僅 `[LH03]` 擊殺,M18a 對照:`[LH01]`、`[LH02]` 存活)、`installTimeout` 丟掉／補預設／丟非數字／轉 Number、自用鍵被丟、`createCdnLocal` 系列五檔各加 `w-playwright` 之 import／require／動態 import／字串／工具腳本、經相對匯入之閉包帶入(M20)、`before` 時限被拿掉／改回 120000／同檔第二處被拿掉、盤點器誤含 `beforeEach`／時限判定恆真／不核對時限在啟動之前／只認 `launchBrowser(`／字串判準不含路徑分隔字元／閉包不走相對匯入／不剝註解、`[CE16c]` 鉤子不掛路由／不還原／持久入口未經鉤子.修前(改前 src)之紅:新測試與 6 個 e2e 檔皆因 import 具名匯出而 LOAD-ERROR;`[LB13]`、`[LH04]`、`[CE16c]` 於修前亦綠(守門測試,以上列變異證其鑑別力);`[LH06]` 於改前之 6 個 e2e 檔(最終 src ＋ 改前測試)為紅,列出 7 處未掛.
+
 ## 2. 改動範圍 → 測試檔
 
 | 改動範圍 | 受影響之測試檔 |
 |---|---|
+| `src/launchBrowser.mjs`(含 R-LB-8 之轉出常數與 `installTimeout` 傳遞)、`src/WPackageToolsE2e.mjs` 之 `INSTALL_BUDGET_MS`／`LAUNCH_HOOK_TIMEOUT_MS` 鍵 | `unit-launchBudget`、`unit-WPackageToolsE2e`、`api-launchBrowserWiring`(`[LB13]`);`before` 啟動瀏覽器之 e2e 檔之時限(`[LH06]`) |
 | `src/launchBrowser.mjs`、`src/chromiumLaunchArgs.mjs`、`package.json` 之 w-playwright 版本 | `api-launchBrowserWiring`、全部 e2e 檔(`e2e-browserPrimitives`、`e2e-captureEquivalence`、`e2e-itemsUnionBoxGraphics`、`e2e-launchBrowserLang`、`e2e-launchBrowserScroll`、`e2e-portInImage`、`e2e-probeStuckTooltip`、`e2e-waitDrawerReady`;皆經 `launchBrowser`)、`unit-WPackageToolsE2e`;輔助 `test/tools/withHostLang.mjs`、`test/tools/launchBrowserCmdline.mjs` |
 | `src/WPackageToolsE2e.mjs`(入口之鍵) | `unit-WPackageToolsE2e` |
 | 截圖、量框、等待類原語 | 對應之 e2e 檔(見 `README.md` §6) |

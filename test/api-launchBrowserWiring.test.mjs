@@ -12,6 +12,7 @@ import withHostLang from './tools/withHostLang.mjs'
 //[LB04]: 替身以 next() 走真路徑, 真啟動 headless shell
 //[LB07]、[LB07c]: 子行程內不掛替身之真路徑, 真啟動 headless shell, 讀 Playwright 之 <launching> 紀錄驗實際命令列(含語系開關恰一個)
 //[LB09]～[LB12]: 語系旗標(--lang=zh-TW)與呼叫端自給語系(opt.args、opt.lang)之合併, 以替身取 w-playwright 合併後之 args(R-LB-6)
+//[LB13]: installTimeout(autoInstall 之整體安裝上限; 排程第 636 項 ⑤)與 w-playwright 自用鍵之原樣傳遞(spy 不啟動; 替身層驗自用鍵不轉傳)
 //本檔只啟動 headless shell(無頭、未給通道), 不啟動真 Chrome、Edge、完整 Chromium
 
 
@@ -294,6 +295,53 @@ describe('launchBrowser 經 w-playwright(接線)', function() {
                 assert.strict.equal(raw[0].installDeps, true, `installDeps for ${String(v)}`)
             }, false)
         }
+    })
+
+    it('[LB13] opt.installTimeout(autoInstall之整體安裝上限)與w-playwright之自用鍵(debug、funLog、onTrace)原樣送給wpw.launchChromium(含0、數字字串、無效值; 不解讀、不補預設、不改寫); 未給時不帶該鍵(預設INSTALL_BUDGET_MS由w-playwright採用); 經w-playwright後不轉傳給BrowserType(為自用鍵)', async function() {
+        //需求(排程第 636 項 ⑤): installTimeout 之傳遞——本函數之 ...opt 本即原樣交出, 以測試釘住, 防日後加入白名單或預設而丟鍵
+        let values = [900000, 12345, 0, '5000', -1, 'abc', null, undefined, NaN, Infinity]
+        for (let v of values) {
+            await withSpy(async (raw) => {
+                await launchBrowser({ installTimeout: v })
+                assert.strict.equal(raw.length, 1)
+                if (v === undefined || v === null) {
+                    //w-playwright 視 undefined、null 為未給(K3): 鍵不帶或原值皆等價, 不釘「鍵存在」
+                    assert.strict.ok(!Object.hasOwn(raw[0], 'installTimeout') || Object.is(raw[0].installTimeout, v), `installTimeout 不得被補為他值: ${String(v)}`)
+                }
+                else {
+                    assert.strict.ok(Object.hasOwn(raw[0], 'installTimeout'), `installTimeout 鍵須原樣送出: ${String(v)}`)
+                    assert.strict.ok(Object.is(raw[0].installTimeout, v), `installTimeout 值須原樣送出: ${String(v)}`)
+                }
+            }, false)
+        }
+
+        //未給: 不帶該鍵(不由本函數補預設; 預設為 w-playwright 之 INSTALL_BUDGET_MS)
+        await withSpy(async (raw) => {
+            await launchBrowser({ autoInstall: true })
+            assert.strict.equal(raw.length, 1)
+            assert.strict.equal(Object.hasOwn(raw[0], 'installTimeout'), false)
+        }, false)
+
+        //與 w-playwright 其他自用鍵並用: 原樣(同一物件參照)送出
+        let funLog = () => {}
+        let onTrace = () => {}
+        await withSpy(async (raw) => {
+            await launchBrowser({ installTimeout: 4321, debug: true, funLog, onTrace })
+            assert.strict.equal(raw[0].installTimeout, 4321)
+            assert.strict.equal(raw[0].debug, true)
+            assert.strict.equal(raw[0].funLog, funLog)
+            assert.strict.equal(raw[0].onTrace, onTrace)
+        }, false)
+
+        //經 w-playwright(替身層取合併後之選項): 自用鍵不轉傳給 BrowserType(installTimeout 被 w-playwright 辨識為自用鍵而非原樣交 Playwright)
+        await withFake(async () => stub, async (calls) => {
+            //自用鍵須真的給了, 否則「不轉傳」之斷言為空斷言
+            await launchBrowser({ installTimeout: 5000, headless: true, debug: false, funLog, onTrace })
+            assert.strict.equal(calls.length, 1)
+            for (let k of ['installTimeout', 'autoInstall', 'installDeps', 'debug', 'funLog', 'onTrace']) {
+                assert.strict.equal(Object.hasOwn(calls[0], k), false, `自用鍵不得轉傳給 BrowserType: ${k}`)
+            }
+        })
     })
 
     it('[LB03] opt.args含無效元素(不以-開頭)時w-playwright判整個args無效: 旗標組(含--lang=zh-TW)一併捨棄, 只留守門之一串與w-playwright依主機系統語系補入之--lang(行為變更, README §5)', async function() {
