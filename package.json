@@ -1,17 +1,17 @@
 {
   "name": "w-package-tools-e2e",
-  "version": "1.0.56",
+  "version": "1.0.57",
   "dependencies": {
     "dotenv": "^18.0.10",
     "json5": "^2.2.3",
     "pixelmatch": "^8.0.0",
     "pngjs": "^7.0.0",
     "sharp": "^0.35.5",
-    "w-playwright": "^1.0.6",
-    "wsemi": "^1.9.79"
+    "w-playwright": "^1.0.7",
+    "wsemi": "^1.9.81"
   },
   "devDependencies": {
-    "w-package-tools": "^1.1.31"
+    "w-package-tools": "^1.1.32"
   },
   "scripts": {
     "test": "mocha --no-parallel \"test/*.test.mjs\" --timeout 180000",
