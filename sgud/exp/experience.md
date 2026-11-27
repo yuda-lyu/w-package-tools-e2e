@@ -218,6 +218,21 @@
 - **`npm i <套件>@<版>` 之副作用**: 會把 `package.json` 補上檔尾換行(原檔無),並把 `package-lock.json` 之 `version` 欄同步為 `package.json` 之版本(1.0.53 → 1.0.54,先前未同步);本輪還原檔尾換行(`package.json` 只留 `w-playwright` 範圍之一行差異),lock 之 version 同步保留(與 `package.json` 一致,非本輪所改之版本).
 - **修前紅之形狀**: 新增具名匯出使「import 具名匯出之測試檔」於修前 src 為 LOAD-ERROR(`does not provide an export named …`),不是個案紅;個案層級之鑑別力由變異證明(37 個全擊殺,另 2 個預期存活之對照);`[LB13]`、`[LH04]`、`[CE16c]` 於修前亦綠(`launchBrowser` 之 `...opt` 本即原樣、系列本不依賴 w-playwright、`createCdnLocal` 行為未變),屬守門測試,不宣稱為修前紅.
 
+## 注意事項: `noteOwn` 之完成觀察點與取樣重試(2026-11-27 p674; 規則見 `sgud/rule/rulebook_port.md` R-28～R-36)
+
+- **缺陷形狀**: 背景取樣(`noteOwn`)失敗時不寫、不重試、不告知,回傳 `undefined`——使用端既無法等「記錄已寫入」,只能輪詢預約檔並設時限(滿載時逾時),產品面亦因取樣失敗而下次開跑與 `restart` 無從依身分確認殘留.背景(fire-and-forget)工作須有完成之觀察點:回傳 Promise(帶可判讀之結果)與 `onTrace` 事件並存,二者之解開與發出次序固定(事件先、解開後).
+- **以「批」建模,不用 `sampling`／`dirty` 旗標**: 舊寫法之 `dirty` 只記「有人再呼叫」,無從知道哪些呼叫被哪次取樣涵蓋.新寫法:呼叫登記入 `queued`,每輪取樣開始時整批領走(`splice(0)`),該輪之行程表於領走**之後**才查,故必涵蓋這批呼叫;進行中再呼叫者留在 `queued` 等下一輪(不併入進行中之重試,簡單且可證).前一輪失敗不牽連下一輪.
+- **`ok` 指「該 child 已記入預約檔」,不是「取樣成功」**: 使用端要的是預約檔記有該行程;child 已結束、存活而不在表內、預約檔不存在或屬他人,皆不是記入,以 `reason` 區分.
+- **順手發現並修: 原 `writeKnown` 不核對預約檔之持有者**: `pinned`(`E2E_PORT_OFFSET` 已指定)而該埠已被他人預約時,會把本實例之行程身分寫進他人之預約檔;現只寫屬本持有鏈者(`s.ownTokens`),其餘跳過並以 `no-reservation` 告知(`[NO08]`).
+- **重試之依據**: 預設 3 次、間隔 1000 毫秒,取自同模組就緒核對之 `OWNER_TRIES`／`ownerRetryMs`(R-17、R-19);單次查詢上限取 `PORT_QUERY_TIMEOUT_MS`(R-21).用盡即 `ok:false`,不是掩蓋(規格 P6).取樣內部拋錯(`sample-error`)非暫時性,不重試.
+- **測試手法**: ①`mkTableSource()`——注入之 `tableAsync` 只記回調,由測試決定何時以什麼結果完成,`reached(n)` 以事件等第 n 次嘗試發出(不以延時);②否定斷言「尚未解開」用 `isPending(p)`:讓出一輪事件迴圈(`setImmediate`)後仍未解開——邏輯上無任何東西能解開它,不受負載影響;③間隔與逾時用 `node:test` 之 `mock.timers`(只模擬 `setTimeout`):差 1 毫秒不觸發、到點觸發;注意 `tick(1)` 會把 `noteRetryMs:0` 連續排出之重試一次跑完(單一刻度內用盡),斷言要以此為準;④寫預約檔失敗以「在暫存檔路徑建目錄」模擬(寫入拋 `EISDIR`),於 `note-attempt` 事件之同步回調內移除即得「暫時性失敗後恢復」;⑤計時器上限夾值以 `process.on('warning')` 驗無 `TimeoutOverflowWarning`;⑥「不阻擋行程結束」以真實子行程驗(`test/tools/noteOwnExitChild.mjs`,兩種模式:重試計時器、逾時計時器各待命 1 小時,父行程以 `close` 事件為準、60 秒防懸置).
+- **未驗**: 全機滿載之實況(本輪不自起加壓,以替身延遲／替身失敗代替);預設實作逾時時之「終止查詢指令」動作本身只做機制探測(`spawn` + `kill`,約 700 毫秒 `close` 為 `code:null`),無整合測試(`tableAsync` 非公開匯出,見 R-35 與帳本 §6.4);「不保持事件迴圈」則由 `[RA13]` 涵蓋.
+- **`spawn` 之 `timeout` 選項會破壞 `unref`(獨立複審 F1,實測)**: Node 之 `spawn(..., { timeout })` 內部建一個**不 `unref`** 之計時器,直到子行程結束才清除,抵消 `cp.unref()`、`cp.stdout.unref()`:不等待之行程多留到行程表查詢結束(實測 22 毫秒 → 385 毫秒;查詢懸置時最久 60 秒).改為自建計時器 `unref` 後 `cp.kill()`.測試以 `process.getActiveResourcesInfo()` 判定(使用中資源含 `Timeout` 即保持事件迴圈;不以耗時判定,不受負載影響;變異「改回 `spawn` 之 `timeout`」顯示 `["Timeout"]`).`[RA12]` 兩種模式用注入之 `tableAsync` 看不到此缺陷——預設實作之計時器與查詢行程另需 `[RA13]`.
+- **「全有或全無」之判定會誤報(複審 F2)**: 初版以 `written < total`(每個預約檔都寫成才算記入)判 `no-reservation`;`pinned` 後再宣告新埠(`extendActive` 只在 `auto` 才預約新埠)、`inherited` 宣告之埠多於上層預約者皆有「不屬本實例所預約」之埠,無檔可寫而誤報.改為「屬本持有鏈之檔一個都沒寫成才失敗」;下次開跑回收殘留預約時取各檔 `known` 之聯集,故一個寫成即足.測試補 `[NO08b]`(auto／inherited／pinned 三種 source 各一).
+- **「檔案存在而讀不出」屬暫時性(複審 C 小注)**: `readHolder` 對不存在與讀不出一律回 `null`;寫入前須以 `fs.existsSync` 區分,存在而讀不出(寫到一半、被占用)計入 `write-failed` 重試,否則被當成「預約檔不存在」而不重試(`[NO09c]`).
+- **`async` 之注入函數**: `tableAsync` 若為 `async (cb) => {...}` 而拋錯,回傳之 Promise 被拒絕,原先無人處理(unhandled rejection),且要等到逾時才算失敗;現附 `.then(undefined, () => finish(null))`(`[NO02e]`).
+- **`unref` 之取捨**: 重試與逾時計時器皆 `unref`(不阻擋行程結束,與原本 `cp.unref()` 一致),代價是「`await noteOwn()` 而行程別無事件迴圈保持者」(如純腳本、服務行程亦已結束)時,Promise 可能永不解開而行程結束;mocha 與使用端(有服務行程、測試執行器)不受影響,JSDoc 已寫明.
+
 ## 注意事項: 套件維護與驗證(2026-09-29, 移入)
 
 - `test/e2e-captureEquivalence.test.mjs` 含 w-web-sso／w-web-perm 當時實作之凍結複本(逐位元等價之對照組)與框幾何專測, 屬行為契約, 勿因「看起來重複」刪除; 凍結區段以 `eslint-disable` 保持逐字.

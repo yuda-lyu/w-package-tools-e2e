@@ -5,12 +5,13 @@ import assert from 'assert'
 import { spawn, spawnSync } from 'child_process'
 import { fileURLToPath } from 'url'
 import pidExists from '../src/pidExists.mjs'
+import reserveE2ePorts from '../src/reserveE2ePorts.mjs'
 import { spawnOccupant as spawnOccupantOf, assertOccupantIntact, stopChild } from './tools/portOccupant.mjs'
 
 
-//自動換埠之實機測試(規格 C:/opensrcOper/dspec/e2e埠與多套件同跑.md §3): 真實監聽行程, 占用者由測試自建並回驗毫髮無傷。
+//自動換埠之實機測試(規格〈e2e埠與多套件同跑〉§3, 主控規格庫): 真實監聽行程, 占用者由測試自建並回驗毫髮無傷。
 //夾具 test/tools/portFixtureRun.mjs 模擬一個套件之單開 e2e 啟動; 登錄目錄獨立於使用者之登錄目錄。
-//固定埠(不隨機; 避開 19030、18930、19050、19051、19200～19500): 基準 19620(後端)、19630(前端), 位移 100 起。
+//固定埠(不隨機; 避開 19030、18930、19050、19051、19200～19500): 基準 19620(後端)、19630(前端), 位移 100 起; [RA11]、[RA12] 另用 19580～19582(不與前者並用, 預約於獨立登錄目錄)。
 
 
 let fdPkg = path.resolve(fileURLToPath(new URL('..', import.meta.url)))
@@ -369,6 +370,67 @@ describe('reserveE2ePorts 實機', function() {
         await assertOccupantIntact(o)
         fs.writeFileSync(c.fpGate, 'open')
         assert.strict.equal(await r.closed, 0, r.out())
+    })
+
+    //noteOwn 之完成觀察點(真實行程表、真實行程): 使用端以 await 取代輪詢預約檔
+    it('[RA11] noteOwn 之 Promise(真實行程表與真實行程): 解開時預約檔已記有該行程與其真實起始時間, 不必輪詢預約檔', async function() {
+        let c = mkCase()
+        let o = await spawnOccupant(19580)
+        let h = reserveE2ePorts([19581], { regDir: c.reg, root: c.root, env: {}, log: () => {} })
+        try {
+            let r = await h.noteOwn(o.child)
+            assert.strict.deepEqual([r.ok, r.reason], [true, 'recorded'], JSON.stringify(r))
+            assert.strict.ok(r.attempts >= 1 && r.attempts <= 3, JSON.stringify(r))
+            //解開當下(未經任何等待)預約檔已含該行程之身分
+            let rec = JSON.parse(fs.readFileSync(path.join(c.reg, 'p19581.json'), 'utf8'))
+            let mine = rec.known.find((k) => k.pid === o.child.pid)
+            assert.strict.ok(mine, JSON.stringify(rec.known))
+            assert.strict.ok(mine.startMs <= Date.now() && Date.now() - mine.startMs < 10 * 60 * 1000, `起始時間須為真實值: ${mine.startMs}`)
+        }
+        finally {
+            h.release()
+        }
+    })
+
+    //noteOwn 之計時器與背景查詢不阻擋行程結束(不等待之使用端行程於工作結束後須能自行結束)
+    //起 noteOwnExitChild(不等待 noteOwn), 回傳{code,out}: code 為離開碼, 逾 60 秒仍未自行結束為 'hung'
+    async function runExitChild(mode) {
+        let c = mkCase()
+        fs.mkdirSync(c.reg, { recursive: true })
+        let child = spawn(process.execPath, [path.join(fdPkg, 'test', 'tools', 'noteOwnExitChild.mjs'), c.reg, mode], { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true })
+        spawned.push(child)
+        let out = ''
+        child.stdout.on('data', (d) => {
+            out += d
+        })
+        child.stderr.on('data', (d) => {
+            out += d
+        })
+        let guard
+        let timeout = new Promise((resolve) => {
+            guard = setTimeout(() => resolve('hung'), 60000)
+        })
+        let code = await Promise.race([new Promise((resolve) => child.on('close', (v) => resolve(v))), timeout])
+        clearTimeout(guard)
+        return { code, out }
+    }
+
+    for (let [mode, what] of [['retry', '取樣失敗且重試間隔極長(重試計時器待命)'], ['hang', '取行程表懸置且逾時上限極長(逾時計時器待命)']]) {
+        it(`[RA12] noteOwn 不等待者: ${what}時, 行程仍於其餘工作結束後自行結束(離開碼 0)`, async function() {
+            let { code, out } = await runExitChild(mode)
+            assert.strict.equal(code, 0, `子行程須自行結束; 輸出: ${out}`)
+            assert.strict.ok(out.includes('noted-called'), out)
+        })
+    }
+
+    //預設實作(真實起行程表查詢指令)之逾時計時器與查詢行程不得保持事件迴圈: 以仍保持事件迴圈之資源種類判定(不以耗時判定, 不受負載影響)
+    it('[RA13] noteOwn 不等待者(預設 tableAsync, 真實行程表查詢): 其逾時計時器與查詢行程不保持事件迴圈(Timeout、行程皆不在使用中資源內)', async function() {
+        let { code, out } = await runExitChild('real')
+        assert.strict.equal(code, 0, `子行程須自行結束; 輸出: ${out}`)
+        let m = /active-resources (\[.*\])/.exec(out)
+        assert.strict.ok(m, out)
+        let list = JSON.parse(m[1])
+        assert.strict.deepEqual(list.filter((x) => /Timeout|Process/.test(x)), [], `使用中資源: ${m[1]}`)
     })
 
 })

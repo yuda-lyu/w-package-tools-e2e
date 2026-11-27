@@ -59,10 +59,11 @@
 - 2026-11-05(pe309): 新增 §6 自動換埠(`reserveE2ePorts`); 對應 README §2.12、§5.
 - 2026-11-05(pe312): §6 新增 R-15～R-24(就緒核對、`restart` 查不到不續行、`reselect` 用盡之訊息、查埠逾時、行程表改 OS API、查無監聽者之訊息); 對應 README §2.4、§2.12、§5.
 - 2026-11-05(pe316): §6 新增 R-26(試綁定第 5 種, `ipv6Only` 之 `::`)、R-27(殺殘留後等待釋放時偵測失敗不當成可用)及其兩張輸入空間表; 移除「`ipv6Only` 之 `::` 偵測不到」之限制; 新增首次偵測失敗仍 fail-open 之限制; 對應 README §2.12、§5.
+- 2026-11-27(p674): §6 新增 R-28～R-36(`noteOwn` 之完成觀察點: 回傳 Promise、結果理由、取樣失敗有界重試、合併取樣、`onTrace` 事件、`opt.tableAsync` 文件化為正式注入點、寫預約檔只寫本持有鏈、不阻擋行程結束、`createServiceManager` 之 `own-noted`)與 `noteOwn` 結果之輸入空間表; 修訂 R-13、PR71; 對應 README §2.12、§5.
 
 ## 6. 自動換埠(`reserveE2ePorts`; 2026-11-05 pe309)
 
-編列依據: 跨套件規格 `C:\opensrcOper\dspec\e2e埠與多套件同跑.md`(E1～E8)、主控 pe309 派工. 測試: `test/unit-reserveE2ePorts.test.mjs`(注入; `[PR*]`)、`test/api-reserveE2ePorts.test.mjs`(真實監聽行程; `[RA*]`)、`test/e2e-portInImage.test.mjs`(真 Chromium; `[PI*]`)、`test/api-shardE2e.test.mjs`(與多開; `[S-A*]`).
+編列依據: 跨套件規格〈e2e埠與多套件同跑〉(主控規格庫, E1～E8)、主控 pe309 派工. 測試: `test/unit-reserveE2ePorts.test.mjs`(注入; `[PR*]`)、`test/api-reserveE2ePorts.test.mjs`(真實監聽行程; `[RA*]`)、`test/e2e-portInImage.test.mjs`(真 Chromium; `[PI*]`)、`test/api-shardE2e.test.mjs`(與多開; `[S-A*]`).
 
 ### 6.1 模組與單一擁有者
 
@@ -90,7 +91,7 @@
 | R-10 | 與多開: 已設 `E2E_PORT_OFFSET` 不換埠(`pinned`); `E2E_PORT_HOLD` 沿用(`inherited`); 多開配發走同一預約, 互相避開 | `reserveE2ePorts`、`runShardedE2e` | `[PR30]`～`[PR33]`、`[RA9]`、`[S-A4]`、`[S-A5]`、`[S-A6]` |
 | R-11 | 誤用即拋錯: 保留前已呼叫 `resolveE2ePort`／`createServiceManager`(否則換埠時常數過期); 不合法之基準埠或位移 | `reserveE2ePorts` | `[RA5]`、`[PR32]`、`[PR60]` |
 | R-12 | 已導入時管理器: restart 只殺身分已確認之監聽者, 其餘拋錯; 服務就緒前結束立即拋錯; 就緒後記入預約. 未導入者完全不變 | `createServiceManager` | `[PR82]`～`[PR84]`、`unit-serviceManager`(不動) |
-| R-13 | `noteOwn` 背景取樣不阻塞測試、不重疊, 只記存活者與其子孫之真實起始時間; `killOwnListeners` 只殺該埠之監聽者 | `makeHandle` | `[PR70]`～`[PR74]`、`[PR73b]` |
+| R-13 | `noteOwn` 背景取樣不阻塞測試、不重疊, 只記存活者與其子孫之真實起始時間; `killOwnListeners` 只殺該埠之監聽者(完成之觀察點與重試見 R-28～R-35) | `makeHandle` | `[PR70]`～`[PR74]`、`[PR73b]` |
 | R-14 | 選項非預期值用預設(K3); 登錄目錄不可建立時警告並只靠實際綁定; 偵測子行程失敗時警告並照預約繼續 | `reserveE2ePorts`、`createE2ePortClaimer` | `[PR62]`、`[PR19]`、`[PR20]` |
 | R-15 | 就緒核對: 自建之服務(`ensure` 之 spawn 與 `restart`)於就緒探測通過後, 該埠之**每個**監聽者須為 spawn 回傳之行程或其存活子孫才放行, 之後才 `noteOwn`; 不分是否導入 `reserveE2ePorts` | `verifyDef`、`verifyReady`(`src/createServiceManager.mjs`)、`judgePortOwner`(`src/reapShardProcesses.mjs`) | `[SU01]`～`[SU13]`、`[SU20]`、`[SU29]`、`[SA4]`～`[SA7]` |
 | R-16 | 核對不符(他人、查無監聽者): 重試共 3 次仍不符即拋 `E2E_PORT_NOT_OWN`, 寫明埠與占用者, 只收自建, **不下殺占用者**; 涵蓋「偵測與綁定之間被搶走」與靜默改埠 | 同上 | `[SU21]`、`[SU22]`、`[SU22b]`、`[SU25]`～`[SU27]`、`[SU30]`、`[SU31]`、`[SA1]` ×4 位址、`[SA2]`、`[SA10]`; 真實 vue-cli 見 pe312 報告 |
@@ -105,6 +106,15 @@
 | R-25 | 新選項依 K3: `verifyOwner`、`exec` 非函數、`ownerRetryMs` 非有效非負數視為未給; 重試迴圈提供 `onTrace`(`owner-check`、`restart-query`; 同步、凍結、拋錯忽略; 規格〈計時器相關函數之觀察回調與測試〉) | `createServiceManager` | `[SU37]`、`[SU38]`、`[SU41b]` |
 | R-26 | 試綁定五種, 依序 `127.0.0.1`、`0.0.0.0`、`::`(雙棧)、`::1`、`{ host:'::', ipv6Only:true }`: 每種占用形式只和同形式之試綁定衝突(雙棧 `::` 與 `ipv6Only` 之 `::` 互不衝突, pe316 實測), 少一種就有占用者偵測不到; 前四種不帶 `ipv6Only` 選項(與舊版同形); 失敗時 `host` 為 `'::(ipv6Only)'`; 本機無 IPv6(`EAFNOSUPPORT`、`EADDRNOTAVAIL`)之含 `:` 位址(含第 5 種)不算占用; 被占用即換埠、不動占用者 | `BIND_TRIES`、`checkPortFree`(`src/checkPortFree.mjs`) | `[CU1]`～`[CU7]`、`[CF1]`～`[CF5]`(×5 種占用形式; 占用者 PID 不變且仍回應) |
 | R-27 | 殺殘留後等待釋放時偵測失敗(`probe` 回 `null`)不是「全部可用」: 視為仍忙, 保留最後一次成功偵測之結果, 等滿 25 次仍失敗即不可用並換下一個位移, `blocked` 之 `code` 為 `PROBE_FAILED`、`owners` 寫明偵測子行程失敗與最後一次成功偵測之結果; 等待中途失敗後恢復則繼續等到偵測回報可用。**每個位移之第一次偵測失敗**(殺殘留前, 或沒有殘留可殺; 如偵測工具壞掉)不在此列: 警告後照預約結果繼續(`[PR20]` 既定, 見 §6.4) | `tryOffset`(`src/reserveE2ePorts.mjs`) | `[PR15d]`、`[PR15e]`、`[PR15f]`、`[PR15g]`、`[PR20]` |
+| R-28 | 完成之觀察點(p674; 規格〈計時器相關函數之觀察回調與測試〉P1、P3): `noteOwn(child)` 回傳 `Promise<{ ok, attempts, reason }>`, 於**涵蓋該 child 之那次取樣已寫入預約檔之後**才解開; 取樣最終失敗亦解開(`ok:false`), **永不 reject、不同步拋錯**(不等待之既有寫法不受影響, 無 unhandled rejection); `child` 無效回傳已解開之 Promise(`invalid-child`, `attempts:0`) | `makeHandle`(`noteOwn`、`settle`、`judge`) | `[NO01]`、`[NO03]`、`[NO06]`、`[NO10]`、`[NO14]`、`[RA11]` |
+| R-29 | 結果理由(`reason`): `recorded`(存活且在行程表且屬本持有鏈之預約檔至少一個寫成; `basePorts` 為空時無檔可寫亦回此; `ok:true`)、`invalid-child`、`child-exited`(取樣時已結束)、`not-in-table`(存活而行程表無其列)、`no-reservation`(屬本持有鏈之預約檔一個都沒寫成: 已 `release` 或屬他人)、`table-failed`／`table-timeout`／`write-failed`(暫時性, 重試用盡; `write-failed` 含寫入拋錯與預約檔存在而讀不出)、`sample-error`(取樣內部拋錯, 非暫時性, 不重試); 行程表查不到、逾時時預約檔一字不動; 多埠 `write-failed` 時已寫成之檔不回復(複審 F2、F6: 「全有或全無」會使 inherited 宣告之埠多於上層預約者、pinned 再宣告新埠誤報 `no-reservation`) | `judge`、`attempt`、`writeKnown` | `[NO02a]`～`[NO02e]`、`[NO03]`、`[NO07]`、`[NO08]`、`[NO08b]`、`[NO08c]`、`[NO09]`、`[NO09b]`、`[NO09c]`、`[NO10]`、`[NO11]`、`[PR71]` |
+| R-30 | 取樣失敗(行程表查詢回 `null`、非陣列、`tableAsync` 同步拋錯、逾 `noteTimeoutMs`、寫預約檔拋錯)為**有界重試**: 每輪最多 `noteTries` 次(預設 3, 同就緒核對 `OWNER_TRIES`)、間隔 `noteRetryMs`(預設 1000, 同 `ownerRetryMs`; 0 有效)、單次查詢上限 `noteTimeoutMs`(預設 `PORT_QUERY_TIMEOUT_MS`, R-21); 用盡即 `ok:false` 如實告知, 不掩蓋(規格 P6); 三者依 K3(非預期值改用預設, 並夾在計時器上限 2^31-1 內) | `attempt`、`queryTableOnce`、`reserveE2ePorts`(選項) | `[NO02*]`、`[NO03]`、`[NO11]`、`[NO12]`、`[NO13]`、`[NO13b]` |
+| R-31 | 合併取樣: 取樣進行中再呼叫者排入下一輪(不重疊), 下一輪之行程表於領走之後才查詢, 其 Promise 須等涵蓋自己之那次取樣寫入後才解開, 不被較早開始之取樣提前了結; 前一輪失敗不牽連下一輪 | `queued`、`runNext` | `[NO04]`、`[NO04b]`、`[NO04c]`、`[PR72]` |
+| R-32 | `opt.onTrace` 增 `note-attempt`(`attempt`、`ok`、`reason`、`count`)、`noted`(`pid`、`attempts`)、`note-failed`(`pid`、`attempts`、`reason`); 每個 `noteOwn` 呼叫恰有一個 `noted` 或 `note-failed`, 於 Promise 解開之前同步發出; 事件凍結、回調拋錯忽略(wsemi `getTrace`) | `settle`、`attempt` | `[NO01]`、`[NO04c]`、`[NO05]`、`[NO06]` |
+| R-33 | `opt.tableAsync` 為正式注入點(同 `opt.probe`、`opt.exec`; 簽名 `(cb, ctx) => void`, `cb(table|null)`, `ctx` 為 `{ timeoutMs }` 可忽略; 非陣列視同 `null`、`cb` 只取第一次、同步拋錯、回傳之 Promise 被拒絕(`async` 函數)或逾時不回調視為該次失敗; 複審 F3), JSDoc 已寫明; 依 L0e: 不移除(既有測試與使用端借用), 文件化以免成為不明接縫; `(cb)` 舊簽名相容 | `queryTableOnce` | `[NO02*]`、`[NO02e]`、`[NO11]`、`[PR70]`～`[PR74]` |
+| R-34 | 寫預約檔(`writeKnown`)只寫屬本持有鏈(`token`、`E2E_PORT_HOLD`)之檔: 預約檔不存在(已 `release`)或屬他人者跳過、不重建、不動他人之檔(全部跳過才 `no-reservation`); 寫入拋錯、預約檔存在而讀不出(寫到一半、被占用)皆計入 `write-failed` 重試, 不當成預約檔不存在 | `writeKnown` | `[NO08]`、`[NO08b]`(auto／inherited／pinned 三種 source)、`[NO09]`、`[NO09b]`、`[NO09c]` |
+| R-35 | 不阻擋行程結束: 重試計時器、逾時計時器、預設實作之查詢行程與其逾時計時器皆 `unref`, 行程若無其他事物保持事件迴圈, 不等待之使用端行程於工作結束後自行結束; 預設實作逾 `ctx.timeoutMs`(預設 `PORT_QUERY_TIMEOUT_MS`)即終止其查詢指令: **逾時計時器自建並 `unref`, 不用 `spawn` 之 `timeout` 選項**(其內部計時器不 `unref`, 實測使不等待之行程多留至查詢結束, 複審 F1) | `queryTableOnce`、`attempt`、`tableAsync` | `[RA12]`(兩種計時器各一)、`[RA13]`(預設實作: 使用中資源不含 `Timeout`、行程)、`[RA11]`(真實行程表) |
+| R-36 | `createServiceManager` 之 `noteOwn(st, svc)` 維持不阻塞服務就緒(不 await); 取樣完成後以其 `onTrace` 之 `own-noted`(`service`、`port`、`pid`、`ok`、`attempts`、`reason`)告知(`startServersOnce` 與 `restart` 皆然); 保留之 `noteOwn` 不回 Promise(假保留)時不發事件、不拋錯, 回傳被拒絕之 Promise 時不產生 unhandled rejection(含未傳 `onTrace`; 複審 F4); `state(name)` 之鍵集合不變 | `noteOwn`(`src/createServiceManager.mjs`) | `[NO15]`、`[NO15b]`、`[NO15c]`、`[PR82]` |
 
 ### 6.3 輸入空間表
 
@@ -146,6 +156,34 @@
 | 占用(無殘留可殺) | — | 不等待, 直接換埠 | `[PR15f]` |
 | `null`(首次) | — | 警告後照預約結果繼續(既定) | `[PR20]` |
 
+`noteOwn` 之結果(R-28～R-31)之輸入空間表: 軸為 child 狀態 × 行程表查詢 × 預約檔狀態 × 並發; 每格之應然(`ok`／`reason`／`attempts`)與測試.
+
+| child | 行程表查詢 | 預約檔 | 並發 | 應然 | 測試 |
+|---|---|---|---|---|---|
+| 無效(`null`、無 `pid`、非物件) | — | — | — | 已解開之 Promise: `false`／`invalid-child`／0; 不取樣; `note-failed` | `[NO06]` |
+| 存活且在表內 | 成功 | 全為本持有鏈 | 單一呼叫 | `true`／`recorded`／1; 解開時預約檔已記有; 事件先於解開 | `[NO01]`、`[RA11]` |
+| 存活且在表內 | 延遲(解開須等其完成) | 同上 | 單一呼叫 | 查詢完成前不解開、預約檔無該行程 | `[NO01]` |
+| 存活且在表內 | 失敗 N 次後成功(`null`／拋錯／非陣列／非同步 `null`／`async` 拒絕) | 同上 | — | `true`／`recorded`／N+1; 重試事件依序; 拒絕不等到逾時、無 unhandled rejection | `[NO02a]`～`[NO02e]` |
+| 存活且在表內 | 一直失敗 | 同上 | — | `false`／`table-failed`／`noteTries`; 預約檔一字不動; 不 reject; 其後呼叫仍可取樣 | `[NO03]`、`[PR71]` |
+| 存活 | 懸置(不回調) | 同上 | — | `false`／`table-timeout`; 逾時後才回調者忽略 | `[NO11]`、`[NO12]` |
+| 存活 | 成功但取樣內部拋錯 | 同上 | — | `false`／`sample-error`／1; 不重試 | `[NO10]` |
+| 已結束 | 成功 | 同上 | — | `false`／`child-exited`; 其餘仍寫入 | `[NO07]`、`[NO04c]` |
+| 存活但不在表內 | 成功 | 同上 | — | `false`／`not-in-table` | `[NO07]`、`[NO04c]` |
+| 存活且在表內 | 成功 | 寫檔暫時失敗後可寫 | — | `true`／`recorded`／2 | `[NO09]` |
+| 存活且在表內 | 成功 | 寫檔一直失敗(單埠) | — | `false`／`write-failed`; 預約檔一字不動 | `[NO09]` |
+| 存活且在表內 | 成功 | 多埠, 其中一個一直寫不成 | — | `false`／`write-failed`; 已寫成之檔不回復 | `[NO09b]` |
+| 存活且在表內 | 成功 | 存在而讀不出(寫到一半、被占用) | — | 恢復後 `true`／`recorded`／2; 一直讀不出 `false`／`write-failed`, 不改寫該檔 | `[NO09c]` |
+| 存活且在表內 | 成功 | 全部已 `release` 或全屬他人 | — | `false`／`no-reservation`; 不重建、不動他人之檔 | `[NO08]` |
+| 存活且在表內 | 成功 | 部分屬他人(多埠) | — | `true`／`recorded`; 他人之檔不動 | `[NO08]` |
+| 存活且在表內 | 成功 | inherited(上層之 token, 宣告之埠多於已預約者)、pinned(再宣告新埠)、auto | — | `true`／`recorded`; 已預約之檔寫入、未預約之埠不建檔 | `[NO08b]` |
+| 存活且在表內 | 成功 | `basePorts` 為空 | — | `true`／`recorded`; 無檔 | `[NO08c]` |
+| 兩個 child, 後者於前一輪取樣進行中呼叫 | 第 1 輪之表無後者 | 同上 | 合併 | 後者等第 2 輪; 不被第 1 輪提前解開 | `[NO04]` |
+| 同上 | 第 1 輪一直失敗 | 同上 | 合併 | 前者 `false`; 後者依第 2 輪之結果 | `[NO04b]` |
+| 同一輪涵蓋多個呼叫 | 成功 | 同上 | 合併 | 各依自己之 child 判定; 事件依呼叫順序、`count` 為本輪呼叫數 | `[NO04c]` |
+| 不等待(fire-and-forget) | 失敗、拋錯 | — | — | 不拋錯、無 unhandled rejection、行程可自行結束 | `[NO14]`、`[RA12]` |
+| 不等待(預設實作, 真實行程表查詢) | 真實 | — | — | 逾時計時器與查詢行程不保持事件迴圈 | `[RA13]` |
+| 管理器 `startServersOnce`／`restart` | 成功／失敗 | — | — | 不阻塞就緒; `own-noted` 告知; 假保留不回 Promise 不發事件; 回傳拒絕之 Promise 無 unhandled rejection | `[NO15]`、`[NO15b]`、`[NO15c]` |
+
 就緒核對(R-15～R-18)之輸入空間表: 軸為監聽者查詢 × 行程表查詢 × 自建行程狀態 × 占用者位址; 每格之應然與測試(占用者位址 `127.0.0.1`、`0.0.0.0`、`::`、`::1` 皆跑 `[SA1]`、`[SA20]`、`[SA21]`、`[SA30]`; `ipv6Only` 之 `::` 於 pe316 起由試綁定偵測而換埠, 不再走到核對).
 
 | 監聽者查詢 | 行程表 | 自建行程 | 應然 | 測試 |
@@ -178,7 +216,11 @@
 - `applyEnv:true` 之位移被常數取用後不可重選(常數已過期), 管理器因此只報錯、不重選.
 - 一個實例一個管理器: 同一行程內第二個管理器會把第一個啟動之服務當成他人.
 - POSIX 只有注入測試.
+- `noteOwn` 最壞等待約 `noteTries×noteTimeoutMs＋(noteTries-1)×noteRetryMs`(預設約 3 分 2 秒; 全機滿載且查詢一再逾時時); 使用端 `await` 者須以其自身之案時限容納, 或調小 `noteTimeoutMs`／`noteTries`(p674).
+- 預設實作之「逾時即終止查詢指令」(自建 `unref` 計時器後 `cp.kill()`)之**終止動作本身**無整合測試(變異 M43「不終止」預期存活): `tableAsync` 非公開匯出且依平台起 PowerShell／ps, 無法在不改 PATH 之下注入長時間指令; 其「不保持事件迴圈」由 `[RA13]` 涵蓋、逾時後之結果收斂(失敗、重試、用盡告知)由 `queryTableOnce` 之 `noteTimeoutMs` 以注入之懸置來源涵蓋(`[NO11]`、`[NO12]`); 終止動作之機制以 `spawn` + `kill` 之探測證明(`close` 事件 `code:null`, 約 700 毫秒).
+- `noteTimeoutMs` 較預設小者, 預設實作會依 `ctx.timeoutMs` 終止其查詢(不留下並行查詢); 注入之 `tableAsync` 忽略 `ctx` 者, 逾時後只放棄等待, 其查詢自行結束.
+- `noteOwn` 之重試以「同一輪」為單位: 重試期間才呼叫者排入下一輪(不併入進行中之重試), 結果之 `attempts` 為該輪之嘗試次數; 保留之 `release` 後尚在重試者終將以 `no-reservation` 解開(不取消).
 
 ### 6.5 改動範圍 → e2e 檔
 
-改 `reserveE2ePorts`、`checkPortFree`、`resolveE2ePort`: 跑 `unit-reserveE2ePorts`、`api-reserveE2ePorts`、`unit-portOffset`、`api-shardE2e`(`[S-A*]`);改 `checkPortFree`(試綁定)另跑 `unit-checkPortFree`、`api-checkPortFree`; 改 `createServiceManager`、`judgePortOwner`: 另跑 `unit-serviceOwner`、`api-serviceOwner`、`unit-serviceManager`; 改 `PS_TABLE`、`listProcessTable`: 另跑 `api-procTable`、`unit-shardProcIdentity`、`api-shardKillIdentity`、`api-shardE2e`; 改畫面含埠之指引: `e2e-portInImage`. 固定埠: 19620、19630(`api-reserveE2ePorts`, 位移 100 起)、19640(`e2e-portInImage`, 不監聽)、19650 起(`api-serviceOwner`, 每案遞增)、19800、19801(`unit-serviceOwner`, 注入, 不監聽)、19960 起(`api-checkPortFree`, 每案遞增, 位移 100 後為 20060 起)、19961～19967(`unit-checkPortFree`, 替身, 不監聽). 測試一律以 `E2E_PORT_REG_DIR` 或 `regDir` 另指登錄目錄.
+改 `reserveE2ePorts`、`checkPortFree`、`resolveE2ePort`: 跑 `unit-reserveE2ePorts`、`api-reserveE2ePorts`、`unit-portOffset`、`api-shardE2e`(`[S-A*]`);改 `checkPortFree`(試綁定)另跑 `unit-checkPortFree`、`api-checkPortFree`; 改 `createServiceManager`、`judgePortOwner`: 另跑 `unit-serviceOwner`、`api-serviceOwner`、`unit-serviceManager`; 改 `PS_TABLE`、`listProcessTable`: 另跑 `api-procTable`、`unit-shardProcIdentity`、`api-shardKillIdentity`、`api-shardE2e`; 改畫面含埠之指引: `e2e-portInImage`. 固定埠: 19620、19630(`api-reserveE2ePorts`, 位移 100 起)、19580、19581、19582(`api-reserveE2ePorts` `[RA11]` 占用者與預約、`[RA12]` 子行程, p674; 預約用獨立登錄目錄)、19731～19734(`unit-reserveE2ePorts` `[NO15]`、`[NO15b]`, 注入, 不監聽)、19640(`e2e-portInImage`, 不監聽)、19650 起(`api-serviceOwner`, 每案遞增)、19800、19801(`unit-serviceOwner`, 注入, 不監聽)、19960 起(`api-checkPortFree`, 每案遞增, 位移 100 後為 20060 起)、19961～19967(`unit-checkPortFree`, 替身, 不監聽). 測試一律以 `E2E_PORT_REG_DIR` 或 `regDir` 另指登錄目錄.

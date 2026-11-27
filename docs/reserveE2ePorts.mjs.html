@@ -70,6 +70,12 @@ let START_TOLERANCE_MS = 60000
 //內容不可讀之預約檔(剛建立尚未寫完)視為仍在之時限
 let UNREADABLE_GRACE_MS = 60000
 let KNOWN_LIMIT = 200
+//noteOwn 取樣失敗(行程表查不到、逾時、寫預約檔失敗)之有界重試: 暫時性失敗(系統忙碌)之容錯, 用盡即如實告知, 不無限等
+//次數與間隔取 createServiceManager 之就緒核對先例(OWNER_TRIES 共 3 次、ownerRetryMs 1000 毫秒); 單次查詢之上限同 R-21 取 PORT_QUERY_TIMEOUT_MS
+let NOTE_TRIES = 3
+let NOTE_RETRY_MS = 1000
+//setTimeout 之上限(超過會立即觸發)
+let MAX_TIMER_MS = 2147483647
 
 //寫入環境變數之保留(一個行程一份: 位移為行程層級, 子行程繼承)
 let active = null
@@ -410,11 +416,21 @@ function fmtBlocked(b) {
 
 
 //把已確認身分之行程併入預約檔(整檔換掉, 讀者不會讀到半份); 失敗不影響測試
-function writeKnown(regDir, ports, known) {
+//只寫屬本持有鏈(ownTokens)之預約檔: 預約檔已不存在(已釋放)或屬他人者跳過, 不把本實例之行程寫進他人之預約
+//回傳{written,total,errors}: written為寫入成功之檔數, total為應寫之埠數, errors為暫時性失敗之檔數(可重試): 寫入拋錯, 或檔案存在而讀不出(寫到一半、被占用); 檔不存在或屬他人不算
+function writeKnown(regDir, ports, known, ownTokens) {
+    let written = 0
+    let errors = 0
     for (let p of ports) {
         let fp = fileOf(regDir, p)
         let cur = readHolder(fp)
         if (!cur) {
+            if (fs.existsSync(fp)) {
+                errors++
+            }
+            continue
+        }
+        if (!ownTokens.includes(cur.token)) {
             continue
         }
         let map = new Map((Array.isArray(cur.known) ? cur.known : []).map((k) => [keyOf(k), k]))
@@ -424,22 +440,34 @@ function writeKnown(regDir, ports, known) {
         try {
             fs.writeFileSync(tmp, JSON.stringify(cur))
             fs.renameSync(tmp, fp)
+            written++
         }
         catch (err) {
-            fs.rmSync(tmp, { force: true })
+            errors++
+            try {
+                fs.rmSync(tmp, { force: true })
+            }
+            catch (err2) {}
         }
     }
+    return { written, total: ports.length, errors }
 }
 
 
-//非同步取行程表(服務已就緒後背景取樣, 不阻塞測試)
-function tableAsync(cb) {
+//非同步取行程表(服務已就緒後背景取樣, 不阻塞測試); 單次查詢逾 ctx.timeoutMs(預設 PORT_QUERY_TIMEOUT_MS)即終止該查詢並回 null(取樣之重試與告知見 makeHandle)
+//逾時計時器自建並 unref: 不用 spawn 之 timeout 選項(其內部計時器不 unref, 會使行程留著直到查詢結束, 抵消下列之 unref)
+function tableAsync(cb, ctx = {}) {
+    let timeoutMs = Number.isFinite(ctx.timeoutMs) &amp;&amp; ctx.timeoutMs > 0 ? Math.min(ctx.timeoutMs, MAX_TIMER_MS) : PORT_QUERY_TIMEOUT_MS
     let { prog, args } = processTableCommand()
     let out = ''
     let done = false
+    let timer = null
     let finish = (table) => {
         if (!done) {
             done = true
+            if (timer) {
+                clearTimeout(timer)
+            }
             cb(table)
         }
     }
@@ -456,50 +484,156 @@ function tableAsync(cb) {
     })
     cp.once('error', () => finish(null))
     cp.once('close', (code) => finish(code === 0 ? parseProcessTable(out) : null))
+    timer = setTimeout(() => {
+        //逾時: 先回報失敗再終止查詢(終止後 close 事件之回報被忽略)
+        finish(null)
+        try {
+            cp.kill()
+        }
+        catch (err) {}
+    }, timeoutMs)
     //不阻擋本行程結束
+    timer.unref()
     cp.unref()
     cp.stdout.unref()
 }
 
 
-function makeHandle(s) {
-    let exec = s.exec
-    let sampling = false
-    let dirty = false
-    let children = new Set()
-    let known = []
-
-    function sample() {
-        if (sampling) {
-            dirty = true
+//取行程表一次(取樣之一次嘗試): 回調恰好一次, cb(table|null, timedOut)
+//注入之tableAsync同步拋錯、回調多次、逾 noteTimeoutMs 仍不回調(懸置)皆收斂為恰好一次: 拋錯與逾時為失敗(null), 多次回調只取第一次; 非陣列視為失敗
+function queryTableOnce(s, cb) {
+    let done = false
+    let timer = null
+    let finish = (table, timedOut) => {
+        if (done) {
             return
         }
-        sampling = true
-        s.tableAsync((table) => {
-            sampling = false
-            if (table) {
-                let seeds = [...known]
-                for (let child of children) {
-                    if (isChildAlive(child)) {
-                        let row = table.find((p) => p.pid === child.pid)
-                        if (row) {
-                            seeds.push({ pid: row.pid, startMs: row.startMs, image: row.image || '' })
-                        }
-                    }
-                    else {
-                        children.delete(child)
-                    }
-                }
-                known = sampleShardKnown(table, seeds).known
-                if (s.regDir) {
-                    writeKnown(s.regDir, h.ports, known)
+        done = true
+        if (timer) {
+            clearTimeout(timer)
+        }
+        cb(Array.isArray(table) ? table : null, timedOut === true)
+    }
+    timer = setTimeout(() => finish(null, true), s.noteTimeoutMs)
+    //不阻擋本行程結束
+    if (timer &amp;&amp; typeof timer.unref === 'function') {
+        timer.unref()
+    }
+    try {
+        //第二參數告知單次查詢之上限, 使預設實作於逾時時真的終止查詢(不留下多個並行查詢); 注入者可忽略
+        let r = s.tableAsync((table) => finish(table, false), { timeoutMs: s.noteTimeoutMs })
+        //async 函數之 reject 視為該次查詢失敗(不等到逾時), 並攔下其 rejection
+        if (r &amp;&amp; typeof r.then === 'function') {
+            r.then(undefined, () => finish(null, false))
+        }
+    }
+    catch (err) {
+        finish(null, false)
+    }
+}
+
+
+function makeHandle(s) {
+    let exec = s.exec
+    let trace = s.trace || null
+    let children = new Set()
+    let known = []
+    //尚未被任何一次取樣涵蓋之noteOwn呼叫: 每次取樣開始時整批領走, 該次取樣之行程表於領走後才查詢, 故必涵蓋這些呼叫之child
+    let queued = []
+    let running = false
+
+    //一次取樣之內容: 以行程表更新本實例已確認身分之行程並寫入預約檔
+    function sampleInto(table) {
+        let seeds = [...known]
+        for (let child of children) {
+            if (isChildAlive(child)) {
+                let row = table.find((p) => p.pid === child.pid)
+                if (row) {
+                    seeds.push({ pid: row.pid, startMs: row.startMs, image: row.image || '' })
                 }
             }
-            if (dirty) {
-                dirty = false
-                sample()
+            else {
+                children.delete(child)
             }
+        }
+        known = sampleShardKnown(table, seeds).known
+        return s.regDir ? writeKnown(s.regDir, h.ports, known, s.ownTokens) : { written: 0, total: 0, errors: 0 }
+    }
+
+    //某次呼叫之結果: 取樣已成功; 依該呼叫之child判定是否已記入
+    function judge(w, table, wr, attempts) {
+        if (!isChildAlive(w.child)) {
+            return { ok: false, attempts, reason: 'child-exited' }
+        }
+        if (!table.some((p) => p &amp;&amp; p.pid === w.child.pid)) {
+            return { ok: false, attempts, reason: 'not-in-table' }
+        }
+        //屬本持有鏈之預約檔一個都沒寫成(已釋放、屬他人): 未記入。只要有一個寫成即算記入(下次開跑回收殘留預約時, 取各檔 known 之聯集)
+        if (wr.total > 0 &amp;&amp; wr.written === 0) {
+            return { ok: false, attempts, reason: 'no-reservation' }
+        }
+        return { ok: true, attempts, reason: 'recorded' }
+    }
+
+    //先發事件(同步), 再解開Promise: 以事件同步者必於Promise解開之前收到
+    function settle(w, result) {
+        if (trace) {
+            if (result.ok) {
+                trace('noted', { pid: w.pid, attempts: result.attempts })
+            }
+            else {
+                trace('note-failed', { pid: w.pid, attempts: result.attempts, reason: result.reason })
+            }
+        }
+        w.resolve(result)
+    }
+
+    //取樣一輪(batch為本輪涵蓋之呼叫); 失敗且未用盡次數時隔 noteRetryMs 重試, 用盡即對本輪全部呼叫如實告知
+    function attempt(batch, n) {
+        queryTableOnce(s, (table, timedOut) => {
+            let fail = null
+            let wr = null
+            if (!table) {
+                fail = timedOut ? 'table-timeout' : 'table-failed'
+            }
+            else {
+                try {
+                    wr = sampleInto(table)
+                    if (wr.errors > 0) {
+                        fail = 'write-failed'
+                    }
+                }
+                catch (err) {
+                    //取樣內部拋錯非暫時性, 不重試
+                    fail = 'sample-error'
+                }
+            }
+            if (trace) {
+                trace('note-attempt', { attempt: n, ok: fail === null, reason: fail, count: batch.length })
+            }
+            if (fail !== null &amp;&amp; fail !== 'sample-error' &amp;&amp; n &lt; s.noteTries) {
+                let t = setTimeout(() => attempt(batch, n + 1), s.noteRetryMs)
+                //不阻擋本行程結束
+                if (t &amp;&amp; typeof t.unref === 'function') {
+                    t.unref()
+                }
+                return
+            }
+            for (let w of batch) {
+                settle(w, fail !== null ? { ok: false, attempts: n, reason: fail } : judge(w, table, wr, n))
+            }
+            running = false
+            runNext()
         })
+    }
+
+    //領走全部待涵蓋之呼叫並取樣: 同一時間只有一輪(不重疊), 進行中再呼叫者排入下一輪
+    function runNext() {
+        if (running || queued.length === 0) {
+            return
+        }
+        running = true
+        attempt(queued.splice(0), 1)
     }
 
     let h = {
@@ -511,12 +645,19 @@ function makeHandle(s) {
         ports: s.bases.map((b) => b + s.offset),
         portOf: (base) => Number(base) + h.offset,
         //記下本實例之服務行程: 背景取其真實起始時間與子孫, 寫入預約檔; 供下次開跑與restart依身分確認殘留
+        //回傳Promise: 涵蓋該child之那次取樣已寫入預約檔後解開{ok,attempts,reason}; 取樣最終失敗亦解開(ok為false), 永不拒絕、不同步拋錯; child無效回傳已解開之Promise
         noteOwn: (child) => {
             if (!child || !child.pid) {
-                return
+                let w = { child: null, pid: null, resolve: () => {} }
+                let result = { ok: false, attempts: 0, reason: 'invalid-child' }
+                settle(w, result)
+                return Promise.resolve(result)
             }
             children.add(child)
-            sample()
+            return new Promise((resolve) => {
+                queued.push({ child, pid: child.pid, resolve })
+                runNext()
+            })
         },
         //只殺身分已確認屬本實例之監聽者(identity、chain); 其餘占用者留在skipped; 回傳形狀相容killPortListeners之{pids,killed}; pids為null或tableOk為false即查詢失敗, 身分未知
         killOwnListeners: (port) => {
@@ -586,16 +727,25 @@ function hookExit() {
  * @param {Function} [opt.exists=pidExists] 輸入判斷PID存在之函數，預設pidExists
  * @param {Function} [opt.sleepFn=sleepSync] 輸入同步等待函數(ms)，預設sleepSync
  * @param {Function} [opt.log=console.log] 輸入輸出函數，預設console.log
- * @param {Function} [opt.onTrace=null] 輸入觀察回調函數，傳入凍結之事件物件{ type, ... }，type為'try'(試某位移；offset)、'blocked'(該位移不可用；offset、ports、codes)、'wait'(baseOnly等待中；offset)、'selected'(已選定；offset、ports、source)、'exhausted'(重選用盡；tries)，預設null
- * @returns {Object} 回傳物件{source,token,offset,shifted,basePorts,ports,portOf(base),noteOwn(child),killOwnListeners(port),reselect(reason),release()}，source為'auto'(本行程選定)、'pinned'(環境變數已指定)、'inherited'(上層已保留)
+ * @param {Function} [opt.tableAsync] 輸入非同步取行程表函數(cb, ctx)=>void，每次取樣嘗試呼叫一次：取得後呼叫cb(table)，table為元素{pid,ppid,startMs,image}之陣列；查詢失敗呼叫cb(null)；ctx為{timeoutMs}(本次查詢之上限，即noteTimeoutMs，供實作逾時時終止查詢，可忽略)；非陣列視同null，cb多次呼叫只取第一次，同步拋錯、回傳之Promise被拒絕(async函數拋錯)或逾noteTimeoutMs仍不呼叫cb皆視為該次查詢失敗。供測試注入替身(同opt.probe、opt.exec為正式注入點)，預設為背景起行程表查詢指令(不經shell、隱藏視窗、逾ctx.timeoutMs即終止該指令；Windows為PowerShell、其他平台為ps)；該查詢與其逾時計時器皆不阻擋行程結束
+ * @param {Number} [opt.noteTries=3] 輸入noteOwn每次取樣之最多嘗試次數(含第一次)正整數，預設3(同createServiceManager就緒核對之OWNER_TRIES)；查詢失敗、逾時或寫預約檔失敗時重試，用盡即noteOwn之Promise以ok為false解開
+ * @param {Number} [opt.noteRetryMs=1000] 輸入noteOwn取樣失敗後重試之間隔毫秒數(非負數)，預設1000(同createServiceManager之ownerRetryMs)
+ * @param {Number} [opt.noteTimeoutMs=60000] 輸入noteOwn單次取行程表之等待上限毫秒數(正整數)，預設PORT_QUERY_TIMEOUT_MS(60000)；逾時視為該次查詢失敗，已解開之結果不受其後才回調之查詢影響。最壞情形noteOwn約需noteTries×noteTimeoutMs＋(noteTries-1)×noteRetryMs才解開
+ * @param {Function} [opt.onTrace=null] 輸入觀察回調函數，傳入凍結之事件物件{ type, ... }，type為'try'(試某位移；offset)、'blocked'(該位移不可用；offset、ports、codes)、'wait'(baseOnly等待中；offset)、'selected'(已選定；offset、ports、source)、'exhausted'(重選用盡；tries)、'note-attempt'(noteOwn取樣一次；attempt為第幾次、ok、reason為失敗原因'table-failed'|'table-timeout'|'write-failed'|'sample-error'或null、count為本輪涵蓋之noteOwn呼叫數)、'noted'(noteOwn之child已記入預約檔；pid、attempts)、'note-failed'(noteOwn未記入；pid、attempts、reason)，每個noteOwn呼叫恰有一個'noted'或'note-failed'，於其Promise解開之前同步發出，預設null
+ * @returns {Object} 回傳物件{source,token,offset,shifted,basePorts,ports,portOf(base),noteOwn(child),killOwnListeners(port),reselect(reason),release()}，source為'auto'(本行程選定)、'pinned'(環境變數已指定)、'inherited'(上層已保留)；noteOwn(child)背景取樣後把child與其子孫之真實起始時間寫入預約檔，回傳Promise&lt;{ok,attempts,reason}>：涵蓋該child之那次取樣已寫入預約檔後解開(合併取樣時各呼叫各等涵蓋自己之那次，不被較早開始之取樣提前解開)；ok為true且reason為'recorded'表示child已記入預約檔(屬本持有鏈之預約檔至少一個寫成；下次開跑回收殘留預約時取各檔known之聯集；basePorts為空時無預約檔可寫，只記於記憶體亦回'recorded')，ok為false時reason為'invalid-child'(child無效，attempts為0)、'child-exited'(取樣時child已結束)、'not-in-table'(child存活而行程表無其列)、'no-reservation'(屬本持有鏈之預約檔一個都沒寫成：已release或屬他人)、'table-failed'|'table-timeout'|'write-failed'(暫時性失敗，重試用盡仍失敗；write-failed含寫入拋錯與預約檔存在而讀不出，多埠時已寫成之檔不回復)、'sample-error'(取樣內部拋錯，非暫時性，不重試)；行程表查不到、逾時、解析不出時預約檔一字不動；永不拒絕(不重新拋出任何錯)、不同步拋錯，故不等待者(fire-and-forget)行為不受影響；Promise之計時器與背景查詢皆不阻擋行程結束，行程若無其他事物保持事件迴圈，等待中之Promise不會使行程留著；重試期間才呼叫者排入下一輪(不併入進行中之重試)，其等待上限另自下一輪起算
  * @example
  *
  * import reserveE2ePorts from 'w-package-tools-e2e/src/reserveE2ePorts.mjs'
  * import resolveE2ePort from 'w-package-tools-e2e/src/resolveE2ePort.mjs'
  *
- * reserveE2ePorts([11007, 8080])
+ * let reservation = reserveE2ePorts([11007, 8080])
  * //8080被占用時印出 [e2e-port] 基準埠 [11007, 8080] → 實際埠 [11107, 8180] (位移 100) ...
  * let baseUrl = `http://127.0.0.1:${resolveE2ePort(8080)}` //http://127.0.0.1:8180
+ *
+ * //服務就緒後記下其行程; 需知道記錄是否已寫入時才等待(不等待者不受影響)
+ * let r = await reservation.noteOwn(child)
+ * console.log(r)
+ * // => { ok: true, attempts: 1, reason: 'recorded' }
  *
  */
 function reserveE2ePorts(basePorts, opt = {}) {
@@ -642,6 +792,10 @@ function reserveE2ePorts(basePorts, opt = {}) {
         regDir: claimer.regDir,
         ownTokens: [claimer.token, ...(hold ? [hold] : [])],
         tableAsync: typeof opt.tableAsync === 'function' ? opt.tableAsync : tableAsync,
+        trace,
+        noteTries: pickPosInt(opt.noteTries, NOTE_TRIES),
+        noteRetryMs: Math.min(Number.isFinite(opt.noteRetryMs) &amp;&amp; opt.noteRetryMs >= 0 ? opt.noteRetryMs : NOTE_RETRY_MS, MAX_TIMER_MS),
+        noteTimeoutMs: Math.min(pickPosInt(opt.noteTimeoutMs, PORT_QUERY_TIMEOUT_MS), MAX_TIMER_MS),
         offset: curOffset,
         source: 'auto',
         reselect: null,
@@ -929,7 +1083,7 @@ export default reserveE2ePorts
 <br class="clear">
 
 <footer>
-    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 4.0.5</a> on Fri Nov 27 2026 13:53:04 GMT+0800 (台北標準時間) using the <a href="https://github.com/clenemt/docdash">docdash</a> theme.
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 4.0.5</a> on Fri Nov 27 2026 21:39:42 GMT+0800 (台北標準時間) using the <a href="https://github.com/clenemt/docdash">docdash</a> theme.
 </footer>
 
 <script>prettyPrint();</script>

@@ -60,7 +60,7 @@ function withPort(o, port) {
  * @param {Function} [opt.exec] 輸入同步執行子指令函數(與child_process.spawnSync同形)，用於就緒核對與查占用者，預設為不經shell、隱藏視窗之spawnSync
  * @param {Number} [opt.ownerRetryMs=1000] 輸入就緒核對與restart查監聽者之重試間隔毫秒數，預設1000(共試3次)
  * @param {Function} [opt.verifyOwner] 輸入就緒核對函數async(svc,child)，確認不符時自行拋錯，預設為核對監聽者行程鏈；只用於單元測試之假行程，或確實無法以行程鏈判定之服務(須自行確認身分)
- * @param {Function} [opt.onTrace=null] 輸入觀察回調函數，傳入凍結之事件物件{ type, ... }，type為'owner-check'(就緒核對一次；service、port、attempt、result、owners)、'restart-query'(restart查監聽者一次；service、port、attempt、ok)，預設null
+ * @param {Function} [opt.onTrace=null] 輸入觀察回調函數，傳入凍結之事件物件{ type, ... }，type為'owner-check'(就緒核對一次；service、port、attempt、result、owners)、'restart-query'(restart查監聽者一次；service、port、attempt、ok)、'own-noted'(已導入reserveE2ePorts時，服務就緒後之noteOwn取樣完成，ok為該服務行程是否已記入預約檔；service、port、pid、ok、attempts、reason，reason同reservation.noteOwn之結果；不阻塞服務就緒，事件於其後非同步發出)，預設null
  * @param {Function} [opt.onCleanup=null] 輸入cleanup末尾之同步回呼(例如刪臨時設定檔)，預設null
  * @param {Function} [opt.log=console.log] 輸入輸出函數，預設console.log
  * @returns {Object} 回傳物件{startServersOnce({only}),restart(name,{args,env,hookArg}),cleanup(),state(name),portOf(name)}
@@ -263,15 +263,26 @@ function createServiceManager(opt = {}) {
         st.spawned = true
         await waitReady(svc)
         await verifyReady(svc, st)
-        noteOwn(st)
+        noteOwn(st, svc)
         log(`[e2e-setup] ${svc.name} ready`)
     }
 
     //已導入自動換埠: 記下本實例之服務行程, 供下次開跑與 restart 依身分確認殘留
-    function noteOwn(st) {
+    //不等待取樣(不阻塞服務就緒); 取樣完成之結果以 onTrace 之 'own-noted' 事件告知(res.noteOwn 回傳 Promise 者; 假保留回傳他物者略過)
+    function noteOwn(st, svc) {
         let res = resOf()
         if (res && st.proc) {
-            res.noteOwn(st.proc)
+            let pid = st.proc.pid
+            let p = res.noteOwn(st.proc)
+            if (p && typeof p.then === 'function') {
+                //回調內之任何拋錯與 rejection 一律吞掉(只是告知, 不得影響服務就緒或產生 unhandled rejection)
+                p.then((r) => {
+                    if (trace) {
+                        let o = r && typeof r === 'object' ? r : {}
+                        trace('own-noted', { service: svc.name, port: svc.port, pid: pid === undefined ? null : pid, ok: o.ok === true, attempts: Number.isFinite(o.attempts) ? o.attempts : null, reason: typeof o.reason === 'string' ? o.reason : null })
+                    }
+                }).catch(() => {})
+            }
         }
     }
 
@@ -346,7 +357,7 @@ function createServiceManager(opt = {}) {
         st.spawned = true
         await waitReady(svc)
         await verifyReady(svc, st)
-        noteOwn(st)
+        noteOwn(st, svc)
     }
 
     function cleanup() {

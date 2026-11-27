@@ -1,13 +1,15 @@
 import fs from 'fs'
 import path from 'path'
 import assert from 'assert'
+import { mock } from 'node:test'
 import reserveE2ePorts, { assertE2eBasePort, getActiveE2ePortReservation, createE2ePortClaimer } from '../src/reserveE2ePorts.mjs'
+import { PORT_QUERY_TIMEOUT_MS } from '../src/listenerPids.mjs'
 import resolveE2ePort from '../src/resolveE2ePort.mjs'
 import createServiceManager from '../src/createServiceManager.mjs'
 import { psOut, ok } from './tools/portPidsFake.mjs'
 
 
-//自動換埠之單元測試(規格 C:/opensrcOper/dspec/e2e埠與多套件同跑.md E1～E7; 帳本 sgud/rule/rulebook_port.md R-*)。
+//自動換埠之單元測試(規格〈e2e埠與多套件同跑〉E1～E7, 主控規格庫; 帳本 sgud/rule/rulebook_port.md R-*)。
 //偵測與行程表一律注入, 不碰真實埠與行程; 真實監聽行程見 api-reserveE2ePorts。預約檔落 test/_tmp/reserveE2ePorts/, 不碰使用者之登錄目錄。
 
 
@@ -72,6 +74,31 @@ let regFiles = (fx) => fs.readdirSync(fx.regDir).sort()
 function writeHolder(fx, port, info) {
     fs.writeFileSync(fileOf(fx, port), JSON.stringify({ token: 'other-token', pid: 999001, startApproxMs: Date.now() - 1000, root: 'C:\\other', known: [], port, ...info }))
 }
+
+
+//可控之行程表來源(注入 opt.tableAsync): 每次取樣嘗試記下其回調, 由測試決定何時以什麼結果完成; reached(n)等第 n 次嘗試發出(事件同步, 不以延時)
+function mkTableSource() {
+    let calls = []
+    let waiters = []
+    let fn = (cb) => {
+        calls.push(cb)
+        waiters.filter((w) => calls.length >= w.n).forEach((w) => w.resolve())
+        waiters = waiters.filter((w) => calls.length < w.n)
+    }
+    let reached = (n) => (calls.length >= n ? Promise.resolve() : new Promise((resolve) => waiters.push({ n, resolve })))
+    return { calls, fn, reached }
+}
+
+
+//p 此刻是否尚未解開: 讓出一輪事件迴圈後仍未解開者為真(用於「尚未給行程表所以不可能解開」之否定斷言, 無計時器參與, 不受負載影響)
+function isPending(p) {
+    return Promise.race([p.then(() => false, () => false), new Promise((resolve) => setImmediate(() => resolve(true)))])
+}
+
+
+let rowOf = (pid) => ({ pid, ppid: 1, startMs: 5000 + pid, image: 'svc.exe' })
+let childOf = (pid, alive = true) => ({ pid, exitCode: alive ? null : 0, signalCode: null })
+let NOTE_TYPES = ['note-attempt', 'noted', 'note-failed']
 
 
 describe('reserveE2ePorts', function() {
@@ -720,11 +747,22 @@ describe('reserveE2ePorts', function() {
             assert.strict.deepEqual(got, [[700, 5000], [704, 5100]])
         })
 
-        it('[PR71] noteOwn 取樣失敗(取不到行程表): 不寫、不拋錯', function() {
+        //取樣失敗(取不到行程表)不寫入任何資料(含錯誤資料)、不拋錯; 重試用盡後如實告知(Promise 以 ok:false 解開, 見 [NO03])
+        it('[PR71] noteOwn 取樣失敗(取不到行程表): 預約檔一字不動、不拋錯, 用盡次數後以 ok:false 解開', async function() {
             let fx = mk()
-            let h = reserve(fx, [8080], { tableAsync: (cb) => cb(null) })
-            h.noteOwn(child(700))
-            assert.strict.deepEqual(readFile(fx, 8080).known, [])
+            let calls = 0
+            let tableAsync = (cb) => {
+                calls++
+                cb(null)
+            }
+            let h = reserve(fx, [8080], { tableAsync, noteTries: 2, noteRetryMs: 1 })
+            let before = fs.readFileSync(fileOf(fx, 8080), 'utf8')
+            let p = h.noteOwn(child(700))
+            assert.strict.deepEqual(readFile(fx, 8080).known, [], '同步回來時尚未寫入')
+            let r = await p
+            assert.strict.deepEqual(r, { ok: false, attempts: 2, reason: 'table-failed' })
+            assert.strict.equal(calls, 2)
+            assert.strict.equal(fs.readFileSync(fileOf(fx, 8080), 'utf8'), before, '失敗不得改寫預約檔')
         })
 
         it('[PR72] noteOwn 取樣進行中再呼叫: 不重疊, 結束後補取一次', function() {
@@ -782,6 +820,719 @@ describe('reserveE2ePorts', function() {
             o.known = [{ pid: 4321, startMs: 5001 }]
             fs.writeFileSync(fileOf(fx, 8080), JSON.stringify(o))
             assert.strict.deepEqual(h.killOwnListeners(8080).killed, ['4321'])
+        })
+
+    })
+
+    //noteOwn 之完成觀察點(Promise 與 onTrace)與取樣重試: 行程表以 opt.tableAsync 注入(同 opt.probe、opt.exec, 為正式注入點), 不碰真實行程表
+    //斷言語意(解開時預約檔之內容、結果之 ok/attempts/reason、事件之次序與內容), 以事件與 Promise 同步, 不以延時等待
+    describe('noteOwn 之完成觀察點與取樣重試', function() {
+
+        let rejections = []
+        let onRej = (reason) => rejections.push(reason)
+        let warnings = []
+        let onWarn = (w) => warnings.push(w)
+
+        before(function() {
+            process.on('unhandledRejection', onRej)
+            process.on('warning', onWarn)
+        })
+
+        after(function() {
+            process.off('unhandledRejection', onRej)
+            process.off('warning', onWarn)
+            assert.strict.deepEqual(rejections, [], 'noteOwn 不得產生 unhandled rejection')
+        })
+
+        afterEach(function() {
+            mock.timers.reset()
+        })
+
+        //管理器之快速選項(不等待、不核對監聽者)
+        let smBase = {
+            pollMs: 1,
+            portReleaseTimeoutMs: 5,
+            portReleasePollMs: 1,
+            sleep: async () => {},
+            killTree: () => {},
+            verifyOwner: async () => {},
+            log: () => {},
+        }
+        let noteEvs = (ev) => ev.filter((e) => NOTE_TYPES.includes(e.type)).map((e) => ({ ...e }))
+        let knownPids = (fx, port = 8080) => readFile(fx, port).known.map((k) => k.pid).sort((a, b) => a - b)
+
+        //完成之觀察點 [R1]: 回傳 Promise, 於本次取樣已寫入預約檔後才解開
+        it('[NO01] 取樣延遲完成: Promise 於預約檔寫入之後才解開(延遲落在等待期間); 事件先於解開, 事件發出時預約檔已記有該行程', async function() {
+            let fx = mk()
+            let src = mkTableSource()
+            let seen = null
+            let h = reserve(fx, [8080], {
+                tableAsync: src.fn,
+                onTrace: (e) => {
+                    if (e.type === 'noted') {
+                        seen = knownPids(fx)
+                    }
+                },
+            })
+            let p = h.noteOwn(childOf(700))
+            assert.strict.ok(p instanceof Promise, 'noteOwn 須回傳 Promise')
+            await src.reached(1)
+            assert.strict.equal(await isPending(p), true, '行程表尚未回來, 不得解開')
+            assert.strict.deepEqual(knownPids(fx), [], '尚未寫入')
+            src.calls[0]([rowOf(700)])
+            let r = await p
+            assert.strict.deepEqual(r, { ok: true, attempts: 1, reason: 'recorded' })
+            assert.strict.deepEqual(seen, [700], '事件發出時(解開之前)預約檔已寫入')
+            assert.strict.deepEqual(readFile(fx, 8080).known.map((k) => [k.pid, k.startMs]), [[700, 5700]])
+        })
+
+        //[R2] 取樣失敗(行程表查詢回 null、逾時、拋錯、非陣列)改為有界重試
+        let FAILS = [
+            ['回 null(同步)', (cb) => cb(null)],
+            ['回 null(非同步)', (cb) => setImmediate(() => cb(null))],
+            ['同步拋錯', () => {
+                throw new Error('boom')
+            }],
+            ['回非陣列', (cb) => cb({ rows: [] })],
+        ]
+        FAILS.forEach(([name, fail], i) => {
+            it(`[NO02${'abcd'[i]}] 取樣失敗 2 次後成功(${name}): 重試, 結果 attempts 為 3, 預約檔已記有該行程`, async function() {
+                let fx = mk()
+                let ev = []
+                let calls = 0
+                let h = reserve(fx, [8080], {
+                    noteRetryMs: 1,
+                    onTrace: (e) => ev.push(e),
+                    tableAsync: (cb) => {
+                        calls++
+                        if (calls <= 2) {
+                            return fail(cb)
+                        }
+                        cb([rowOf(700)])
+                    },
+                })
+                let r = await h.noteOwn(childOf(700))
+                assert.strict.deepEqual(r, { ok: true, attempts: 3, reason: 'recorded' })
+                assert.strict.equal(calls, 3)
+                assert.strict.deepEqual(knownPids(fx), [700])
+                assert.strict.deepEqual(noteEvs(ev), [
+                    { type: 'note-attempt', attempt: 1, ok: false, reason: 'table-failed', count: 1 },
+                    { type: 'note-attempt', attempt: 2, ok: false, reason: 'table-failed', count: 1 },
+                    { type: 'note-attempt', attempt: 3, ok: true, reason: null, count: 1 },
+                    { type: 'noted', pid: 700, attempts: 3 },
+                ])
+            })
+        })
+
+        it('[NO03] 一直失敗: 重試用盡(noteTries 次)以 ok:false 解開、不 reject; 預約檔一字不動; 其後之呼叫仍可取樣', async function() {
+            let fx = mk()
+            let ev = []
+            let src = mkTableSource()
+            let h = reserve(fx, [8080], { tableAsync: src.fn, noteTries: 4, noteRetryMs: 1, onTrace: (e) => ev.push(e) })
+            let before = fs.readFileSync(fileOf(fx, 8080), 'utf8')
+            let p = h.noteOwn(childOf(700))
+            for (let i = 1; i <= 4; i++) {
+                await src.reached(i)
+                src.calls[i - 1](null)
+            }
+            let settled = await Promise.allSettled([p])
+            assert.strict.equal(settled[0].status, 'fulfilled', '失敗須以 resolve 帶結果告知, 不得 reject')
+            assert.strict.deepEqual(settled[0].value, { ok: false, attempts: 4, reason: 'table-failed' })
+            assert.strict.equal(src.calls.length, 4, '用盡後不再嘗試')
+            assert.strict.equal(fs.readFileSync(fileOf(fx, 8080), 'utf8'), before, '失敗不得改寫預約檔')
+            let evs = noteEvs(ev)
+            assert.strict.deepEqual(evs.map((e) => e.type), ['note-attempt', 'note-attempt', 'note-attempt', 'note-attempt', 'note-failed'])
+            assert.strict.deepEqual(evs[4], { type: 'note-failed', pid: 700, attempts: 4, reason: 'table-failed' })
+            //用盡後不卡住: 下一次呼叫另起一輪、成功
+            let p2 = h.noteOwn(childOf(700))
+            await src.reached(5)
+            src.calls[4]([rowOf(700)])
+            assert.strict.deepEqual(await p2, { ok: true, attempts: 1, reason: 'recorded' })
+            assert.strict.deepEqual(knownPids(fx), [700])
+        })
+
+        //[R1 合併取樣] 每個 noteOwn 之 Promise 須等到涵蓋該 child 之那次取樣寫入後才解開
+        it('[NO04] 合併取樣: 取樣進行中再呼叫者排入下一輪, 須等涵蓋自己之那次取樣寫入後才解開, 不被較早開始之取樣提前了結', async function() {
+            let fx = mk()
+            let src = mkTableSource()
+            let h = reserve(fx, [8080], { tableAsync: src.fn })
+            let pA = h.noteOwn(childOf(700))
+            await src.reached(1)
+            let pB = h.noteOwn(childOf(704))
+            assert.strict.equal(src.calls.length, 1, '不重疊')
+            //第 1 輪之行程表尚無 704(其後才起)
+            src.calls[0]([rowOf(700)])
+            assert.strict.deepEqual(await pA, { ok: true, attempts: 1, reason: 'recorded' })
+            await src.reached(2)
+            assert.strict.equal(await isPending(pB), true, 'B 之 child 不在第 1 輪行程表內, 不得被第 1 輪提前解開')
+            assert.strict.deepEqual(knownPids(fx), [700])
+            src.calls[1]([rowOf(700), rowOf(704)])
+            assert.strict.deepEqual(await pB, { ok: true, attempts: 1, reason: 'recorded' })
+            assert.strict.deepEqual(knownPids(fx), [700, 704])
+        })
+
+        it('[NO04b] 合併取樣: 前一輪重試用盡失敗時, 排入下一輪者不受牽連, 各自依自己那輪之結果解開', async function() {
+            let fx = mk()
+            let src = mkTableSource()
+            let h = reserve(fx, [8080], { tableAsync: src.fn, noteTries: 2, noteRetryMs: 1 })
+            let pA = h.noteOwn(childOf(700))
+            await src.reached(1)
+            let pB = h.noteOwn(childOf(704))
+            src.calls[0](null)
+            await src.reached(2)
+            src.calls[1](null)
+            assert.strict.deepEqual(await pA, { ok: false, attempts: 2, reason: 'table-failed' })
+            await src.reached(3)
+            assert.strict.equal(await isPending(pB), true, 'B 之那輪尚未給行程表')
+            src.calls[2]([rowOf(700), rowOf(704)])
+            assert.strict.deepEqual(await pB, { ok: true, attempts: 1, reason: 'recorded' })
+            assert.strict.deepEqual(knownPids(fx), [700, 704])
+        })
+
+        it('[NO04c] 合併取樣: 同一輪涵蓋多個呼叫時(count)各依自己之 child 判定, 事件依呼叫順序', async function() {
+            let fx = mk()
+            let src = mkTableSource()
+            let ev = []
+            let h = reserve(fx, [8080], { tableAsync: src.fn, onTrace: (e) => ev.push(e) })
+            let p0 = h.noteOwn(childOf(700))
+            await src.reached(1)
+            let pExited = h.noteOwn(childOf(708, false))
+            let pMissing = h.noteOwn(childOf(712))
+            let pOk = h.noteOwn(childOf(704))
+            src.calls[0]([rowOf(700)])
+            await p0
+            await src.reached(2)
+            src.calls[1]([rowOf(700), rowOf(704)])
+            assert.strict.deepEqual(await pExited, { ok: false, attempts: 1, reason: 'child-exited' })
+            assert.strict.deepEqual(await pMissing, { ok: false, attempts: 1, reason: 'not-in-table' })
+            assert.strict.deepEqual(await pOk, { ok: true, attempts: 1, reason: 'recorded' })
+            assert.strict.deepEqual(noteEvs(ev), [
+                { type: 'note-attempt', attempt: 1, ok: true, reason: null, count: 1 },
+                { type: 'noted', pid: 700, attempts: 1 },
+                { type: 'note-attempt', attempt: 1, ok: true, reason: null, count: 3 },
+                { type: 'note-failed', pid: 708, attempts: 1, reason: 'child-exited' },
+                { type: 'note-failed', pid: 712, attempts: 1, reason: 'not-in-table' },
+                { type: 'noted', pid: 704, attempts: 1 },
+            ])
+            assert.strict.deepEqual(knownPids(fx), [700, 704])
+        })
+
+        it('[NO05] onTrace: 事件為凍結物件、次序與內容(重試 → 成功 → noted)固定, 回調拋錯不影響結果', async function() {
+            let fx = mk()
+            let src = mkTableSource()
+            let ev = []
+            let h = reserve(fx, [8080], {
+                tableAsync: src.fn,
+                noteRetryMs: 1,
+                onTrace: (e) => {
+                    ev.push(e)
+                    throw new Error('回調拋錯須被忽略')
+                },
+            })
+            let p = h.noteOwn(childOf(700))
+            await src.reached(1)
+            src.calls[0](null)
+            await src.reached(2)
+            src.calls[1]([rowOf(700)])
+            assert.strict.deepEqual(await p, { ok: true, attempts: 2, reason: 'recorded' })
+            let notes = ev.filter((e) => NOTE_TYPES.includes(e.type))
+            assert.strict.ok(notes.every((e) => Object.isFrozen(e)), '事件須凍結')
+            assert.strict.deepEqual(notes.map((e) => ({ ...e })), [
+                { type: 'note-attempt', attempt: 1, ok: false, reason: 'table-failed', count: 1 },
+                { type: 'note-attempt', attempt: 2, ok: true, reason: null, count: 1 },
+                { type: 'noted', pid: 700, attempts: 2 },
+            ])
+        })
+
+        it('[NO06] child 無效(null、undefined、{}、pid 為 0、非物件): 回傳已解開之 Promise(ok:false, attempts:0, invalid-child), 不取樣、有 note-failed 事件', async function() {
+            let fx = mk()
+            let ev = []
+            let calls = 0
+            let tableAsync = () => {
+                calls++
+            }
+            let h = reserve(fx, [8080], { tableAsync, onTrace: (e) => ev.push(e) })
+            let before = fs.readFileSync(fileOf(fx, 8080), 'utf8')
+            for (let bad of [null, undefined, {}, { pid: 0 }, 5, 'x']) {
+                let p = h.noteOwn(bad)
+                let got
+                p.then((v) => {
+                    got = v
+                })
+                await null
+                await null
+                assert.strict.deepEqual(got, { ok: false, attempts: 0, reason: 'invalid-child' }, '已解開(不待任何事件)')
+            }
+            assert.strict.equal(calls, 0)
+            assert.strict.equal(fs.readFileSync(fileOf(fx, 8080), 'utf8'), before)
+            let fails = noteEvs(ev)
+            assert.strict.equal(fails.length, 6)
+            assert.strict.deepEqual(fails[0], { type: 'note-failed', pid: null, attempts: 0, reason: 'invalid-child' })
+        })
+
+        it('[NO07] 結果之理由: child 取樣時已結束(child-exited)、存活而行程表無其列(not-in-table); 兩者皆不記入, 其餘仍寫入', async function() {
+            let fx = mk()
+            let h = reserve(fx, [8080], { tableAsync: (cb) => cb([rowOf(700), rowOf(704)]) })
+            assert.strict.deepEqual(await h.noteOwn(childOf(800, false)), { ok: false, attempts: 1, reason: 'child-exited' })
+            assert.strict.deepEqual(await h.noteOwn(childOf(812)), { ok: false, attempts: 1, reason: 'not-in-table' })
+            assert.strict.deepEqual(knownPids(fx), [], '未記入者不得出現在預約檔')
+            assert.strict.deepEqual(await h.noteOwn(childOf(704)), { ok: true, attempts: 1, reason: 'recorded' })
+            assert.strict.deepEqual(knownPids(fx), [704])
+        })
+
+        it('[NO08] 預約檔已不存在(release 後)或屬他人(他持有鏈): 本持有鏈之檔一個都沒寫成即 ok:false/no-reservation, 不寫入、不重建; 他人之預約檔一字不動; 有一個寫成即算記入', async function() {
+            let fx = mk()
+            let h = reserve(fx, [8080, 9090], { tableAsync: (cb) => cb([rowOf(700)]) })
+            //其中一個預約檔換成他人持有: 屬本持有鏈者(8080)照寫, 他人之檔不動, 結果為已記入
+            writeHolder(fx, 9090, { known: [{ pid: 1, startMs: 2 }] })
+            let other = fs.readFileSync(fileOf(fx, 9090), 'utf8')
+            assert.strict.deepEqual(await h.noteOwn(childOf(700)), { ok: true, attempts: 1, reason: 'recorded' })
+            assert.strict.equal(fs.readFileSync(fileOf(fx, 9090), 'utf8'), other, '不得把本實例之行程寫進他人之預約')
+            assert.strict.deepEqual(knownPids(fx, 8080), [700], '屬本持有鏈者照寫')
+            //全部屬他人: 未記入
+            writeHolder(fx, 8080, { known: [{ pid: 3, startMs: 4 }] })
+            let other8 = fs.readFileSync(fileOf(fx, 8080), 'utf8')
+            assert.strict.deepEqual(await h.noteOwn(childOf(700)), { ok: false, attempts: 1, reason: 'no-reservation' })
+            assert.strict.equal(fs.readFileSync(fileOf(fx, 8080), 'utf8'), other8)
+            //已釋放: 預約檔不在
+            let fx2 = mk()
+            let h2 = reserve(fx2, [8080], { tableAsync: (cb) => cb([rowOf(700)]) })
+            h2.release()
+            assert.strict.deepEqual(await h2.noteOwn(childOf(700)), { ok: false, attempts: 1, reason: 'no-reservation' })
+            assert.strict.equal(fs.existsSync(fileOf(fx2, 8080)), false, '不得重建已釋放之預約檔')
+        })
+
+        it('[NO08b] 各 source 之寫入: inherited(上層保留, 預約檔為上層之 token, 且宣告之埠多於已預約者)、pinned(埠被後續宣告擴充)、auto 皆 ok:true 並寫入已預約之檔', async function() {
+            //inherited: 預約檔屬上層(token 即 E2E_PORT_HOLD), 本行程宣告 [8080, 9090] 而上層只預約 8080
+            let fx = mk([], { env: { E2E_PORT_HOLD: 'parent' } })
+            writeHolder(fx, 8080, { token: 'parent', known: [] })
+            let h = reserve(fx, [8080, 9090], { tableAsync: (cb) => cb([rowOf(700)]) })
+            assert.strict.equal(h.source, 'inherited')
+            assert.strict.deepEqual(await h.noteOwn(childOf(700)), { ok: true, attempts: 1, reason: 'recorded' })
+            assert.strict.deepEqual(knownPids(fx, 8080), [700])
+            assert.strict.equal(fs.existsSync(fileOf(fx, 9090)), false, '未預約之埠不建檔')
+            //pinned: 同一行程再宣告新埠(extendActive 不預約新埠), 已預約之埠照寫
+            let fx2 = mk([], { env: { E2E_PORT_OFFSET: '100' } })
+            let h2 = reserve(fx2, [8080], { tableAsync: (cb) => cb([rowOf(704)]) })
+            assert.strict.equal(h2.source, 'pinned')
+            reserve(fx2, [9090], { tableAsync: (cb) => cb([rowOf(704)]) })
+            assert.strict.deepEqual(h2.ports, [8180, 9190])
+            assert.strict.deepEqual(await h2.noteOwn(childOf(704)), { ok: true, attempts: 1, reason: 'recorded' })
+            assert.strict.deepEqual(knownPids(fx2, 8180), [704])
+            //auto: 全部屬本持有鏈
+            let fx3 = mk()
+            let h3 = reserve(fx3, [8080, 9090], { tableAsync: (cb) => cb([rowOf(708)]) })
+            assert.strict.deepEqual(await h3.noteOwn(childOf(708)), { ok: true, attempts: 1, reason: 'recorded' })
+            assert.strict.deepEqual([knownPids(fx3, 8080), knownPids(fx3, 9090)], [[708], [708]])
+        })
+
+        it('[NO08c] basePorts 為空: 無預約檔可寫, 只記於記憶體, 回 recorded(killOwnListeners 仍依記憶體之身分)', async function() {
+            let fx = mk()
+            let h = reserve(fx, [], { tableAsync: (cb) => cb([rowOf(700)]) })
+            assert.strict.deepEqual(await h.noteOwn(childOf(700)), { ok: true, attempts: 1, reason: 'recorded' })
+            assert.strict.deepEqual(regFiles(fx), [])
+        })
+
+        it('[NO09] 寫預約檔暫時失敗(重試後成功): 以 write-failed 重試; 用盡則 ok:false/write-failed、預約檔不被半寫', async function() {
+            let fx = mk()
+            let tmp = `${fileOf(fx, 8080)}.${process.pid}.tmp`
+            //暫存檔之路徑被目錄占住: 寫入拋錯, 移除後即可
+            fs.mkdirSync(tmp)
+            let ev = []
+            let h = reserve(fx, [8080], {
+                tableAsync: (cb) => cb([rowOf(700)]),
+                noteRetryMs: 1,
+                onTrace: (e) => {
+                    ev.push(e)
+                    if (e.type === 'note-attempt' && e.attempt === 1) {
+                        fs.rmSync(tmp, { recursive: true, force: true })
+                    }
+                },
+            })
+            assert.strict.deepEqual(await h.noteOwn(childOf(700)), { ok: true, attempts: 2, reason: 'recorded' })
+            assert.strict.deepEqual(noteEvs(ev).slice(0, 2).map((e) => [e.attempt, e.ok, e.reason]), [[1, false, 'write-failed'], [2, true, null]])
+            assert.strict.deepEqual(knownPids(fx), [700])
+            //用盡
+            let fx2 = mk()
+            let tmp2 = `${fileOf(fx2, 8080)}.${process.pid}.tmp`
+            fs.mkdirSync(tmp2)
+            let h2 = reserve(fx2, [8080], { tableAsync: (cb) => cb([rowOf(700)]), noteTries: 2, noteRetryMs: 1 })
+            let before = fs.readFileSync(fileOf(fx2, 8080), 'utf8')
+            assert.strict.deepEqual(await h2.noteOwn(childOf(700)), { ok: false, attempts: 2, reason: 'write-failed' })
+            assert.strict.equal(fs.readFileSync(fileOf(fx2, 8080), 'utf8'), before)
+            fs.rmSync(tmp2, { recursive: true, force: true })
+        })
+
+        it('[NO09b] 多埠時一個預約檔寫入一直失敗: ok:false/write-failed(不因另一個寫成而算成功); 已寫成之檔不回復', async function() {
+            let fx = mk()
+            let h = reserve(fx, [8080, 9090], { tableAsync: (cb) => cb([rowOf(700)]), noteTries: 2, noteRetryMs: 1 })
+            let tmp = `${fileOf(fx, 9090)}.${process.pid}.tmp`
+            fs.mkdirSync(tmp)
+            assert.strict.deepEqual(await h.noteOwn(childOf(700)), { ok: false, attempts: 2, reason: 'write-failed' })
+            assert.strict.deepEqual(knownPids(fx, 8080), [700], '另一個檔已寫成, 不回復')
+            assert.strict.deepEqual(knownPids(fx, 9090), [])
+            fs.rmSync(tmp, { recursive: true, force: true })
+        })
+
+        it('[NO09c] 預約檔存在而讀不出(寫到一半、被占用)屬暫時性: 以 write-failed 重試, 恢復後記入; 一直讀不出則 ok:false/write-failed(不當成預約檔不存在)', async function() {
+            let fx = mk()
+            let fp = fileOf(fx, 8080)
+            let orig = ''
+            let h = reserve(fx, [8080], {
+                tableAsync: (cb) => cb([rowOf(700)]),
+                noteRetryMs: 1,
+                onTrace: (e) => {
+                    if (e.type === 'note-attempt' && e.attempt === 1) {
+                        fs.writeFileSync(fp, orig)
+                    }
+                },
+            })
+            orig = fs.readFileSync(fp, 'utf8')
+            fs.writeFileSync(fp, '{"token":')
+            assert.strict.deepEqual(await h.noteOwn(childOf(700)), { ok: true, attempts: 2, reason: 'recorded' })
+            assert.strict.deepEqual(knownPids(fx), [700])
+            //一直讀不出
+            let fx2 = mk()
+            let fp2 = fileOf(fx2, 8080)
+            let h2 = reserve(fx2, [8080], { tableAsync: (cb) => cb([rowOf(700)]), noteTries: 2, noteRetryMs: 1 })
+            fs.writeFileSync(fp2, '{"token":')
+            assert.strict.deepEqual(await h2.noteOwn(childOf(700)), { ok: false, attempts: 2, reason: 'write-failed' })
+            assert.strict.equal(fs.readFileSync(fp2, 'utf8'), '{"token":', '讀不出之檔不得被改寫')
+        })
+
+        it('[NO02e] tableAsync 為 async 函數而拒絕: 視為該次查詢失敗(不等到逾時)並攔下其 rejection, 重試後成功', async function() {
+            let fx = mk()
+            let n = 0
+            let n0 = rejections.length
+            let h = reserve(fx, [8080], {
+                tableAsync: async (cb) => {
+                    n++
+                    if (n === 1) {
+                        throw new Error('boom')
+                    }
+                    cb([rowOf(700)])
+                },
+                noteRetryMs: 1,
+                noteTimeoutMs: 600000,
+            })
+            assert.strict.deepEqual(await h.noteOwn(childOf(700)), { ok: true, attempts: 2, reason: 'recorded' })
+            await new Promise((resolve) => setImmediate(resolve))
+            assert.strict.deepEqual(rejections.slice(n0), [], '被拒絕之 Promise 須被攔下')
+        })
+
+        it('[NO10] 取樣內部拋錯(行程表含非預期之列): ok:false/sample-error, 不重試、不 reject、不同步拋錯', async function() {
+            let fx = mk()
+            let calls = 0
+            let tableAsync = (cb) => {
+                calls++
+                cb([null])
+            }
+            let h = reserve(fx, [8080], { tableAsync, noteRetryMs: 1 })
+            let p
+            assert.strict.doesNotThrow(() => {
+                p = h.noteOwn(childOf(700))
+            })
+            assert.strict.deepEqual(await p, { ok: false, attempts: 1, reason: 'sample-error' })
+            assert.strict.equal(calls, 1, '非暫時性失敗不重試')
+        })
+
+        it('[NO11] 取行程表懸置: 逾 noteTimeoutMs 視為該次失敗(table-timeout), 用盡後 ok:false; 其後才回調者被忽略(不重複解開、不改寫預約檔)', async function() {
+            let fx = mk()
+            let src = mkTableSource()
+            let ev = []
+            let h = reserve(fx, [8080], { tableAsync: src.fn, noteTimeoutMs: 5, noteRetryMs: 1, noteTries: 2, onTrace: (e) => ev.push(e) })
+            let before = fs.readFileSync(fileOf(fx, 8080), 'utf8')
+            let r = await h.noteOwn(childOf(700))
+            assert.strict.deepEqual(r, { ok: false, attempts: 2, reason: 'table-timeout' })
+            assert.strict.equal(src.calls.length, 2)
+            let n = ev.length
+            src.calls[0]([rowOf(700)])
+            src.calls[1]([rowOf(700)])
+            assert.strict.equal(ev.length, n, '逾時後才回調者不得再產生事件')
+            assert.strict.equal(fs.readFileSync(fileOf(fx, 8080), 'utf8'), before)
+        })
+
+        it('[NO12] 重試間隔與逾時各取 noteRetryMs、noteTimeoutMs(假時鐘: 差 1 毫秒不觸發、到點觸發); 逾時後之重試再隔 noteRetryMs', async function() {
+            let fx = mk()
+            let src = mkTableSource()
+            mock.timers.enable({ apis: ['setTimeout'] })
+            let h = reserve(fx, [8080], { tableAsync: src.fn, noteRetryMs: 250, noteTimeoutMs: 800, noteTries: 3 })
+            let p = h.noteOwn(childOf(700))
+            assert.strict.equal(src.calls.length, 1)
+            mock.timers.tick(799)
+            assert.strict.equal(src.calls.length, 1, '逾時未到')
+            mock.timers.tick(1)
+            //第 1 次逾時 → 隔 noteRetryMs 重試
+            mock.timers.tick(249)
+            assert.strict.equal(src.calls.length, 1, '重試間隔未到')
+            mock.timers.tick(1)
+            assert.strict.equal(src.calls.length, 2)
+            src.calls[1]([rowOf(700)])
+            assert.strict.deepEqual(await p, { ok: true, attempts: 2, reason: 'recorded' })
+        })
+
+        it('[NO13] 選項非預期值改用預設(K3): noteTries 預設 3、noteRetryMs 預設 1000、noteTimeoutMs 預設 PORT_QUERY_TIMEOUT_MS; noteRetryMs 為 0 有效', async function() {
+            //一律失敗(回 null)之行程表來源; count() 為嘗試次數
+            let mkFailing = () => {
+                let n = 0
+                return {
+                    count: () => n,
+                    fn: (cb) => {
+                        n++
+                        cb(null)
+                    },
+                }
+            }
+            //noteTries 非正整數 → 3 次
+            for (let bad of [0, -1, 1.5, 'x', null, NaN]) {
+                let fx = mk()
+                let src = mkFailing()
+                let h = reserve(fx, [8080], { tableAsync: src.fn, noteTries: bad, noteRetryMs: 1 })
+                let r = await h.noteOwn(childOf(700))
+                assert.strict.deepEqual([r.ok, r.attempts, src.count()], [false, 3, 3], `noteTries=${String(bad)}`)
+                handles.splice(0).forEach((x) => x.release())
+            }
+            //noteRetryMs 非有效非負數 → 1000
+            for (let bad of [-1, 'x', null, NaN, Infinity]) {
+                let fx = mk()
+                let src = mkFailing()
+                mock.timers.enable({ apis: ['setTimeout'] })
+                let h = reserve(fx, [8080], { tableAsync: src.fn, noteRetryMs: bad })
+                let p = h.noteOwn(childOf(700))
+                assert.strict.equal(src.count(), 1)
+                mock.timers.tick(999)
+                assert.strict.equal(src.count(), 1, `noteRetryMs=${String(bad)} 未到預設 1000`)
+                mock.timers.tick(1)
+                assert.strict.equal(src.count(), 2, `noteRetryMs=${String(bad)} 到預設 1000`)
+                mock.timers.tick(1000)
+                assert.strict.deepEqual(await p, { ok: false, attempts: 3, reason: 'table-failed' })
+                mock.timers.reset()
+                handles.splice(0).forEach((x) => x.release())
+            }
+            //noteRetryMs 為 0 有效(不被換成 1000)
+            {
+                let fx = mk()
+                let src = mkFailing()
+                mock.timers.enable({ apis: ['setTimeout'] })
+                let h = reserve(fx, [8080], { tableAsync: src.fn, noteRetryMs: 0 })
+                let p = h.noteOwn(childOf(700))
+                mock.timers.tick(1)
+                assert.strict.equal(src.count(), 3, 'noteRetryMs=0 一個刻度內即把重試用完(預設 1000 時只會重試 0 次)')
+                assert.strict.deepEqual(await p, { ok: false, attempts: 3, reason: 'table-failed' })
+                mock.timers.reset()
+                handles.splice(0).forEach((x) => x.release())
+            }
+            //noteTimeoutMs 非正整數 → PORT_QUERY_TIMEOUT_MS
+            for (let bad of [0, -1, 1.5, 'x', null]) {
+                let fx = mk()
+                let ev = []
+                mock.timers.enable({ apis: ['setTimeout'] })
+                let h = reserve(fx, [8080], { tableAsync: () => {}, noteTimeoutMs: bad, noteTries: 1, onTrace: (e) => ev.push(e) })
+                let p = h.noteOwn(childOf(700))
+                mock.timers.tick(PORT_QUERY_TIMEOUT_MS - 1)
+                assert.strict.equal(noteEvs(ev).length, 0, `noteTimeoutMs=${String(bad)} 未到預設逾時`)
+                mock.timers.tick(1)
+                assert.strict.deepEqual(await p, { ok: false, attempts: 1, reason: 'table-timeout' })
+                mock.timers.reset()
+                handles.splice(0).forEach((x) => x.release())
+            }
+        })
+
+        it('[NO13b] 間隔與逾時之上限夾在計時器可用範圍內(超過 2^31-1 毫秒不得被計時器改為 1 毫秒)', async function() {
+            let fx = mk()
+            let src = mkTableSource()
+            let n0 = warnings.length
+            let h = reserve(fx, [8080], { tableAsync: src.fn, noteTimeoutMs: 1e12, noteRetryMs: 1e12 })
+            let p = h.noteOwn(childOf(700))
+            await src.reached(1)
+            src.calls[0](null)
+            //讓出, 使 process.emitWarning(nextTick)有機會送達
+            await new Promise((resolve) => setImmediate(resolve))
+            await new Promise((resolve) => setImmediate(resolve))
+            assert.strict.deepEqual(warnings.slice(n0).filter((w) => w.name === 'TimeoutOverflowWarning').map((w) => w.message), [])
+            assert.strict.equal(await isPending(p), true, '重試間隔夾在上限, 不得立即重試')
+            assert.strict.equal(src.calls.length, 1)
+        })
+
+        it('[NO14] 不等待者(fire-and-forget): 取樣失敗、tableAsync 同步拋錯皆不拋錯、不產生 unhandled rejection; 事件仍告知', async function() {
+            let fx = mk()
+            let doneP = null
+            let fails = []
+            let gotFail = new Promise((resolve) => {
+                doneP = resolve
+            })
+            let h = reserve(fx, [8080], {
+                tableAsync: () => {
+                    throw new Error('boom')
+                },
+                noteTries: 2,
+                noteRetryMs: 1,
+                onTrace: (e) => {
+                    if (e.type === 'note-failed') {
+                        fails.push(e.reason)
+                        if (fails.length === 2) {
+                            doneP()
+                        }
+                    }
+                },
+            })
+            assert.strict.doesNotThrow(() => {
+                h.noteOwn(childOf(700))
+                h.noteOwn(null)
+            })
+            await gotFail
+            assert.strict.deepEqual(fails, ['invalid-child', 'table-failed'])
+            //讓出, 使任何 unhandled rejection 有機會被回報
+            await new Promise((resolve) => setImmediate(resolve))
+            assert.strict.deepEqual(rejections, [])
+        })
+
+        //[R4] createServiceManager 之 noteOwn 不阻塞服務就緒; 完成以 onTrace 之 own-noted 轉出
+        it('[NO15] createServiceManager: 服務就緒不等 noteOwn 取樣; 取樣完成後以 own-noted 事件告知(service、port、pid、ok、attempts、reason)', async function() {
+            let fx = mk()
+            let src = mkTableSource()
+            let h = reserve(fx, [19731], { tableAsync: src.fn })
+            let ev = []
+            let ready = false
+            let onOwn = null
+            let gotOwn = new Promise((resolve) => {
+                onOwn = resolve
+            })
+            let sm = createServiceManager({
+                ...smBase,
+                reservation: h,
+                onTrace: (e) => {
+                    ev.push(e)
+                    if (e.type === 'own-noted') {
+                        onOwn(e)
+                    }
+                },
+                probe: async () => ready,
+                services: [{
+                    name: 'a',
+                    port: 19731,
+                    spawn: () => {
+                        ready = true
+                        return childOf(4321)
+                    },
+                }],
+            })
+            //防懸置上限(真實計時器): 若管理器等了取樣, 取樣尚未回來, 就緒永不完成
+            let guard
+            let timeout = new Promise((resolve) => {
+                guard = setTimeout(() => resolve('blocked'), 10000)
+            })
+            let r = await Promise.race([sm.startServersOnce().then(() => 'ready'), timeout])
+            clearTimeout(guard)
+            assert.strict.equal(r, 'ready', '服務就緒不得等 noteOwn 之取樣')
+            await src.reached(1)
+            assert.strict.deepEqual(ev.filter((e) => e.type === 'own-noted'), [], '取樣尚未完成, 無事件')
+            src.calls[0]([rowOf(4321)])
+            await gotOwn
+            assert.strict.deepEqual(ev.filter((e) => e.type === 'own-noted').map((e) => ({ ...e })), [
+                { type: 'own-noted', service: 'a', port: 19731, pid: 4321, ok: true, attempts: 1, reason: 'recorded' },
+            ])
+            assert.strict.deepEqual(knownPids(fx, 19731), [4321])
+        })
+
+        it('[NO15c] createServiceManager: restart 後之 noteOwn 亦以 own-noted 告知(新行程之 pid); 保留之 noteOwn 回傳被拒絕之 Promise 時不產生 unhandled rejection', async function() {
+            let fx = mk()
+            let h = reserve(fx, [19735], { tableAsync: (cb) => cb([rowOf(4321), rowOf(4323)]) })
+            let got = []
+            let onTwo = null
+            let gotTwo = new Promise((resolve) => {
+                onTwo = resolve
+            })
+            let ready = false
+            let n = 0
+            let sm = createServiceManager({
+                ...smBase,
+                reservation: h,
+                onTrace: (e) => {
+                    if (e.type === 'own-noted') {
+                        got.push({ ...e })
+                        if (got.length === 2) {
+                            onTwo()
+                        }
+                    }
+                },
+                probe: async () => ready,
+                services: [{
+                    name: 'a',
+                    port: 19735,
+                    spawn: () => {
+                        ready = true
+                        return childOf(4321 + (n++ * 2))
+                    },
+                }],
+            })
+            await sm.startServersOnce()
+            await sm.restart('a')
+            await gotTwo
+            assert.strict.deepEqual(got.map((e) => [e.service, e.port, e.pid, e.ok, e.reason]), [['a', 19735, 4321, true, 'recorded'], ['a', 19735, 4323, true, 'recorded']])
+            //回傳被拒絕之 Promise 之假保留: 管理器不得因此產生 unhandled rejection(含未傳 onTrace 者)
+            let n0 = rejections.length
+            let ready2 = false
+            let sm2 = createServiceManager({
+                ...smBase,
+                reservation: { source: 'auto', noteOwn: () => Promise.reject(new Error('x')), killOwnListeners: () => ({ pids: [], killed: [], skipped: [] }) },
+                probe: async () => ready2,
+                services: [{
+                    name: 'b',
+                    port: 19736,
+                    spawn: () => {
+                        ready2 = true
+                        return childOf(4324)
+                    },
+                }],
+            })
+            await sm2.startServersOnce()
+            await new Promise((resolve) => setImmediate(resolve))
+            assert.strict.deepEqual(rejections.slice(n0), [])
+        })
+
+        it('[NO15b] createServiceManager: 取樣用盡失敗時 own-noted 如實告知(ok:false、attempts、reason), 服務照常就緒; 假保留(noteOwn 不回 Promise)不發此事件', async function() {
+            let fx = mk()
+            let h = reserve(fx, [19732], { tableAsync: (cb) => cb(null), noteTries: 2, noteRetryMs: 1 })
+            let onOwn = null
+            let gotOwn = new Promise((resolve) => {
+                onOwn = resolve
+            })
+            let mkSm = (reservation, port, onTrace) => {
+                let ready = false
+                return createServiceManager({
+                    ...smBase,
+                    reservation,
+                    onTrace,
+                    probe: async () => ready,
+                    services: [{
+                        name: 'a',
+                        port,
+                        spawn: () => {
+                            ready = true
+                            return childOf(4322)
+                        },
+                    }],
+                })
+            }
+            await mkSm(h, 19732, (e) => {
+                if (e.type === 'own-noted') {
+                    onOwn(e)
+                }
+            }).startServersOnce()
+            let e = await gotOwn
+            assert.strict.deepEqual({ ...e }, { type: 'own-noted', service: 'a', port: 19732, pid: 4322, ok: false, attempts: 2, reason: 'table-failed' })
+            assert.strict.deepEqual(knownPids(fx, 19732), [], '失敗不寫入')
+            //假保留(回傳非 Promise)與回傳怪值者: 不發事件、不拋錯
+            let ev = []
+            let notes = []
+            await mkSm({ source: 'auto', noteOwn: (c) => notes.push(c), killOwnListeners: () => ({ pids: [], killed: [], skipped: [] }) }, 19733, (x) => ev.push(x)).startServersOnce()
+            await mkSm({ source: 'auto', noteOwn: () => Promise.resolve('x'), killOwnListeners: () => ({ pids: [], killed: [], skipped: [] }) }, 19734, (x) => ev.push(x)).startServersOnce()
+            await new Promise((resolve) => setImmediate(resolve))
+            assert.strict.deepEqual(notes.length, 1)
+            assert.strict.deepEqual(ev.filter((x) => x.type === 'own-noted').map((x) => ({ ...x })), [
+                { type: 'own-noted', service: 'a', port: 19734, pid: 4322, ok: false, attempts: null, reason: null },
+            ])
         })
 
     })

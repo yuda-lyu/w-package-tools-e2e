@@ -238,7 +238,7 @@ prepare(ctx) → launch() → openPage(browser) → beforeRun(ctx) → run(page,
   | 探測有回應而查無監聽者 | 同上 | `E2E_PORT_NOT_OWN` |
   | 查詢失敗（監聽者或行程表回 `null`） | 重試共 3 次，仍查不到**不當成自己人**：拋錯，收掉自建之服務，不下殺；多因系統負載過高，可重跑 | `E2E_PORT_OWNER_UNKNOWN` |
 
-  沿用既有服務（port 已有回應而未 spawn；含 `E2E_PORT_OFFSET=0` 手動鎖埠）**不核對**，語意照舊。**launcher 先結束、真正服務由孫行程接手之寫法無法判定**（中間行程已死即斷鏈，`E2E_PORT_NOT_OWN`）：請直接 spawn 服務；`shell:true`、`npm run serve` 這類 launcher 全程存活者可以判定。確實無法以行程鏈判定之服務（例如容器）以 `opt.verifyOwner(svc, child)` 自行確認身分。測試之假 child 同樣以 `verifyOwner` 略過。重試間隔 `opt.ownerRetryMs`（預設 1000）；查詢之執行函數 `opt.exec`；觀察回調 `opt.onTrace`（事件 `owner-check`：`service`、`port`、`attempt`、`result`、`owners`；`restart-query`：`service`、`port`、`attempt`、`ok`）。
+  沿用既有服務（port 已有回應而未 spawn；含 `E2E_PORT_OFFSET=0` 手動鎖埠）**不核對**，語意照舊。**launcher 先結束、真正服務由孫行程接手之寫法無法判定**（中間行程已死即斷鏈，`E2E_PORT_NOT_OWN`）：請直接 spawn 服務；`shell:true`、`npm run serve` 這類 launcher 全程存活者可以判定。確實無法以行程鏈判定之服務（例如容器）以 `opt.verifyOwner(svc, child)` 自行確認身分。測試之假 child 同樣以 `verifyOwner` 略過。重試間隔 `opt.ownerRetryMs`（預設 1000）；查詢之執行函數 `opt.exec`；觀察回調 `opt.onTrace`（事件 `owner-check`：`service`、`port`、`attempt`、`result`、`owners`；`restart-query`：`service`、`port`、`attempt`、`ok`；已導入 `reserveE2ePorts` 時另有 `own-noted`：服務就緒後之 `noteOwn` 取樣完成〔不阻塞就緒，事件於其後非同步發出〕，`service`、`port`、`pid`、`ok`、`attempts`、`reason`，見 §2.12〈記錄完成之觀察點〉）。
 - 服務之 `beforeSpawn({ phase, args, env, hookArg })`：每次 spawn 前呼叫並等待，`phase` 為 `'start'`（startServersOnce 確定要 spawn 時；沿用時不呼叫）或 `'restart'`（`hookArg` 取自 restart 之 opt）——供「服務啟動前必須完成」之前置：w-web-api 首次啟動前 `npm run build`、w-web-perm 首次啟動前重建資料庫與 `restart(…, { hookArg:{ reseed:true } })` 之重新播種。
 - `cleanup()`：同步（exit / 訊號處理器內非同步不會被等待）、依 services 反序殺自建、重置一次性狀態、呼叫 `onCleanup`。觸發來源兩條：`registerCleanupHooks`（root after＋exit / 訊號備援）與直跑主函式末尾顯式呼叫。
 - **own 政策 v1 不支援**（只用自建、port 被佔即報錯、綁定失敗字樣偵測、監聽者回驗、跨行程互斥）；參考實作為 w-web-task `test/tools/harnessLifecycle.mjs`。
@@ -465,6 +465,21 @@ let baseUrl = `http://127.0.0.1:${resolveE2ePort(8080)}`
 
 **占用者一律不殺**（E4）。唯一例外：同一專案（`root` 相同，預設 `process.cwd()`）之殘留預約記有已確認身分之行程時，只依 `identity`、`chain` 下殺這些行程（階段 `stale-reservation`，每筆印 `[e2e-port] 下殺…`），之後回到基準埠。身分由 `createServiceManager` 於服務就緒後背景取樣（`noteOwn`；未用管理器者自行呼叫 `reservation.noteOwn(child)`），寫入預約檔；未曾被取樣者不殺。
 
+**記錄完成之觀察點（`noteOwn` 之回傳；2026-11-27）**：`reservation.noteOwn(child)` 仍於背景取行程表、不阻塞服務就緒，但現回傳 `Promise<{ ok, attempts, reason }>`，於**涵蓋該 child 之那次取樣已寫入預約檔之後**才解開——使用端要確知「記錄已寫入」時 `await` 它，不必輪詢預約檔並設時限。**永不 reject、不同步拋錯**（既有不等待之寫法完全不受影響）。結果：
+
+| `ok` | `reason` | 意義 |
+|---|---|---|
+| `true` | `recorded` | child 存活，其身分（PID、真實起始時間）與子孫已寫入預約檔（屬本持有鏈之預約檔至少一個寫成；下次開跑回收殘留預約時取各檔 `known` 之聯集）。`basePorts` 為空時無預約檔可寫，只記於記憶體（`killOwnListeners` 仍依它），亦回 `recorded` |
+| `false` | `invalid-child` | child 無效（`null`、無 `pid`…），未取樣（`attempts` 為 0），回傳已解開之 Promise |
+| `false` | `child-exited` | 取樣時 child 已結束，不記 |
+| `false` | `not-in-table` | child 存活而行程表無其列（剛結束或剛起），不記 |
+| `false` | `no-reservation` | 屬本持有鏈之預約檔一個都沒寫成：已 `release`（檔不存在）或不屬本持有鏈（`pinned` 而埠被他人預約）；不寫入、不重建、不動他人之檔 |
+| `false` | `table-failed`／`table-timeout`／`write-failed`／`sample-error` | 前三者為暫時性、重試用盡仍失敗：行程表查詢回 `null`（或拋錯、回非陣列、`async` 函數拒絕）／單次查詢逾 `noteTimeoutMs`／寫預約檔失敗（寫入拋錯，如防毒掃描占用；或預約檔存在而讀不出）；`sample-error` 為取樣內部拋錯（非暫時性，不重試）。行程表查不到、逾時、解析不出時預約檔一字不動；多埠時 `write-failed` 前已寫成之檔不回復 |
+
+**有界重試**：行程表查不到、逾時、寫檔失敗屬暫時性（系統忙碌），`noteOwn` 每輪最多嘗試 `noteTries` 次（預設 3，同就緒核對之 `OWNER_TRIES`），失敗後隔 `noteRetryMs`（預設 1000，同 `ownerRetryMs`）再試；單次查詢上限 `noteTimeoutMs`（預設 `PORT_QUERY_TIMEOUT_MS`＝60000；預設實作逾時即終止其查詢指令）；用盡即 `ok:false` 如實告知，**不是掩蓋**——最壞情形約需 `noteTries×noteTimeoutMs＋(noteTries-1)×noteRetryMs`；三者皆為 `reserveE2ePorts` 之選項（K3：非預期值改用預設；`noteRetryMs` 可為 0）。**合併取樣**：取樣進行中再呼叫者排入下一輪（不重疊；重試期間才呼叫者亦排入下一輪，其等待上限自下一輪起算），其 Promise 須等涵蓋自己之那次取樣寫入後才解開，不被較早開始之取樣提前了結。Promise 之計時器與背景查詢（含預設實作之逾時計時器與查詢行程）皆不阻擋行程結束（行程若無其他事物保持事件迴圈，等待中之 Promise 不會使行程留著；`test/api-reserveE2ePorts.test.mjs` `[RA12]`、`[RA13]`）。
+
+**觀察回調**（`opt.onTrace`，同步、凍結、拋錯忽略）：`note-attempt`（取樣一次；`attempt`、`ok`、`reason`〔失敗原因或 `null`〕、`count`〔本輪涵蓋之呼叫數〕）、`noted`（`pid`、`attempts`）、`note-failed`（`pid`、`attempts`、`reason`）。每個 `noteOwn` 呼叫恰有一個 `noted` 或 `note-failed`，於其 Promise 解開之前同步發出。`createServiceManager` 於服務就緒後不等待取樣，完成時以其 `onTrace` 之 `own-noted`（`service`、`port`、`pid`、`ok`、`attempts`、`reason`）告知。測試以 `opt.tableAsync`（`(cb, ctx) => void`，`cb(table|null)`，`ctx` 為 `{ timeoutMs }`；同 `opt.probe`、`opt.exec` 為正式注入點）注入行程表，不碰真實行程表。
+
 **與 `E2E_PORT_OFFSET`、多開之關係**：
 
 | 情形 | 行為 | 回傳之 `source` |
@@ -523,7 +538,7 @@ assert.strictEqual(await page.textContent('#url'), `http://127.0.0.1:${resolveE2
 1. `test/tools/e2e-setup.mjs` 最上層呼叫 `reserveE2ePorts(本實例全部基準埠)`；`opt.avoid` 列同套件 `api-`、`unit-` 測試寫死之埠。
 2. 前端、後端、redirect、CORS、種子內網址、設定檔之埠一律由 `resolveE2ePort` 衍生；`Grep "localhost:|127\.0\.0\.1:" test/` 逐筆確認（§2.10）。`vue-cli-service serve` 要帶 `--port <實際埠>`（只是起點，被占走時之靜默改埠由就緒核對擋下，§2.4）。
 3. 逐檔 runner（`run-e2e-isolated.mjs`）於最上層先呼叫一次，子行程之 mocha 繼承保留；其 `killPortListeners(埠)` 改為 `reservation.killOwnListeners(埠)`（回傳形狀相容 `{pids,killed}`，多 `skipped`）。
-4. 不用 `createServiceManager` 者：自建之服務就緒後呼叫 `reservation.noteOwn(child)`；被占用即拋錯之檢查可移除。
+4. 不用 `createServiceManager` 者：自建之服務就緒後呼叫 `reservation.noteOwn(child)`（需確知記錄已寫入時 `await` 其回傳，見上〈記錄完成之觀察點〉）；被占用即拋錯之檢查可移除。
 5. 畫面含埠者依上表處理；`test/tools/e2eShard.json` 之 `officialOnly` 改為覆蓋者可移出。
 6. 實測（規格 §3）：①人為占用基準埠，e2e 全綠且占用者無恙；②兩個套件同時跑全綠；③沒有占用時，標準圖比對結果與導入前相同。
 
@@ -699,6 +714,15 @@ let captureStableWithBox = (page, target, opts = {}) => pkgCaptureStableWithBox(
 6. 結束後 `diffBaselineSnapshots` 須 unchanged（added / removed / changed / touched 皆空）且 `git status --porcelain -- test/pics` 為空。
 
 ## 5. 改版須知：哪些變更會動到使用端之標準圖
+
+### 行為變更（2026-11-27，`reserveE2ePorts` 之 `noteOwn` 提供完成之觀察點：回傳 Promise、`onTrace` 事件、取樣失敗有界重試；`opt.tableAsync` 文件化為正式注入點）
+
+- **新增**：`noteOwn(child)` 回傳 `Promise<{ ok, attempts, reason }>`（原回傳 `undefined`），於涵蓋該 child 之那次取樣已寫入預約檔後解開；永不 reject、不同步拋錯；child 無效亦回傳已解開之 Promise。`opt.onTrace` 增 `note-attempt`、`noted`、`note-failed` 三事件；`createServiceManager` 之 `onTrace` 增 `own-noted`；選項 `noteTries`（3）、`noteRetryMs`（1000）、`noteTimeoutMs`（60000）。細節見 §2.12〈記錄完成之觀察點〉。
+- **行為變更（取樣失敗改為有界重試）**：行程表查詢回 `null`（或逾時、拋錯）原本**不寫、不重試、不告知**，預約檔無該服務之身分，下次開跑與 `restart` 無從依身分確認殘留；現每輪最多嘗試 3 次（間隔 1 秒），用盡以 `ok:false` 告知。**不等待之使用端行為不變**（回傳值被忽略、重試在背景進行、計時器與查詢行程不阻擋行程結束，`[RA12]`、`[RA13]`）；差別只在：①原本一次失敗即放棄之取樣，現多試 2 次；②單次查詢逾 `noteTimeoutMs`（預設 60 秒）即終止該行程表查詢指令（原無上限，懸置之 PowerShell 會一直留著）；③取樣內部拋錯、`tableAsync` 同步拋錯或回非陣列，原會使 `noteOwn` 同步拋錯或於背景回調中成為未捕捉例外（即 `createServiceManager` 之服務啟動因此失敗或測試行程崩潰），現一律收斂為結果（`sample-error`、`table-failed`）。
+- **行為變更（寫預約檔只寫本持有鏈之檔）**：`noteOwn` 之取樣原會把本實例之行程寫進該埠之預約檔，**不核對該檔是否屬本持有鏈**；現只寫屬本持有鏈（`token`、`E2E_PORT_HOLD`）者，預約檔不存在或屬他人者跳過；屬本持有鏈之檔一個都沒寫成才以 `no-reservation` 告知。正常使用（預約檔為本實例所建）不受影響；影響只在 `pinned`（`E2E_PORT_OFFSET` 已指定）而該埠已被他人預約之情形——原會把本實例之身分寫進他人之預約檔。
+- **`opt.tableAsync`（正式注入點）**：`(cb, ctx) => void`，每次取樣嘗試呼叫一次，取得後 `cb(table)`（`table` 為 `{ pid, ppid, startMs, image }` 陣列），查詢失敗 `cb(null)`；`ctx` 為 `{ timeoutMs }`（本次查詢之上限即 `noteTimeoutMs`，供實作逾時時終止查詢，可忽略）；非陣列視同 `null`、`cb` 只取第一次、同步拋錯、回傳之 Promise 被拒絕（`async` 函數拋錯）或逾 `noteTimeoutMs` 不回調皆視為該次失敗。原為未文件化之接縫（使用端借用以在測試取得事件），現寫入 JSDoc；`(cb)` 之舊簽名相容（`ctx` 為新增之第二參數）。
+- **使用端改法（建議）**：原以輪詢預約檔並設時限（如 120 秒）等「記有服務行程」者，改為 `await reservation.noteOwn(child)`，再讀一次預約檔斷言（`r.ok` 為 `false` 時 `r.reason` 寫明原因；全機滿載時取樣可能用盡重試，此時如實失敗而非等到逾時）；借用 `opt.tableAsync` 取事件者改用 `opt.onTrace` 之 `noted`／`note-failed`。
+- **對標準圖之影響：0**（不碰截圖與比對）。**新增依賴**：無。
 
 ### 行為變更（2026-11-26，`w-playwright` 升 `^1.0.6`：`launchBrowser` 之安裝有真實上限、轉出 `INSTALL_BUDGET_MS`／`LAUNCH_HOOK_TIMEOUT_MS`；`createCdnLocal` 之接線文件改以啟動後鉤子為首選）
 
