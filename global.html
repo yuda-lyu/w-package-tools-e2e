@@ -1820,7 +1820,7 @@ assertBaselineMatch(buf, './test/pics/tokens/tokens-eng-E2E-001-list-loaded.png'
     
     <dt class="tag-source">Source:</dt>
     <dd class="tag-source"><ul class="dummy"><li>
-        <a href="reserveE2ePorts.mjs.html">reserveE2ePorts.mjs</a>, <a href="reserveE2ePorts.mjs.html#line861">line 861</a>
+        <a href="reserveE2ePorts.mjs.html">reserveE2ePorts.mjs</a>, <a href="reserveE2ePorts.mjs.html#line1015">line 1015</a>
     </li></ul></dd>
     
 
@@ -8796,7 +8796,7 @@ guard.restore() //cleanup 內(後端已停): 原位元組還原、逐檔 sha256 
     
     <dt class="tag-source">Source:</dt>
     <dd class="tag-source"><ul class="dummy"><li>
-        <a href="reserveE2ePorts.mjs.html">reserveE2ePorts.mjs</a>, <a href="reserveE2ePorts.mjs.html#line242">line 242</a>
+        <a href="reserveE2ePorts.mjs.html">reserveE2ePorts.mjs</a>, <a href="reserveE2ePorts.mjs.html#line248">line 248</a>
     </li></ul></dd>
     
 
@@ -10485,7 +10485,7 @@ sm.cleanup()</code></pre>
                 </td>
             
 
-            <td class="description last"><p>輸入觀察回調函數，傳入凍結之事件物件{ type, ... }，type為'owner-check'(就緒核對一次；service、port、attempt、result、owners)、'restart-query'(restart查監聽者一次；service、port、attempt、ok)，預設null</p></td>
+            <td class="description last"><p>輸入觀察回調函數，傳入凍結之事件物件{ type, ... }，type為'owner-check'(就緒核對一次；service、port、attempt、result、owners)、'restart-query'(restart查監聽者一次；service、port、attempt、ok)、'own-noted'(已導入reserveE2ePorts時，服務就緒後之noteOwn取樣完成，ok為該服務行程是否已記入預約檔；service、port、pid、ok、attempts、reason，reason同reservation.noteOwn之結果；不阻塞服務就緒，事件於其後非同步發出)，預設null</p></td>
         </tr>
 
     
@@ -13207,7 +13207,7 @@ console.log(Object.keys(m.files).length)
     
     <dt class="tag-source">Source:</dt>
     <dd class="tag-source"><ul class="dummy"><li>
-        <a href="reserveE2ePorts.mjs.html">reserveE2ePorts.mjs</a>, <a href="reserveE2ePorts.mjs.html#line842">line 842</a>
+        <a href="reserveE2ePorts.mjs.html">reserveE2ePorts.mjs</a>, <a href="reserveE2ePorts.mjs.html#line996">line 996</a>
     </li></ul></dd>
     
 
@@ -22570,7 +22570,7 @@ applyEnv為false時不寫環境變數，由回傳值之portOf取實際埠：供�
     
     <dt class="tag-source">Source:</dt>
     <dd class="tag-source"><ul class="dummy"><li>
-        <a href="reserveE2ePorts.mjs.html">reserveE2ePorts.mjs</a>, <a href="reserveE2ePorts.mjs.html#line554">line 554</a>
+        <a href="reserveE2ePorts.mjs.html">reserveE2ePorts.mjs</a>, <a href="reserveE2ePorts.mjs.html#line704">line 704</a>
     </li></ul></dd>
     
 
@@ -22620,9 +22620,14 @@ applyEnv為false時不寫環境變數，由回傳值之portOf取實際埠：供�
     <pre class="prettyprint"><code>import reserveE2ePorts from 'w-package-tools-e2e/src/reserveE2ePorts.mjs'
 import resolveE2ePort from 'w-package-tools-e2e/src/resolveE2ePort.mjs'
 
-reserveE2ePorts([11007, 8080])
+let reservation = reserveE2ePorts([11007, 8080])
 //8080被占用時印出 [e2e-port] 基準埠 [11007, 8080] → 實際埠 [11107, 8180] (位移 100) ...
-let baseUrl = `http://127.0.0.1:${resolveE2ePort(8080)}` //http://127.0.0.1:8180</code></pre>
+let baseUrl = `http://127.0.0.1:${resolveE2ePort(8080)}` //http://127.0.0.1:8180
+
+//服務就緒後記下其行程; 需知道記錄是否已寫入時才等待(不等待者不受影響)
+let r = await reservation.noteOwn(child)
+console.log(r)
+// => { ok: true, attempts: 1, reason: 'recorded' }</code></pre>
 
 
 
@@ -23349,6 +23354,164 @@ let baseUrl = `http://127.0.0.1:${resolveE2ePort(8080)}` //http://127.0.0.1:8180
 
         <tr>
             
+                <td class="name"><code>tableAsync</code></td>
+            
+
+            <td class="type">
+            
+                
+<span class="param-type">function</span>
+
+
+
+            
+            </td>
+
+            
+                <td class="attributes">
+                
+                    &lt;optional><br>
+                
+
+                
+
+                
+                </td>
+            
+
+            
+                <td class="default">
+                
+                </td>
+            
+
+            <td class="description last"><p>輸入非同步取行程表函數(cb, ctx)=&gt;void，每次取樣嘗試呼叫一次：取得後呼叫cb(table)，table為元素{pid,ppid,startMs,image}之陣列；查詢失敗呼叫cb(null)；ctx為{timeoutMs}(本次查詢之上限，即noteTimeoutMs，供實作逾時時終止查詢，可忽略)；非陣列視同null，cb多次呼叫只取第一次，同步拋錯、回傳之Promise被拒絕(async函數拋錯)或逾noteTimeoutMs仍不呼叫cb皆視為該次查詢失敗。供測試注入替身(同opt.probe、opt.exec為正式注入點)，預設為背景起行程表查詢指令(不經shell、隱藏視窗、逾ctx.timeoutMs即終止該指令；Windows為PowerShell、其他平台為ps)；該查詢與其逾時計時器皆不阻擋行程結束</p></td>
+        </tr>
+
+    
+
+        <tr>
+            
+                <td class="name"><code>noteTries</code></td>
+            
+
+            <td class="type">
+            
+                
+<span class="param-type">Number</span>
+
+
+
+            
+            </td>
+
+            
+                <td class="attributes">
+                
+                    &lt;optional><br>
+                
+
+                
+
+                
+                </td>
+            
+
+            
+                <td class="default">
+                
+                    <code>3</code>
+                
+                </td>
+            
+
+            <td class="description last"><p>輸入noteOwn每次取樣之最多嘗試次數(含第一次)正整數，預設3(同createServiceManager就緒核對之OWNER_TRIES)；查詢失敗、逾時或寫預約檔失敗時重試，用盡即noteOwn之Promise以ok為false解開</p></td>
+        </tr>
+
+    
+
+        <tr>
+            
+                <td class="name"><code>noteRetryMs</code></td>
+            
+
+            <td class="type">
+            
+                
+<span class="param-type">Number</span>
+
+
+
+            
+            </td>
+
+            
+                <td class="attributes">
+                
+                    &lt;optional><br>
+                
+
+                
+
+                
+                </td>
+            
+
+            
+                <td class="default">
+                
+                    <code>1000</code>
+                
+                </td>
+            
+
+            <td class="description last"><p>輸入noteOwn取樣失敗後重試之間隔毫秒數(非負數)，預設1000(同createServiceManager之ownerRetryMs)</p></td>
+        </tr>
+
+    
+
+        <tr>
+            
+                <td class="name"><code>noteTimeoutMs</code></td>
+            
+
+            <td class="type">
+            
+                
+<span class="param-type">Number</span>
+
+
+
+            
+            </td>
+
+            
+                <td class="attributes">
+                
+                    &lt;optional><br>
+                
+
+                
+
+                
+                </td>
+            
+
+            
+                <td class="default">
+                
+                    <code>60000</code>
+                
+                </td>
+            
+
+            <td class="description last"><p>輸入noteOwn單次取行程表之等待上限毫秒數(正整數)，預設PORT_QUERY_TIMEOUT_MS(60000)；逾時視為該次查詢失敗，已解開之結果不受其後才回調之查詢影響。最壞情形noteOwn約需noteTries×noteTimeoutMs＋(noteTries-1)×noteRetryMs才解開</p></td>
+        </tr>
+
+    
+
+        <tr>
+            
                 <td class="name"><code>onTrace</code></td>
             
 
@@ -23382,7 +23545,7 @@ let baseUrl = `http://127.0.0.1:${resolveE2ePort(8080)}` //http://127.0.0.1:8180
                 </td>
             
 
-            <td class="description last"><p>輸入觀察回調函數，傳入凍結之事件物件{ type, ... }，type為'try'(試某位移；offset)、'blocked'(該位移不可用；offset、ports、codes)、'wait'(baseOnly等待中；offset)、'selected'(已選定；offset、ports、source)、'exhausted'(重選用盡；tries)，預設null</p></td>
+            <td class="description last"><p>輸入觀察回調函數，傳入凍結之事件物件{ type, ... }，type為'try'(試某位移；offset)、'blocked'(該位移不可用；offset、ports、codes)、'wait'(baseOnly等待中；offset)、'selected'(已選定；offset、ports、source)、'exhausted'(重選用盡；tries)、'note-attempt'(noteOwn取樣一次；attempt為第幾次、ok、reason為失敗原因'table-failed'|'table-timeout'|'write-failed'|'sample-error'或null、count為本輪涵蓋之noteOwn呼叫數)、'noted'(noteOwn之child已記入預約檔；pid、attempts)、'note-failed'(noteOwn未記入；pid、attempts、reason)，每個noteOwn呼叫恰有一個'noted'或'note-failed'，於其Promise解開之前同步發出，預設null</p></td>
         </tr>
 
     
@@ -23415,7 +23578,7 @@ let baseUrl = `http://127.0.0.1:${resolveE2ePort(8080)}` //http://127.0.0.1:8180
 
         
 <div class="param-desc">
-    <p>回傳物件{source,token,offset,shifted,basePorts,ports,portOf(base),noteOwn(child),killOwnListeners(port),reselect(reason),release()}，source為'auto'(本行程選定)、'pinned'(環境變數已指定)、'inherited'(上層已保留)</p>
+    <p>回傳物件{source,token,offset,shifted,basePorts,ports,portOf(base),noteOwn(child),killOwnListeners(port),reselect(reason),release()}，source為'auto'(本行程選定)、'pinned'(環境變數已指定)、'inherited'(上層已保留)；noteOwn(child)背景取樣後把child與其子孫之真實起始時間寫入預約檔，回傳Promise&lt;{ok,attempts,reason}&gt;：涵蓋該child之那次取樣已寫入預約檔後解開(合併取樣時各呼叫各等涵蓋自己之那次，不被較早開始之取樣提前解開)；ok為true且reason為'recorded'表示child已記入預約檔(屬本持有鏈之預約檔至少一個寫成；下次開跑回收殘留預約時取各檔known之聯集；basePorts為空時無預約檔可寫，只記於記憶體亦回'recorded')，ok為false時reason為'invalid-child'(child無效，attempts為0)、'child-exited'(取樣時child已結束)、'not-in-table'(child存活而行程表無其列)、'no-reservation'(屬本持有鏈之預約檔一個都沒寫成：已release或屬他人)、'table-failed'|'table-timeout'|'write-failed'(暫時性失敗，重試用盡仍失敗；write-failed含寫入拋錯與預約檔存在而讀不出，多埠時已寫成之檔不回復)、'sample-error'(取樣內部拋錯，非暫時性，不重試)；行程表查不到、逾時、解析不出時預約檔一字不動；永不拒絕(不重新拋出任何錯)、不同步拋錯，故不等待者(fire-and-forget)行為不受影響；Promise之計時器與背景查詢皆不阻擋行程結束，行程若無其他事物保持事件迴圈，等待中之Promise不會使行程留著；重試期間才呼叫者排入下一輪(不併入進行中之重試)，其等待上限另自下一輪起算</p>
 </div>
 
 
@@ -35156,7 +35319,7 @@ console.log(r) //{ written: false, reason: 'same', numDiff: 0 }</code></pre>
 <br class="clear">
 
 <footer>
-    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 4.0.5</a> on Fri Nov 27 2026 13:53:04 GMT+0800 (台北標準時間) using the <a href="https://github.com/clenemt/docdash">docdash</a> theme.
+    Documentation generated by <a href="https://github.com/jsdoc3/jsdoc">JSDoc 4.0.5</a> on Fri Nov 27 2026 21:39:42 GMT+0800 (台北標準時間) using the <a href="https://github.com/clenemt/docdash">docdash</a> theme.
 </footer>
 
 <script>prettyPrint();</script>
